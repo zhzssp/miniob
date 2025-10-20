@@ -42,6 +42,7 @@ public:
 
 private:
   RC create_updated_record(const Record &old_record, Record &new_record);
+  RC update_all_records();
 
 private:
   Table *table_;

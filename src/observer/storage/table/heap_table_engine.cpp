@@ -366,7 +366,14 @@ RC HeapTableEngine::update_record_with_trx(const Record &old_record, const Recor
   }
   
   // 2. 更新记录数据
-  rc = record_handler_->update_record(old_record.rid(), new_record.data());
+  rc = record_handler_->delete_record(&old_record.rid());
+  if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to delete old record. table=%s, index=%s, rid=%s, rc=%s",
+               table_meta_->name(), old_record.rid().to_string().c_str(), strrc(rc));
+      return rc;
+  }
+  // RID &rid = new_record.rid(); // 先获取引用
+  rc = record_handler_->insert_record(new_record.data(), new_record.len(), const_cast<RID*>(&new_record.rid()));
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to update record. table=%s, rid=%s, rc=%s",
              table_meta_->name(), old_record.rid().to_string().c_str(), strrc(rc));

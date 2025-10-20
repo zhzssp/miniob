@@ -279,9 +279,12 @@ RC LogicalPlanGenerator::create_plan(UpdateStmt *update_stmt, unique_ptr<Logical
 
   unique_ptr<LogicalOperator> predicate_oper;
 
-  RC rc = create_plan(filter_stmt, predicate_oper);
-  if (rc != RC::SUCCESS) {
-    return rc;
+  RC rc = RC::SUCCESS;
+  if (filter_stmt != nullptr) {
+    rc = create_plan(filter_stmt, predicate_oper);
+    if (rc != RC::SUCCESS) {
+      return rc;
+    }
   }
 
   unique_ptr<LogicalOperator> update_oper(new UpdateLogicalOperator(table, update_stmt->attribute_name(), update_stmt->value()));

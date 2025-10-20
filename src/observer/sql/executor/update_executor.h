@@ -9,12 +9,24 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 //
-// Created by WangYunlai on 2021/6/9.
+// Created by Wangyunlai on 2023/6/13.
 //
 
-#include "sql/operator/update_logical_operator.h"
+#pragma once
 
-UpdateLogicalOperator::UpdateLogicalOperator(Table *table, const char *attribute_name, Value *value)
-    : table_(table), attribute_name_(attribute_name), value_(value)
-{}
+#include "common/sys/rc.h"
 
+class SQLStageEvent;
+
+/**
+ * @brief 创建表的执行器
+ * @ingroup Executor
+ */
+class UpdateExecutor
+{
+public:
+  UpdateExecutor()          = default;
+  virtual ~UpdateExecutor() = default;
+
+  RC execute(SQLStageEvent *sql_event);
+};

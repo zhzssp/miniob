@@ -13,22 +13,7 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "sql/stmt/update_stmt.h"
-#include "common/log/log.h"
-#include "sql/stmt/filter_stmt.h"
-#include "storage/db/db.h"
-#include "storage/table/table.h"
 
-UpdateStmt::UpdateStmt(Table *table, const char *attribute_name, Value *value, FilterStmt *filter_stmt)
-    : table_(table), attribute_name_(attribute_name), value_(value), filter_stmt_(filter_stmt)
-{}
-
-UpdateStmt::~UpdateStmt()
-{
-  if (nullptr != filter_stmt_) {
-    delete filter_stmt_;
-    filter_stmt_ = nullptr;
-  }
-}
 
 RC UpdateStmt::create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt)
 {
@@ -52,20 +37,29 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt)
     return RC::SCHEMA_FIELD_NOT_EXIST;
   }
 
-  // 检查值类型是否兼容
+  // 检查值类型是否兼容，如果不兼容则尝试转换
   const AttrType field_type = field_meta->type();
   const AttrType value_type = update_sql.value.attr_type();
+  
+  Value final_value = update_sql.value;
   if (field_type != value_type) {
-    LOG_WARN("type mismatch. field=%s.%s.%s, field_type=%d, value_type=%d",
-             db->name(), table->name(), update_sql.attribute_name.c_str(), field_type, value_type);
-    return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    // 尝试类型转换
+    RC cast_rc = Value::cast_to(update_sql.value, field_type, final_value);
+    if (cast_rc != RC::SUCCESS) {
+      LOG_WARN("type mismatch and cannot cast. field=%s.%s.%s, field_type=%d, value_type=%d",
+               db->name(), table->name(), update_sql.attribute_name.c_str(), field_type, value_type);
+      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    }
   }
 
   // 解析WHERE条件
   FilterStmt *filter_stmt = nullptr;
   RC rc = RC::SUCCESS;
+  const char *table_name = update_sql.relation_name.c_str();
+  unordered_map<string, Table *> table_map;
+  table_map.insert(pair<string, Table *>(string(table_name), table));
   if (!update_sql.conditions.empty()) {
-    rc = FilterStmt::create(db, table, &table_meta, update_sql.conditions.data(),
+    rc = FilterStmt::create(db, table, &table_map, update_sql.conditions.data(),
                            static_cast<int>(update_sql.conditions.size()), filter_stmt);
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to create filter statement. rc=%s", strrc(rc));
@@ -73,7 +67,7 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt)
     }
   }
 
-  // 创建UpdateStmt
-  stmt = new UpdateStmt(table, update_sql.attribute_name.c_str(), &update_sql.value, filter_stmt);
+  stmt = new UpdateStmt(table, update_sql.attribute_name.c_str(), new Value(final_value), filter_stmt);
+
   return RC::SUCCESS;
 }

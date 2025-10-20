@@ -43,3 +43,4 @@ private:
   const char *attribute_name_;
   Value *value_;
 };
+

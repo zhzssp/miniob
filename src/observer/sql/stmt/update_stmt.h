@@ -9,41 +9,49 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 //
-// Created by Wangyunlai on 2022/5/22.
+// Created by Wangyunlai on 2023/6/13.
 //
 
 #pragma once
 
-#include "common/sys/rc.h"
+#include "common/lang/string.h"
+#include "common/lang/vector.h"
 #include "sql/stmt/stmt.h"
-
-class Table;
-class FilterStmt;
+#include "common/log/log.h"
+#include "sql/stmt/filter_stmt.h"
+#include "storage/db/db.h"
+#include "storage/table/table.h"
+class Db;
 
 /**
- * @brief 更新语句
+ * @brief 表示创建表的语句
  * @ingroup Statement
+ * @details 虽然解析成了stmt，但是与原始的SQL解析后的数据也差不多
  */
-class UpdateStmt : public Stmt
-{
-public:
-  UpdateStmt() = default;
-  UpdateStmt(Table *table, const char *attribute_name, Value *value, FilterStmt *filter_stmt);
-  ~UpdateStmt() override;
 
+class UpdateStmt : public Stmt {
 public:
-  static RC create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt);
-
-public:
+  UpdateStmt(Table *table, const char *attribute_name, Value *value, FilterStmt *filter_stmt)
+    : table_(table), attribute_name_(attribute_name), value_(value), filter_stmt_(filter_stmt)
+{}
+  ~UpdateStmt()
+  {
+    if (nullptr != filter_stmt_) {
+      delete filter_stmt_;
+      filter_stmt_ = nullptr;
+    }
+  }
+  StmtType type() const override { return StmtType::UPDATE; }
   Table *table() const { return table_; }
   const char *attribute_name() const { return attribute_name_; }
   Value *value() const { return value_; }
   FilterStmt *filter_stmt() const { return filter_stmt_; }
-  StmtType type() const override { return StmtType::UPDATE; }
-
+  
+  static RC create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt);
+  
 private:
-  Table *table_        = nullptr;
-  const char *attribute_name_ = nullptr;
-  Value *value_        = nullptr;
-  FilterStmt *filter_stmt_ = nullptr;
+  Table *table_;
+  const char *attribute_name_;  // 要更新的字段名
+  Value *value_;               // 新值
+  FilterStmt *filter_stmt_;    // WHERE条件
 };
