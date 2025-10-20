@@ -171,9 +171,52 @@ RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attribut
     return rc;
   }
 
+  // 将新创建的表添加到记录之中
   opened_tables_[table_name] = table;
   LOG_INFO("Create table success. table name=%s, table_id:%d", table_name, table_id);
   return RC::SUCCESS;
+}
+
+RC Db::drop_table(const char *table_name)
+{
+  RC rc = RC::SUCCESS;
+
+  Table *table_to_drop = find_table(table_name);
+  if (!table_to_drop) {
+    LOG_WARN("Table %s not found.", table_name);
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+  LOG_INFO("Find aimed table successfully !");
+
+  string  table_file_path = table_meta_file(path_.c_str(), table_name);
+  int32_t table_id        = next_table_id_++;
+
+  // drop函数待定义 --> 清理资源
+  rc = table_to_drop->drop(
+      this,
+      table_id,
+      table_file_path.c_str(),
+      table_name,
+      path_.c_str(),
+      get_storage_engine()
+  );
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed when executing drop function in Table %s.", table_name);
+    return rc;
+  }
+
+  LOG_INFO("Clean resources successfully");
+
+  // 清除打开表的记录
+  string table_name_string(table_name);
+  opened_tables_.erase(table_name_string);
+  // 清除表指针指向的内容
+  delete table_to_drop;
+
+  LOG_INFO("Remove opened_tables record successfully");
+
+  LOG_INFO("Drop table successfully!!! Table name=%s", table_name);
+  return rc;
 }
 
 Table *Db::find_table(const char *table_name) const

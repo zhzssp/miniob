@@ -309,6 +309,7 @@ RC HeapTableEngine::init()
   return rc;
 }
 
+// 创建field and index --> 索引还unsupported
 RC HeapTableEngine::open()
 {
   RC rc = RC::SUCCESS;
@@ -340,4 +341,29 @@ RC HeapTableEngine::open()
     indexes_.push_back(index);
   }
   return rc;
+}
+
+// 清除field and index --> 索引还unsupported
+RC HeapTableEngine::close()
+{
+  // 关闭索引
+  indexes_.clear();  
+
+  // 关闭记录处理器
+  if (record_handler_ != nullptr) {
+    // 已经完整实现
+    record_handler_->close();  
+    delete record_handler_;
+    record_handler_ = nullptr;
+  }
+
+  // // 关闭磁盘数据缓冲池 DiskDataPool --> 与table.cpp中的drop方法无冲突
+  // if (data_buffer_pool_ != nullptr) {
+  //   data_buffer_pool_->close_file();  
+  //   delete data_buffer_pool_;
+  //   data_buffer_pool_ = nullptr;
+  // }
+
+  LOG_INFO("Table has been closed: %s", table_meta_->name());
+  return RC::SUCCESS;
 }

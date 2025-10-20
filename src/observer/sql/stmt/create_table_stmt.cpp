@@ -17,6 +17,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/create_table_stmt.h"
 #include "event/sql_debug.h"
 
+// db无用
 RC CreateTableStmt::create(Db *db, const CreateTableSqlNode &create_table, Stmt *&stmt)
 {
   StorageFormat storage_format = get_storage_format(create_table.storage_format.c_str());

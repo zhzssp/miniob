@@ -43,8 +43,7 @@ Table::~Table()
   }
 }
 
-RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, const char *base_dir,
-    span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys, StorageFormat storage_format, StorageEngine storage_engine)
+RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, const char *base_dir, span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys, StorageFormat storage_format, StorageEngine storage_engine)
 {
   if (table_id < 0) {
     LOG_WARN("invalid table id. table_id=%d, table_name=%s", table_id, name);
@@ -96,7 +95,7 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
   table_meta_.serialize(fs);
   fs.close();
 
-  db_       = db;
+  db_ = db;
 
   string             data_file = table_data_file(base_dir, name);
   BufferPoolManager &bpm       = db->buffer_pool_manager();
@@ -106,7 +105,9 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
     return rc;
   }
 
+  // 根据不同的存储引擎做不同的处理？  
   if (table_meta_.storage_engine() == StorageEngine::HEAP) {
+    // 存储引擎由元数据、数据库和表本身构成
     engine_ = make_unique<HeapTableEngine>(&table_meta_, db_, this);
   } else if (table_meta_.storage_engine() == StorageEngine::LSM) {
     engine_ = make_unique<LsmTableEngine>(&table_meta_, db_, this);
@@ -123,6 +124,52 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
 
   LOG_INFO("Successfully create table %s:%s", base_dir, name);
   return rc;
+}
+
+RC Table::drop(Db *db, int32_t table_id, const char *path, const char *table_name, const char *base_dir, StorageEngine storage_engine)
+{
+  // 空表判断
+  if (common::is_blank(table_name)) {
+    LOG_WARN("Table name cannot be empty.");
+    return RC::INVALID_ARGUMENT;
+  }
+
+  LOG_INFO("Begin to clean resources of aimed table: %s", table_name);
+
+  // 查找表的元数据，确保该表存在
+  std::string name1 = table_meta_.name();
+  std::string name2 = table_name;
+  if (name1 != name2) {
+    LOG_ERROR("Table name not matched: %s, the name in table_meta_ is %s", table_name, table_meta_.name());
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+
+  // 关闭并清理表的存储引擎
+  if (engine_) {
+    // 自定义close, 关闭索引等 （--> 内部调用了buffer pool的close_file --> 进一步调用manager的close_file）
+    RC rc = engine_->close();
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("Failed to close table engine: %s", table_meta_.name());
+      return rc;
+    }
+    engine_.reset();
+  }
+
+  LOG_INFO("Storage Engine has been cleaned");
+
+  //  进一步删除缓冲池中的相关文件
+  string data_file = table_data_file(base_dir, table_name);
+  // db为传入的this
+  BufferPoolManager &bpm = db->buffer_pool_manager();
+  // close buffer pool 中的文件并且进行删除
+  RC rc = bpm.drop_file(data_file.c_str());
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to drop file from buffer pool: %s", data_file.c_str());
+    return rc;
+  }
+
+  LOG_INFO("BufferPoolManager has been cleaned");
+  return RC::SUCCESS;
 }
 
 RC Table::open(Db *db, const char *meta_file, const char *base_dir)

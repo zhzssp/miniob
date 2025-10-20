@@ -86,6 +86,7 @@ private:
   ThreadHandler      *thread_handler_ = nullptr;
 };
 
+// command line server?
 class CliServer : public Server
 {
 public:
