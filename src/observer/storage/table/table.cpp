@@ -105,9 +105,6 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
     return rc;
   }
 
-<<<<<<< HEAD
-=======
->>>>>>> 9d07334ab3067f5e56378019a1a0e3c270cf02b8
   if (table_meta_.storage_engine() == StorageEngine::HEAP) {
     // 存储引擎由元数据、数据库和表本身构成
     engine_ = make_unique<HeapTableEngine>(&table_meta_, db_, this);

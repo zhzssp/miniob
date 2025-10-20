@@ -210,10 +210,14 @@ RC Db::drop_table(const char *table_name)
   // 清除打开表的记录
   string table_name_string(table_name);
   opened_tables_.erase(table_name_string);
+  if(!find_table(table_name)) {
+    LOG_INFO("Failed to erase opened_tables record !!!");
+  }
+  else {
+    LOG_INFO("Remove opened_tables record successfully");
+  }
   // 清除表指针指向的内容
   delete table_to_drop;
-
-  LOG_INFO("Remove opened_tables record successfully");
 
   LOG_INFO("Drop table successfully!!! Table name=%s", table_name);
   return rc;
@@ -269,7 +273,10 @@ RC Db::open_all_tables()
     if (table->table_id() >= next_table_id_) {
       next_table_id_ = table->table_id() + 1;
     }
-    opened_tables_[table->name()] = table;
+
+    // 不这样修改则会使用const char * --> string的隐式转换
+    string table_name_str = table->name();
+    opened_tables_[table_name_str] = table;
     LOG_INFO("Open table: %s, file: %s", table->name(), filename.c_str());
   }
 
