@@ -29,6 +29,8 @@ class Db;
  * @brief Statement的类型
  *
  */
+
+// 已经定义DROP_TABLE
 #define DEFINE_ENUM()             \
   DEFINE_ENUM_ITEM(CALC)          \
   DEFINE_ENUM_ITEM(SELECT)        \

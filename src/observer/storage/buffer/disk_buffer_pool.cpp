@@ -307,6 +307,7 @@ RC DiskBufferPool::close_file()
   LOG_INFO("Successfully close file %d:%s.", file_desc_, file_name_.c_str());
   file_desc_ = -1;
 
+  // 内部调用BufferPoolManager::close_file
   bp_manager_.close_file(file_name_.c_str());
   return RC::SUCCESS;
 }
@@ -835,6 +836,58 @@ RC BufferPoolManager::create_file(const char *file_name)
 
   close(fd);
   LOG_INFO("Successfully create %s.", file_name);
+  return RC::SUCCESS;
+}
+
+// 自定义
+RC BufferPoolManager::drop_file(const char *file_name)
+{
+  LOG_INFO("BufferPoolManager::drop_file called for dropping buffer file: %s", file_name);
+  string str_file_name(file_name);
+
+  scoped_lock lock_guard(lock_);
+
+  // Check if the file is already opened --> whether or not in the buffer_pools_ map
+  auto iter = buffer_pools_.find(str_file_name);
+  if (iter == buffer_pools_.end()) {
+    LOG_WARN("File is not opened: %s", file_name);
+    // return RC::INTERNAL;  // Return an error if the file is not found
+    return RC::SUCCESS;  // 如果文件未打开，则本来就不需要删除
+  }
+
+  DiskBufferPool *bp = iter->second;
+
+  // Purge all pages related to the buffer pool
+  RC rc = bp->purge_all_pages();
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to purge pages for file %s", file_name);
+    return rc;  // Return the error if purging failed
+  }
+
+  // Close the file --> 与engin_.close()重复？
+  rc = bp->close_file();
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to close file %s", file_name);
+    return rc;  
+  }
+
+  // Remove from the map of opened buffer pools
+  buffer_pools_.erase(iter);
+  id_to_buffer_pools_.erase(bp->id());
+
+  // Delete the DiskBufferPool instance
+  delete bp;
+  LOG_INFO("Successfully dropped file %s", file_name);
+
+  // Remove the actual file from disk
+  // 直接传递文件名是否能够找到目标文件？
+  if (remove(file_name) != 0) {
+    LOG_ERROR("Failed to delete file %s, error: %s", file_name, strerror(errno));
+    // 返回自定义的状态码
+    return RC::IOERR_DELETE; 
+  }
+
+  LOG_INFO("Successfully deleted file %s from disk.", file_name);
   return RC::SUCCESS;
 }
 

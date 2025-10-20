@@ -42,12 +42,13 @@ const char *Session::get_current_db_name() const
     return "";
 }
 
+// 返回表示db对象的指针
 Db *Session::get_current_db() const { return db_; }
 
 void Session::set_current_db(const string &dbname)
 {
   DefaultHandler &handler = *GCTX.handler_;
-  Db             *db      = handler.find_db(dbname.c_str());
+  Db *db = handler.find_db(dbname.c_str());
   if (db == nullptr) {
     LOG_WARN("no such database: %s", dbname.c_str());
     return;
