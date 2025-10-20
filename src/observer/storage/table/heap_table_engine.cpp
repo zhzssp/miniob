@@ -341,3 +341,44 @@ RC HeapTableEngine::open()
   }
   return rc;
 }
+
+RC HeapTableEngine::update_record_with_trx(const Record &old_record, const Record &new_record, Trx *trx)
+{
+  RC rc = RC::SUCCESS;
+  
+  // 1. 更新索引：先删除旧记录，再插入新记录
+  for (Index *index : indexes_) {
+    rc = index->delete_entry(old_record.data(), &old_record.rid());
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to delete entry from index. table=%s, index=%s, rid=%s, rc=%s",
+               table_meta_->name(), index->index_meta().name(), 
+               old_record.rid().to_string().c_str(), strrc(rc));
+      return rc;
+    }
+    
+    rc = index->insert_entry(new_record.data(), &new_record.rid());
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to insert entry to index. table=%s, index=%s, rid=%s, rc=%s",
+               table_meta_->name(), index->index_meta().name(), 
+               new_record.rid().to_string().c_str(), strrc(rc));
+      return rc;
+    }
+  }
+  
+  // 2. 更新记录数据
+  rc = record_handler_->delete_record(&old_record.rid());
+  if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to delete old record. table=%s, index=%s, rid=%s, rc=%s",
+               table_meta_->name(), old_record.rid().to_string().c_str(), strrc(rc));
+      return rc;
+  }
+  // RID &rid = new_record.rid(); // 先获取引用
+  rc = record_handler_->insert_record(new_record.data(), new_record.len(), const_cast<RID*>(&new_record.rid()));
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to update record. table=%s, rid=%s, rc=%s",
+             table_meta_->name(), old_record.rid().to_string().c_str(), strrc(rc));
+    return rc;
+  }
+  
+  return RC::SUCCESS;
+}

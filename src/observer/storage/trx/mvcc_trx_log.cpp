@@ -29,6 +29,7 @@ string MvccTrxLogOperation::to_string() const
   switch (type_) {
     case Type::INSERT_RECORD: return ret + "INSERT_RECORD";
     case Type::DELETE_RECORD: return ret + "DELETE_RECORD";
+    case Type::UPDATE_RECORD: return ret + "UPDATE_RECORD";
     case Type::COMMIT: return ret + "COMMIT";
     case Type::ROLLBACK: return ret + "ROLLBACK";
     default: return ret + "UNKNOWN";
@@ -50,6 +51,15 @@ string MvccTrxRecordLogEntry::to_string() const
 {
   stringstream ss;
   ss << header.to_string() << ", table_id: " << table_id << ", rid: " << rid.to_string();
+  return ss.str();
+}
+
+const int32_t MvccTrxUpdateLogEntry::SIZE = sizeof(MvccTrxUpdateLogEntry);
+
+string MvccTrxUpdateLogEntry::to_string() const
+{
+  stringstream ss;
+  ss << header.to_string() << ", table_id: " << table_id << ", old_rid: " << old_rid.to_string() << ", new_rid: " << new_rid.to_string();
   return ss.str();
 }
 
@@ -92,6 +102,22 @@ RC MvccTrxLogHandler::delete_record(int32_t trx_id, Table *table, const RID &rid
   log_entry.header.trx_id         = trx_id;
   log_entry.table_id              = table->table_id();
   log_entry.rid                   = rid;
+
+  LSN lsn = 0;
+  return log_handler_.append(
+      lsn, LogModule::Id::TRANSACTION, span<const char>(reinterpret_cast<const char *>(&log_entry), sizeof(log_entry)));
+}
+
+RC MvccTrxLogHandler::update_record(int32_t trx_id, Table *table, const RID &old_rid, const RID &new_rid)
+{
+  ASSERT(trx_id > 0, "invalid trx_id:%d", trx_id);
+
+  MvccTrxUpdateLogEntry log_entry;
+  log_entry.header.operation_type = MvccTrxLogOperation(MvccTrxLogOperation::Type::UPDATE_RECORD).index();
+  log_entry.header.trx_id         = trx_id;
+  log_entry.table_id              = table->table_id();
+  log_entry.old_rid               = old_rid;
+  log_entry.new_rid               = new_rid;
 
   LSN lsn = 0;
   return log_handler_.append(
