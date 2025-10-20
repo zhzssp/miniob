@@ -160,7 +160,7 @@ RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attribut
   }
 
   // 文件路径可以移到Table模块
-  string  table_file_path = table_meta_file(path_.c_str(), table_name);
+  string  table_file_path = table_meta_file(path_.c_str(), table_name); // 需要在drop中删除！！！
   Table  *table           = new Table();
   int32_t table_id        = next_table_id_++;
   rc = table->create(this, table_id, table_file_path.c_str(), table_name, path_.c_str(), attributes, primary_keys, storage_format,
@@ -210,7 +210,7 @@ RC Db::drop_table(const char *table_name)
   // 清除打开表的记录
   string table_name_string(table_name);
   opened_tables_.erase(table_name_string);
-  if(!find_table(table_name)) {
+  if(opened_tables_.count(table_name)) {
     LOG_INFO("Failed to erase opened_tables record !!!");
   }
   else {

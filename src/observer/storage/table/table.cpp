@@ -43,6 +43,7 @@ Table::~Table()
   }
 }
 
+// path为table_meta_file(path_, table_name)
 RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, const char *base_dir, span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys, StorageFormat storage_format, StorageEngine storage_engine)
 {
   if (table_id < 0) {
@@ -64,7 +65,7 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
   RC rc = RC::SUCCESS;
 
   // 使用 table_name.table记录一个表的元数据
-  // 判断表文件是否已经存在
+  // 判断.table表文件是否已经存在
   int fd = ::open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
   if (fd < 0) {
     if (EEXIST == errno) {
@@ -98,10 +99,11 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
   db_ = db;
 
   string             data_file = table_data_file(base_dir, name);
+  LOG_INFO("Creating data file for table: %s -------------------------------------", data_file.c_str());
   BufferPoolManager &bpm       = db->buffer_pool_manager();
   rc                           = bpm.create_file(data_file.c_str());
   if (rc != RC::SUCCESS) {
-    LOG_ERROR("Failed to create disk buffer pool of data file. file name=%s", data_file.c_str());
+    LOG_ERROR("Failed to create disk buffer pool of data file. file name=%s --------------------------------------", data_file.c_str());
     return rc;
   }
 
@@ -125,7 +127,8 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
   return rc;
 }
 
-RC Table::drop(Db *db, int32_t table_id, const char *path, const char *table_name, const char *base_dir, StorageEngine storage_engine)
+// meta_file与create中的path一致
+RC Table::drop(Db *db, int32_t table_id, const char *meta_path, const char *table_name, const char *base_dir, StorageEngine storage_engine)
 {
   // 空表判断
   if (common::is_blank(table_name)) {
@@ -156,7 +159,6 @@ RC Table::drop(Db *db, int32_t table_id, const char *path, const char *table_nam
 
   LOG_INFO("Storage Engine has been cleaned");
 
-  //  进一步删除缓冲池中的相关文件
   string data_file = table_data_file(base_dir, table_name);
   // db为传入的this
   BufferPoolManager &bpm = db->buffer_pool_manager();
@@ -165,6 +167,14 @@ RC Table::drop(Db *db, int32_t table_id, const char *path, const char *table_nam
   if (rc != RC::SUCCESS) {
     LOG_ERROR("Failed to drop file from buffer pool: %s", data_file.c_str());
     return rc;
+  }
+
+  if (remove(meta_path) != 0) {
+    LOG_ERROR("Failed to remove table meta file: %s", meta_path);
+    return RC::IOERR_DELETE;
+  }
+  else {
+    LOG_INFO("Table meta file has been removed: %s", meta_path);
   }
 
   LOG_INFO("BufferPoolManager has been cleaned");
