@@ -138,22 +138,20 @@ void Value::set_data(char *data, int length)
   }
 }
 
-void Value::set_date(int year, int month,int day)
+void Value::set_date(int year, int month, int day)
 {
   reset();
-  attr_type_ = AttrType::DATES;
-  value_.int_value_ = 10000*year+100*month+day;
-  length_ = sizeof(int);
-  own_data_ = false;
+  attr_type_        = AttrType::DATES;
+  value_.int_value_ = 10000 * year + 100 * month + day;
+  length_           = sizeof(int);
 }
 
-void Value::set_date(int val)
+void Value::set_date(int value)
 {
   reset();
-  attr_type_ = AttrType::DATES;
-  value_.int_value_ = val;
-  length_ = sizeof(int);
-  own_data_ = false;
+  attr_type_        = AttrType::DATES;
+  value_.int_value_ = value;
+  length_           = sizeof(int);
 }
 
 void Value::set_int(int val)
