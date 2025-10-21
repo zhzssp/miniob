@@ -381,7 +381,7 @@ type:
     INT_T      { $$ = static_cast<int>(AttrType::INTS); }
     | STRING_T { $$ = static_cast<int>(AttrType::CHARS); }
     | FLOAT_T  { $$ = static_cast<int>(AttrType::FLOATS); }
-    | DATE_T { $$ = static_cast<int>(AttrType::DATES); } 
+    | DATE_T   { $$ = static_cast<int>(AttrType::DATES); } 
     | VECTOR_T { $$ = static_cast<int>(AttrType::VECTORS); }
     ;
 primary_key:
