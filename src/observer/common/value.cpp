@@ -110,6 +110,24 @@ void Value::reset()
   own_data_  = false;
 }
 
+void Value::set_date(int year, int month,int day)
+{
+  reset();
+  attr_type_ = AttrType::DATES;
+  value_.int_value_ = 10000*year+100*month+day;
+  length_ = sizeof(int);
+  own_data_ = false;
+}
+
+void Value::set_date(int val)
+{
+  reset();
+  attr_type_ = AttrType::DATES;
+  value_.int_value_ = val;
+  length_ = sizeof(int);
+  own_data_ = false;
+}
+
 void Value::set_data(char *data, int length)
 {
   switch (attr_type_) {
