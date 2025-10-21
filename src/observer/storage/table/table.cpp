@@ -43,8 +43,8 @@ Table::~Table()
   }
 }
 
-RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, const char *base_dir,
-    span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys, StorageFormat storage_format, StorageEngine storage_engine)
+// path为table_meta_file(path_, table_name)
+RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, const char *base_dir, span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys, StorageFormat storage_format, StorageEngine storage_engine)
 {
   if (table_id < 0) {
     LOG_WARN("invalid table id. table_id=%d, table_name=%s", table_id, name);
@@ -65,7 +65,7 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
   RC rc = RC::SUCCESS;
 
   // 使用 table_name.table记录一个表的元数据
-  // 判断表文件是否已经存在
+  // 判断.table表文件是否已经存在
   int fd = ::open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
   if (fd < 0) {
     if (EEXIST == errno) {
@@ -96,17 +96,19 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
   table_meta_.serialize(fs);
   fs.close();
 
-  db_       = db;
+  db_ = db;
 
   string             data_file = table_data_file(base_dir, name);
+  LOG_INFO("Creating data file for table: %s -------------------------------------", data_file.c_str());
   BufferPoolManager &bpm       = db->buffer_pool_manager();
   rc                           = bpm.create_file(data_file.c_str());
   if (rc != RC::SUCCESS) {
-    LOG_ERROR("Failed to create disk buffer pool of data file. file name=%s", data_file.c_str());
+    LOG_ERROR("Failed to create disk buffer pool of data file. file name=%s --------------------------------------", data_file.c_str());
     return rc;
   }
 
   if (table_meta_.storage_engine() == StorageEngine::HEAP) {
+    // 存储引擎由元数据、数据库和表本身构成
     engine_ = make_unique<HeapTableEngine>(&table_meta_, db_, this);
   } else if (table_meta_.storage_engine() == StorageEngine::LSM) {
     engine_ = make_unique<LsmTableEngine>(&table_meta_, db_, this);
@@ -123,6 +125,60 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
 
   LOG_INFO("Successfully create table %s:%s", base_dir, name);
   return rc;
+}
+
+// meta_file与create中的path一致
+RC Table::drop(Db *db, int32_t table_id, const char *meta_path, const char *table_name, const char *base_dir, StorageEngine storage_engine)
+{
+  // 空表判断
+  if (common::is_blank(table_name)) {
+    LOG_WARN("Table name cannot be empty.");
+    return RC::INVALID_ARGUMENT;
+  }
+
+  LOG_INFO("Begin to clean resources of aimed table: %s", table_name);
+
+  // 查找表的元数据，确保该表存在
+  std::string name1 = table_meta_.name();
+  std::string name2 = table_name;
+  if (name1 != name2) {
+    LOG_ERROR("Table name not matched: %s, the name in table_meta_ is %s", table_name, table_meta_.name());
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+
+  // 关闭并清理表的存储引擎
+  if (engine_) {
+    // 自定义close, 关闭索引等 （--> 内部调用了buffer pool的close_file --> 进一步调用manager的close_file）
+    RC rc = engine_->close();
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("Failed to close table engine: %s", table_meta_.name());
+      return rc;
+    }
+    engine_.reset();
+  }
+
+  LOG_INFO("Storage Engine has been cleaned");
+
+  string data_file = table_data_file(base_dir, table_name);
+  // db为传入的this
+  BufferPoolManager &bpm = db->buffer_pool_manager();
+  // close buffer pool 中的文件并且进行删除
+  RC rc = bpm.drop_file(data_file.c_str());
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to drop file from buffer pool: %s", data_file.c_str());
+    return rc;
+  }
+
+  if (remove(meta_path) != 0) {
+    LOG_ERROR("Failed to remove table meta file: %s", meta_path);
+    return RC::IOERR_DELETE;
+  }
+  else {
+    LOG_INFO("Table meta file has been removed: %s", meta_path);
+  }
+
+  LOG_INFO("BufferPoolManager has been cleaned");
+  return RC::SUCCESS;
 }
 
 RC Table::open(Db *db, const char *meta_file, const char *base_dir)

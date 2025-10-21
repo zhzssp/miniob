@@ -40,7 +40,9 @@ public:
 
     Db *db = session_event->session()->get_current_db();
 
+    // 获取所有table列表
     vector<string> all_tables;
+    // 使用的是引用传递 --> 后面的修改可以生效
     db->all_tables(all_tables);
 
     TupleSchema tuple_schema;

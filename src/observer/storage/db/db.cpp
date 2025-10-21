@@ -160,7 +160,7 @@ RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attribut
   }
 
   // 文件路径可以移到Table模块
-  string  table_file_path = table_meta_file(path_.c_str(), table_name);
+  string  table_file_path = table_meta_file(path_.c_str(), table_name); // 需要在drop中删除！！！
   Table  *table           = new Table();
   int32_t table_id        = next_table_id_++;
   rc = table->create(this, table_id, table_file_path.c_str(), table_name, path_.c_str(), attributes, primary_keys, storage_format,
@@ -171,9 +171,56 @@ RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attribut
     return rc;
   }
 
+  // 将新创建的表添加到记录之中
   opened_tables_[table_name] = table;
   LOG_INFO("Create table success. table name=%s, table_id:%d", table_name, table_id);
   return RC::SUCCESS;
+}
+
+RC Db::drop_table(const char *table_name)
+{
+  RC rc = RC::SUCCESS;
+
+  Table *table_to_drop = find_table(table_name);
+  if (!table_to_drop) {
+    LOG_WARN("Table %s not found.", table_name);
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+  LOG_INFO("Find aimed table successfully !");
+
+  string  table_file_path = table_meta_file(path_.c_str(), table_name);
+  int32_t table_id        = next_table_id_++;
+
+  // drop函数待定义 --> 清理资源
+  rc = table_to_drop->drop(
+      this,
+      table_id,
+      table_file_path.c_str(),
+      table_name,
+      path_.c_str(),
+      get_storage_engine()
+  );
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed when executing drop function in Table %s.", table_name);
+    return rc;
+  }
+
+  LOG_INFO("Clean resources successfully");
+
+  // 清除打开表的记录
+  string table_name_string(table_name);
+  opened_tables_.erase(table_name_string);
+  if(opened_tables_.count(table_name)) {
+    LOG_INFO("Failed to erase opened_tables record !!!");
+  }
+  else {
+    LOG_INFO("Remove opened_tables record successfully");
+  }
+  // 清除表指针指向的内容
+  delete table_to_drop;
+
+  LOG_INFO("Drop table successfully!!! Table name=%s", table_name);
+  return rc;
 }
 
 Table *Db::find_table(const char *table_name) const
@@ -226,7 +273,10 @@ RC Db::open_all_tables()
     if (table->table_id() >= next_table_id_) {
       next_table_id_ = table->table_id() + 1;
     }
-    opened_tables_[table->name()] = table;
+
+    // 不这样修改则会使用const char * --> string的隐式转换
+    string table_name_str = table->name();
+    opened_tables_[table_name_str] = table;
     LOG_INFO("Open table: %s, file: %s", table->name(), filename.c_str());
   }
 
