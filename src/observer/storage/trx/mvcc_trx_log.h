@@ -39,6 +39,7 @@ public:
   {
     INSERT_RECORD,  ///< 插入一条记录
     DELETE_RECORD,  ///< 删除一条记录
+    UPDATE_RECORD,  ///< 更新一条记录
     COMMIT,         ///< 提交事务
     ROLLBACK        ///< 回滚事务
   };
@@ -88,6 +89,23 @@ struct MvccTrxRecordLogEntry
 };
 
 /**
+ * @brief 表示事务日志中更新行数据的日志
+ * @ingroup CLog
+ * @details 记录更新操作的旧RID和新RID
+ */
+struct MvccTrxUpdateLogEntry
+{
+  MvccTrxLogHeader header;    ///< 日志头部
+  int32_t          table_id;   ///< 表ID
+  RID              old_rid;    ///< 旧记录ID
+  RID              new_rid;    ///< 新记录ID
+
+  static const int32_t SIZE;  ///< 日志大小
+
+  string to_string() const;
+};
+
+/**
  * @brief 事务提交的日志
  * @ingroup CLog
  * @details 并没有事务回滚的日志，日志头就可以包含所有回滚日志需要的数据。
@@ -121,6 +139,11 @@ public:
    * @brief 记录删除一条记录的日志
    */
   RC delete_record(int32_t trx_id, Table *table, const RID &rid);
+
+  /**
+   * @brief 记录更新一条记录的日志
+   */
+  RC update_record(int32_t trx_id, Table *table, const RID &old_rid, const RID &new_rid);
 
   /**
    * @brief 记录提交事务的日志

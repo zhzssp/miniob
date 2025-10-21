@@ -40,6 +40,7 @@ See the Mulan PSL v2 for more details. */
 #include "net/thread_handler.h"
 #include "net/sql_task_handler.h"
 
+// 功能函数都定义在common下?
 using namespace common;
 
 ServerParam::ServerParam()
@@ -145,6 +146,7 @@ int NetServer::start()
   }
 }
 
+// TCP server用于跨主机通讯，而Unix server则用于本机通讯
 int NetServer::start_tcp_server()
 {
   int                ret = 0;
@@ -265,6 +267,7 @@ int NetServer::serve()
     poll_fd.events  = POLLIN;
     poll_fd.revents = 0;
 
+    // 不断与客户端建立连接?
     while (started_) {
       int ret = poll(&poll_fd, 1, 500);
       if (ret < 0) {

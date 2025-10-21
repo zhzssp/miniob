@@ -309,6 +309,7 @@ RC HeapTableEngine::init()
   return rc;
 }
 
+// 创建field and index --> 索引还unsupported
 RC HeapTableEngine::open()
 {
   RC rc = RC::SUCCESS;
@@ -340,4 +341,69 @@ RC HeapTableEngine::open()
     indexes_.push_back(index);
   }
   return rc;
+}
+
+RC HeapTableEngine::update_record_with_trx(const Record &old_record, const Record &new_record, Trx *trx)
+{
+  RC rc = RC::SUCCESS;
+  
+  // 1. 更新索引：先删除旧记录，再插入新记录
+  for (Index *index : indexes_) {
+    rc = index->delete_entry(old_record.data(), &old_record.rid());
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to delete entry from index. table=%s, index=%s, rid=%s, rc=%s",
+               table_meta_->name(), index->index_meta().name(), 
+               old_record.rid().to_string().c_str(), strrc(rc));
+      return rc;
+    }
+    
+    rc = index->insert_entry(new_record.data(), &new_record.rid());
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to insert entry to index. table=%s, index=%s, rid=%s, rc=%s",
+               table_meta_->name(), index->index_meta().name(), 
+               new_record.rid().to_string().c_str(), strrc(rc));
+      return rc;
+    }
+  }
+  
+  // 2. 更新记录数据
+  rc = record_handler_->delete_record(&old_record.rid());
+  if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to delete old record. table=%s, index=%s, rid=%s, rc=%s",
+               table_meta_->name(), old_record.rid().to_string().c_str(), strrc(rc));
+      return rc;
+  }
+  // RID &rid = new_record.rid(); // 先获取引用
+  rc = record_handler_->insert_record(new_record.data(), new_record.len(), const_cast<RID*>(&new_record.rid()));
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to update record. table=%s, rid=%s, rc=%s",
+             table_meta_->name(), old_record.rid().to_string().c_str(), strrc(rc));
+    return rc;
+  }
+  
+  return RC::SUCCESS;
+}
+// 清除field and index --> 索引还unsupported
+RC HeapTableEngine::close()
+{
+  // 关闭索引
+  indexes_.clear();  
+
+  // 关闭记录处理器
+  if (record_handler_ != nullptr) {
+    // 已经完整实现
+    record_handler_->close();  
+    delete record_handler_;
+    record_handler_ = nullptr;
+  }
+
+  // // 关闭磁盘数据缓冲池 DiskDataPool --> 与table.cpp中的drop方法无冲突
+  // if (data_buffer_pool_ != nullptr) {
+  //   data_buffer_pool_->close_file();  
+  //   delete data_buffer_pool_;
+  //   data_buffer_pool_ = nullptr;
+  // }
+
+  LOG_INFO("Table has been closed: %s", table_meta_->name());
+  return RC::SUCCESS;
 }

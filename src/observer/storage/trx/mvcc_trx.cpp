@@ -172,6 +172,42 @@ RC MvccTrx::delete_record(Table *table, Record &record)
   return RC::SUCCESS;
 }
 
+RC MvccTrx::update_record(Table *table, Record &old_record, Record &new_record)
+{
+  Field begin_field, end_field;
+  trx_fields(table, begin_field, end_field);
+  
+  // 1. 检查旧记录是否可见
+  RC rc = visit_record(table, old_record, ReadWriteMode::READ_WRITE);
+  if (OB_FAIL(rc)) {
+    LOG_WARN("failed to visit old record. rc=%s", strrc(rc));
+    return rc;
+  }
+  
+  // 2. 设置新记录的事务字段
+  begin_field.set_int(new_record, -trx_id_);
+  end_field.set_int(new_record, trx_kit_.max_trx_id());
+  
+  // 3. 通过表引擎更新记录
+  rc = table->update_record_with_trx(old_record, new_record, this);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to update record. rc=%s", strrc(rc));
+    return rc;
+  }
+  
+  // 4. 记录日志
+  rc = log_handler_.update_record(trx_id_, table, old_record.rid(), new_record.rid());
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to append update record log. rc=%s", strrc(rc));
+    return rc;
+  }
+  
+  // 5. 记录操作
+  operations_.push_back(Operation(Operation::Type::UPDATE, table, old_record.rid()));
+  
+  return RC::SUCCESS;
+}
+
 RC MvccTrx::visit_record(Table *table, Record &record, ReadWriteMode mode)
 {
   Field begin_field;
