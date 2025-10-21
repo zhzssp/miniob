@@ -110,24 +110,6 @@ void Value::reset()
   own_data_  = false;
 }
 
-void Value::set_date(int year, int month,int day)
-{
-  reset();
-  attr_type_ = AttrType::DATES;
-  value_.int_value_ = 10000*year+100*month+day;
-  length_ = sizeof(int);
-  own_data_ = false;
-}
-
-void Value::set_date(int val)
-{
-  reset();
-  attr_type_ = AttrType::DATES;
-  value_.int_value_ = val;
-  length_ = sizeof(int);
-  own_data_ = false;
-}
-
 void Value::set_data(char *data, int length)
 {
   switch (attr_type_) {
@@ -146,10 +128,32 @@ void Value::set_data(char *data, int length)
       value_.bool_value_ = *(int *)data != 0;
       length_            = length;
     } break;
+    case AttrType::DATES: {
+      value_.int_value_ = *(int *)data;
+      length_           = length;
+    } break;
     default: {
       LOG_WARN("unknown data type: %d", attr_type_);
     } break;
   }
+}
+
+void Value::set_date(int year, int month,int day)
+{
+  reset();
+  attr_type_ = AttrType::DATES;
+  value_.int_value_ = 10000*year+100*month+day;
+  length_ = sizeof(int);
+  own_data_ = false;
+}
+
+void Value::set_date(int val)
+{
+  reset();
+  attr_type_ = AttrType::DATES;
+  value_.int_value_ = val;
+  length_ = sizeof(int);
+  own_data_ = false;
 }
 
 void Value::set_int(int val)
@@ -224,6 +228,9 @@ void Value::set_value(const Value &value)
     case AttrType::BOOLEANS: {
       set_boolean(value.get_boolean());
     } break;
+    case AttrType::DATES: {
+      set_date(value.get_int());      
+    } break;
     default: {
       ASSERT(false, "got an invalid value type");
     } break;
@@ -284,6 +291,9 @@ int Value::get_int() const
     }
     case AttrType::BOOLEANS: {
       return (int)(value_.bool_value_);
+    }
+    case AttrType::DATES: {
+      return value_.int_value_;
     }
     default: {
       LOG_WARN("unknown data type. type=%d", attr_type_);
