@@ -123,6 +123,28 @@ function do_init
     ${MAKE_COMMAND} -j4 && \
     ${MAKE_COMMAND} install
 
+  # build limonp
+  cd ${TOPDIR}/deps/3rd/cppjieba && \
+    git submodule update --init && \
+    cd deps/limonp && \
+    mkdir -p build && cd build && \
+    ${CMAKE_COMMAND_THIRD_PARTY} .. -DCMAKE_BUILD_TYPE=Release -DINSTALL_GTEST=OFF -DBUILD_GMOCK=OFF -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=${TOPDIR}/deps/3rd/googletest && \
+    ${MAKE_COMMAND} -j4 && \
+    ${MAKE_COMMAND} install
+  
+  # build cppjieba
+  cd ${TOPDIR}/deps/3rd/cppjieba && \
+    mkdir -p build && \
+    cd build && \
+    ${CMAKE_COMMAND_THIRD_PARTY} .. -DCMAKE_BUILD_TYPE=Release -DINSTALL_GTEST=OFF -DBUILD_GMOCK=OFF -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=${TOPDIR}/deps/3rd/googletest && \
+    ${MAKE_COMMAND} -j4 && \
+    ${MAKE_COMMAND} install && \
+
+  # create soft link for cppjieba dict
+  cd ${TOPDIR}/deps/3rd/usr/local && \
+    [ ! -e dict ] && \
+    ln -s share/cppjieba/dict .
+
   cd $current_dir
 }
 
