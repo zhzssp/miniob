@@ -47,6 +47,7 @@ public:
   const FieldMeta    *trx_field() const;
   const FieldMeta    *field(int index) const;
   const FieldMeta    *field(const char *name) const;
+  auto                fields(const vector<string> &names) const -> vector<const FieldMeta *>;
   const FieldMeta    *find_field_by_offset(int offset) const;
   auto                field_metas() const -> const vector<FieldMeta>                *{ return &fields_; }
   auto                trx_fields() const -> span<const FieldMeta>;

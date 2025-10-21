@@ -66,7 +66,8 @@ public:
    * 删除一个表
    * @param table_name 表名
    */
-  RC drop(Db *db, int32_t table_id, const char *path, const char *table_name, const char *base_dir, StorageEngine storage_engine);
+  RC drop(Db *db, int32_t table_id, const char *path, const char *table_name, const char *base_dir,
+      StorageEngine storage_engine);
 
   /**
    * 打开一个表
@@ -100,7 +101,7 @@ public:
   RC get_record(const RID &rid, Record &record);
 
   // TODO refactor
-  RC create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name);
+  RC create_index(Trx *trx, const vector<const FieldMeta *> &field_metas, const char *index_name);
 
   RC get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWriteMode mode);
 

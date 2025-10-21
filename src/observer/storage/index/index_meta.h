@@ -35,12 +35,43 @@ class IndexMeta
 public:
   IndexMeta() = default;
 
-  RC init(const char *name, const FieldMeta &field);
+  RC init(const char *name, const vector<FieldMeta> &fields);
 
 public:
   const char *name() const;
-  const char *field() const;
 
+  // 获取字段信息
+  int         field_count() const { return fields_.size(); }
+  const char *field(int index) const;
+  AttrType    field_type(int index) const;
+  int         field_length(int index) const;
+
+  // 复合键操作
+  /**
+   * @brief 构建复合键
+   * @param record 记录数据
+   * @param composite_key 输出的复合键缓冲区
+   * @return RC
+   */
+  RC build_composite_key(const char *record, char *composite_key) const;
+
+  /**
+   * @brief 从复合键中提取指定字段
+   * @param composite_key 复合键数据
+   * @param field_index 字段索引
+   * @param field_value 输出的字段值缓冲区
+   * @return RC
+   */
+  RC extract_field_from_composite_key(const char *composite_key, int field_index, char *field_value) const;
+
+  /**
+   * @brief 计算字段在复合键中的偏移量
+   * @param field_index 字段索引
+   * @return 偏移量
+   */
+  int field_offset(int field_index) const;
+
+  // 索引降序？
   void desc(ostream &os) const;
 
 public:
@@ -48,6 +79,9 @@ public:
   static RC from_json(const TableMeta &table, const Json::Value &json_value, IndexMeta &index);
 
 protected:
-  string name_;   // index's name
-  string field_;  // field's name
+  string name_;  // index's name
+  // 只有一个字段 --> 可扩展到两个
+  vector<string>   fields_;  // field's name
+  vector<AttrType> field_types_;
+  vector<int>      field_lengths_;
 };

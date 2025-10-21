@@ -302,14 +302,15 @@ desc_table_stmt:
     }
     ;
 
-create_index_stmt:    /*create index 语句的语法解析树*/
-    CREATE INDEX ID ON ID LBRACE ID RBRACE
+create_index_stmt:    /*create index 语句的语法解析树 --> 支持多字段*/
+    CREATE INDEX ID ON ID LBRACE attr_list RBRACE
     {
       $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
       CreateIndexSqlNode &create_index = $$->create_index;
       create_index.index_name = $3;
       create_index.relation_name = $5;
-      create_index.attribute_name = $7;
+      create_index.attribute_names = *$7;  // 使用字段列表
+      delete $7;  // 清理临时vector
     }
     ;
 

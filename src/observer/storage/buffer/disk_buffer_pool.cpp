@@ -236,6 +236,7 @@ RC DiskBufferPool::open_file(const char *file_name)
   LOG_INFO("Successfully open buffer pool file %s.", file_name);
 
   file_name_ = file_name;
+  // 保存文件描述符
   file_desc_ = fd;
 
   Page header_page;
@@ -250,6 +251,7 @@ RC DiskBufferPool::open_file(const char *file_name)
   BPFileHeader *tmp_file_header = reinterpret_cast<BPFileHeader *>(header_page.data);
   buffer_pool_id_ = tmp_file_header->buffer_pool_id;
 
+  // 分配页帧
   RC rc = allocate_frame(BP_HEADER_PAGE, &hdr_frame_);
   if (rc != RC::SUCCESS) {
     LOG_ERROR("failed to allocate frame for header. file name %s", file_name_.c_str());
@@ -793,9 +795,9 @@ RC BufferPoolManager::init(unique_ptr<DoubleWriteBuffer> dblwr_buffer)
   return RC::SUCCESS;
 }
 
+// .index, .data, .table都在这里创建
 RC BufferPoolManager::create_file(const char *file_name)
 {
-  // 数据文件无法创建 --> 上层的drop还没有删除
   int fd = open(file_name, O_RDWR | O_CREAT | O_EXCL, S_IREAD | S_IWRITE);
   if (fd < 0) {
     LOG_ERROR("Failed to create %s, due to %s.", file_name, strerror(errno));
@@ -900,6 +902,7 @@ RC BufferPoolManager::open_file(LogHandler &log_handler, const char *_file_name,
     return RC::BUFFERPOOL_OPEN;
   }
 
+  // 构建.index/.data/.table文件对应的BufferPool
   DiskBufferPool *bp = new DiskBufferPool(*this, frame_manager_, *dblwr_buffer_, log_handler);
   RC              rc = bp->open_file(_file_name);
   if (rc != RC::SUCCESS) {

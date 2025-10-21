@@ -109,6 +109,47 @@ private:
   AttrComparator attr_comparator_;
 };
 
+// 多键值比较
+class CompositeKeyComparator
+{
+public:
+  void init(const IndexFileHeader &header)
+  {
+    field_count_ = 0;
+    for (int i = 0; i < 3; i++) {
+      if (header.key_length[i] > 0) {
+        field_count_++;
+        AttrComparator comparator;
+        comparator.init(header.attr_type[i], header.key_length[i]);
+        field_comparators_.push_back(comparator);
+        field_offsets_.push_back(header.field_offset(i));
+      }
+    }
+  }
+
+  int operator()(const char *v1, const char *v2) const
+  {
+    for (int i = 0; i < field_count_; i++) {
+      const char *key1   = v1 + field_offsets_[i];
+      const char *key2   = v2 + field_offsets_[i];
+      int         result = field_comparators_[i](key1, key2);
+      if (result != 0) {
+        return result;
+      }
+    }
+
+    // 所有字段都相等,最后比较RID
+    const RID *rid1 = (const RID *)(v1 + field_offsets_[field_count_]);
+    const RID *rid2 = (const RID *)(v2 + field_offsets_[field_count_]);
+    return RID::compare(rid1, rid2);
+  }
+
+private:
+  vector<AttrComparator> field_comparators_;
+  vector<int>            field_offsets_;
+  int                    field_count_;
+};
+
 /**
  * @brief 属性打印,调试使用(BplusTree)
  * @ingroup BPlusTree
@@ -160,6 +201,48 @@ private:
   AttrPrinter attr_printer_;
 };
 
+class CompositeKeyPrinter
+{
+public:
+  void init(const IndexFileHeader &header)
+  {
+    field_count_ = 0;
+    for (int i = 0; i < 3; i++) {
+      if (header.key_length[i] > 0) {
+        field_count_++;
+        AttrPrinter printer;
+        printer.init(header.attr_type[i], header.key_length[i]);
+        field_printers_.push_back(printer);
+        field_offsets_.push_back(header.field_offset(i));
+      }
+    }
+  }
+
+  string operator()(const char *v) const
+  {
+    stringstream ss;
+    ss << "{key:[";
+
+    for (int i = 0; i < field_count_; i++) {
+      if (i > 0) {
+        ss << ",";
+      }
+      const char *key = v + field_offsets_[i];
+      ss << field_printers_[i](key);
+    }
+    ss << "],";
+
+    const RID *rid = (const RID *)(v + field_offsets_[field_count_]);
+    ss << "rid:" << rid->to_string() << "}";
+    return ss.str();
+  }
+
+private:
+  vector<AttrPrinter> field_printers_;
+  vector<int>         field_offsets_;
+  int                 field_count_;
+};
+
 /**
  * @brief the meta information of bplus tree
  * @ingroup BPlusTree
@@ -173,20 +256,37 @@ struct IndexFileHeader
     memset(this, 0, sizeof(IndexFileHeader));
     root_page = BP_INVALID_PAGE_NUM;
   }
-  PageNum  root_page;          ///< 根节点在磁盘中的页号
-  int32_t  internal_max_size;  ///< 内部节点最大的键值对数
-  int32_t  leaf_max_size;      ///< 叶子节点最大的键值对数
-  int32_t  attr_length;        ///< 键值的长度
-  int32_t  key_length;         ///< attr length + sizeof(RID)
-  AttrType attr_type;          ///< 键值的类型
+  PageNum root_page;          ///< 根节点在磁盘中的页号
+  int32_t internal_max_size;  ///< 内部节点最大的键值对数
+  int32_t leaf_max_size;      ///< 叶子节点最大的键值对数
+  int32_t attr_length;        ///< 键值的长度
+  // key暂定最多同时拥有三个字段
+  int32_t  key_length[3];  ///< attr length + sizeof(RID)
+  AttrType attr_type[3];   ///< 键值的类型
+
+  // 计算字段偏移量
+  int field_offset(int field_index) const
+  {
+    // 参数检查
+    if (field_index < 0 || field_index >= 3) {
+      return -1;  // 无效的字段索引
+    }
+
+    // 计算偏移量
+    int offset = 0;
+    for (int i = 0; i < field_index; i++) {
+      offset += key_length[i];
+    }
+    return offset;
+  }
 
   const string to_string() const
   {
     stringstream ss;
 
     ss << "attr_length:" << attr_length << ","
-       << "key_length:" << key_length << ","
-       << "attr_type:" << attr_type_to_string(attr_type) << ","
+       << "key_length of the first field:" << key_length[0] << ","
+       << "attr_type of the first field:" << attr_type_to_string(attr_type[0]) << ","
        << "root_page:" << root_page << ","
        << "internal_max_size:" << internal_max_size << ","
        << "leaf_max_size:" << leaf_max_size << ";";
@@ -196,7 +296,7 @@ struct IndexFileHeader
 };
 
 /**
- * @brief the common part of page describtion of bplus tree
+ * @brief the common part of page description of bplus tree
  * @ingroup BPlusTree
  * @code
  * storage format:
@@ -225,6 +325,8 @@ struct IndexNode
  * the value is rid.
  * can you implenment a cluster index ?
  */
+
+// 数据指针只存在于叶子节点
 struct LeafIndexNode : public IndexNode
 {
   static constexpr int HEADER_SIZE = IndexNode::HEADER_SIZE + 4;
@@ -261,7 +363,7 @@ struct InternalIndexNode : public IndexNode
  * @brief IndexNode 仅作为数据在内存或磁盘中的表示
  * @ingroup BPlusTree
  * IndexNodeHandler 负责对IndexNode做各种操作。
- * 作为一个类来说，虚函数会影响“结构体”真实的内存布局，所以将数据存储与操作分开
+ * 作为一个类来说，虚函数会影响“结构体”真实的内存布局，所以将数据存储与操作分开 --> 操作函数影响布局？
  */
 class IndexNodeHandler
 {
@@ -644,9 +746,10 @@ protected:
   // 在调整根节点时，需要加上这个锁。
   // 这个锁可以使用递归读写锁，但是这里偷懒先不改
   common::SharedMutex root_lock_;
-
-  KeyComparator key_comparator_;
-  KeyPrinter    key_printer_;
+  
+  /// 单字段 --> 多字段
+  CompositeKeyComparator key_comparator_;
+  CompositeKeyPrinter    key_printer_;
 
   unique_ptr<common::MemPoolItem> mem_pool_item_;
 

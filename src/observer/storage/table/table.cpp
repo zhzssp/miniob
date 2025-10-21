@@ -44,7 +44,9 @@ Table::~Table()
 }
 
 // path为table_meta_file(path_, table_name)
-RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, const char *base_dir, span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys, StorageFormat storage_format, StorageEngine storage_engine)
+RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, const char *base_dir,
+    span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys, StorageFormat storage_format,
+    StorageEngine storage_engine)
 {
   if (table_id < 0) {
     LOG_WARN("invalid table id. table_id=%d, table_name=%s", table_id, name);
@@ -80,7 +82,8 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
 
   // 创建文件
   const vector<FieldMeta> *trx_fields = db->trx_kit().trx_fields();
-  if ((rc = table_meta_.init(table_id, name, trx_fields, attributes, primary_keys, storage_format, storage_engine)) != RC::SUCCESS) {
+  if ((rc = table_meta_.init(table_id, name, trx_fields, attributes, primary_keys, storage_format, storage_engine)) !=
+      RC::SUCCESS) {
     LOG_ERROR("Failed to init table meta. name:%s, ret:%d", name, rc);
     return rc;  // delete table file
   }
@@ -98,10 +101,10 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
 
   db_ = db;
 
-  string             data_file = table_data_file(base_dir, name);
+  string data_file = table_data_file(base_dir, name);
   LOG_INFO("Creating data file for table: %s -------------------------------------", data_file.c_str());
-  BufferPoolManager &bpm       = db->buffer_pool_manager();
-  rc                           = bpm.create_file(data_file.c_str());
+  BufferPoolManager &bpm = db->buffer_pool_manager();
+  rc                     = bpm.create_file(data_file.c_str());
   if (rc != RC::SUCCESS) {
     LOG_ERROR("Failed to create disk buffer pool of data file. file name=%s --------------------------------------", data_file.c_str());
     return rc;
@@ -128,7 +131,8 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
 }
 
 // meta_file与create中的path一致
-RC Table::drop(Db *db, int32_t table_id, const char *meta_path, const char *table_name, const char *base_dir, StorageEngine storage_engine)
+RC Table::drop(Db *db, int32_t table_id, const char *meta_path, const char *table_name, const char *base_dir,
+    StorageEngine storage_engine)
 {
   // 空表判断
   if (common::is_blank(table_name)) {
@@ -172,8 +176,7 @@ RC Table::drop(Db *db, int32_t table_id, const char *meta_path, const char *tabl
   if (remove(meta_path) != 0) {
     LOG_ERROR("Failed to remove table meta file: %s", meta_path);
     return RC::IOERR_DELETE;
-  }
-  else {
+  } else {
     LOG_INFO("Table meta file has been removed: %s", meta_path);
   }
 
@@ -198,7 +201,7 @@ RC Table::open(Db *db, const char *meta_file, const char *base_dir)
   }
   fs.close();
 
-  db_       = db;
+  db_ = db;
 
   // // 加载数据文件
   // RC rc = init_record_handler(base_dir);
@@ -211,7 +214,7 @@ RC Table::open(Db *db, const char *meta_file, const char *base_dir)
 
   if (table_meta_.storage_engine() == StorageEngine::HEAP) {
     engine_ = make_unique<HeapTableEngine>(&table_meta_, db_, this);
-  }  else if (table_meta_.storage_engine() == StorageEngine::LSM) {
+  } else if (table_meta_.storage_engine() == StorageEngine::LSM) {
     engine_ = make_unique<LsmTableEngine>(&table_meta_, db_, this);
   } else {
     rc = RC::UNSUPPORTED;
@@ -228,39 +231,24 @@ RC Table::open(Db *db, const char *meta_file, const char *base_dir)
   return rc;
 }
 
-RC Table::insert_record(Record &record)
-{
-  return engine_->insert_record(record);
-}
+RC Table::insert_record(Record &record) { return engine_->insert_record(record); }
 
-RC Table::insert_chunk(const Chunk& chunk)
-{
-  return engine_->insert_chunk(chunk);
-}
+RC Table::insert_chunk(const Chunk &chunk) { return engine_->insert_chunk(chunk); }
 
-RC Table::visit_record(const RID &rid, function<bool(Record &)> visitor)
-{
-  return engine_->visit_record(rid, visitor);
-}
+RC Table::visit_record(const RID &rid, function<bool(Record &)> visitor) { return engine_->visit_record(rid, visitor); }
 
-RC Table::insert_record_with_trx(Record &record, Trx *trx)
-{
-  return engine_->insert_record_with_trx(record, trx);
-}
+RC Table::insert_record_with_trx(Record &record, Trx *trx) { return engine_->insert_record_with_trx(record, trx); }
 RC Table::delete_record_with_trx(const Record &record, Trx *trx)
 {
   return engine_->delete_record_with_trx(record, trx);
 }
 
-RC Table::update_record_with_trx(const Record &old_record, const Record &new_record, Trx* trx)
+RC Table::update_record_with_trx(const Record &old_record, const Record &new_record, Trx *trx)
 {
   return engine_->update_record_with_trx(old_record, new_record, trx);
 }
 
-RC Table::get_record(const RID &rid, Record &record)
-{
-  return engine_->get_record(rid, record);
-}
+RC Table::get_record(const RID &rid, Record &record) { return engine_->get_record(rid, record); }
 
 const char *Table::name() const { return table_meta_.name(); }
 
@@ -283,7 +271,7 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
 
   for (int i = 0; i < value_num && OB_SUCC(rc); i++) {
     const FieldMeta *field = table_meta_.field(i + normal_field_start_index);
-    const Value &    value = values[i];
+    const Value     &value = values[i];
     if (field->type() != value.attr_type()) {
       Value real_value;
       rc = Value::cast_to(value, field->type(), real_value);
@@ -330,26 +318,14 @@ RC Table::get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadWriteMode m
   return engine_->get_chunk_scanner(scanner, trx, mode);
 }
 
-RC Table::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name)
+RC Table::create_index(Trx *trx, const vector<const FieldMeta *> &field_metas, const char *index_name)
 {
-  return engine_->create_index(trx, field_meta, index_name);
+  return engine_->create_index(trx, field_metas, index_name);
 }
 
-RC Table::delete_record(const Record &record)
-{
-  return engine_->delete_record(record);
-}
+RC Table::delete_record(const Record &record) { return engine_->delete_record(record); }
 
-Index *Table::find_index(const char *index_name) const
-{
-  return engine_->find_index(index_name);
-}
-Index *Table::find_index_by_field(const char *field_name) const
-{
-  return engine_->find_index_by_field(field_name);
-}
+Index *Table::find_index(const char *index_name) const { return engine_->find_index(index_name); }
+Index *Table::find_index_by_field(const char *field_name) const { return engine_->find_index_by_field(field_name); }
 
-RC Table::sync()
-{
-  return engine_->sync();
-}
+RC Table::sync() { return engine_->sync(); }

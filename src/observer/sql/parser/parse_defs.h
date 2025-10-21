@@ -189,9 +189,9 @@ struct AnalyzeTableSqlNode
  */
 struct CreateIndexSqlNode
 {
-  string index_name;      ///< Index name
-  string relation_name;   ///< Relation name
-  string attribute_name;  ///< Attribute name
+  string         index_name;       ///< Index name
+  string         relation_name;    ///< Relation name
+  vector<string> attribute_names;  ///< Attribute name
 };
 
 /**
