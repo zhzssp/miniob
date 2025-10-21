@@ -7,31 +7,19 @@ THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
-
 #pragma once
 
+#include <string>
+#include <vector>
+#include <memory>
+
 #include "common/sys/rc.h"
-#include "common/type/data_type.h"
-#include "common/type/date_type.h"
 
-/**
- * @brief 固定长度的字符串类型
- * @ingroup DataType
- */
-class CharType : public DataType
+class Tokenizer
 {
+private:
+  /* data */
 public:
-  CharType() : DataType(AttrType::CHARS) {}
-
-  virtual ~CharType() = default;
-
-  int compare(const Value &left, const Value &right) const override;
-
-  RC cast_to(const Value &val, AttrType type, Value &result) const override;
-
-  RC set_value_from_str(Value &val, const string &data) const override;
-
-  int cast_cost(AttrType type) override;
-
-  RC to_string(const Value &val, string &result) const override;
+  virtual RC cut(std::string &text, std::vector<std::string> &tokens) = 0;
+  virtual ~Tokenizer()                                                = default;
 };
