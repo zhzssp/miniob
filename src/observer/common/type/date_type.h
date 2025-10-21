@@ -27,6 +27,4 @@ class DateType : public DataType
 
     RC to_string(const Value &val,string &result)const override;
 
-    private:
-
 };
