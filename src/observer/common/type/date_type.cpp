@@ -24,7 +24,7 @@ RC DateType::set_value_from_str(Value &val, const string &data) const
     return RC::INVALID_DATE_FORMAT;
   }
 
-  if (is_invalid_date(year, month, day)) {
+  if (common::is_invalid_date(year, month, day)) {
     return RC::INVALID_DATE_FORMAT;
   }
 
@@ -59,41 +59,3 @@ RC DateType::to_string(const Value &val, string &result) const
   return RC::SUCCESS;
 }
     
-bool DateType::is_invalid_date(int year,int month,int day)
-{
-    if (year < 1900 || year > 9999) // 年份上下限判断
-    {
-        return true;
-    } 
-    
-    if(month < 1 || month > 12)
-    {
-        return true;
-    }
-
-    if (day <= 0 || day > 31)
-    {
-        return true;
-    }
-    else if (day == 31 && (month != 1 || month != 3 || month != 5 || month != 7 || month != 8 || month != 10 || month != 12))
-    {
-        return true;
-    }
-    else if (month == 2)
-    {
-        if (day > 29)
-        {
-            return true;
-        }
-        else if (day == 29)
-        {
-            if((year % 100 == 0 && year % 400 != 0) || (year % 4 != 0))
-            {
-                return true;
-            }
-        }
-    }
-    //闰年判断
-
-    return false;
-}
