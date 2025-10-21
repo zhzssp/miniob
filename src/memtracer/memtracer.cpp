@@ -81,8 +81,7 @@ void MemTracer::init()
       MEMTRACER_LOG("Invalid environment variable value for MT_MEMORY_LIMIT: %s\n", print_interval_ms_str);
     }
   } else {
-    // MT.set_print_interval(1000 * 5);  // 5s
-    MT.set_print_interval(-1);
+    MT.set_print_interval(1000 * 5);  // 5s
   }
 
   // init `text` memory usage
@@ -102,8 +101,7 @@ void MemTracer::init()
   }
 
   MT.add_allocated_memory(text_size);
-  if (MT.print_interval() != static_cast<size_t>(-1))
-    MT.init_stats_thread();
+  MT.init_stats_thread();
 }
 
 void MemTracer::init_stats_thread()
@@ -136,8 +134,7 @@ void MemTracer::destroy() { MT.stop(); }
 void MemTracer::stop()
 {
   is_stop_ = true;
-  if (t_.joinable())
-    t_.join();
+  t_.join();
 }
 
 void MemTracer::init_hook_funcs_impl()
