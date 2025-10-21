@@ -49,7 +49,7 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
       return RC::SCHEMA_FIELD_NOT_EXIST;
     }
 
-    // cast value if needed
+    // 准备更新的值
     Value final_value;
     if (value->attr_type() != field_meta->type()) {
       rc = Value::cast_to(*value, field_meta->type(), final_value);
@@ -61,7 +61,7 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
       final_value = *value;
     }
 
-    // scan all records and update (apply WHERE if exists)
+    // 检查并更新
     RecordScanner *scanner = nullptr;
     rc = table->get_record_scanner(scanner, session->current_trx(), ReadWriteMode::READ_WRITE);
     if (rc != RC::SUCCESS) {
