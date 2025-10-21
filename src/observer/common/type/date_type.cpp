@@ -43,7 +43,7 @@ RC DateType::set_value_from_str(Value &val, const string &data) const
     
 bool DateType::is_invalid_date(int year,int month,int day)
 {
-    if (year < 1970 || year > 9999) // 年份上下限判断
+    if (year < 1 || year > 9999) // 年份上下限判断
     {
         return true;
     } 
