@@ -16,6 +16,8 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/log/log.h"
 
+#include "sql/expr/expression.h"
+
 #include "sql/operator/calc_logical_operator.h"
 #include "sql/operator/delete_logical_operator.h"
 #include "sql/operator/explain_logical_operator.h"
@@ -118,6 +120,21 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       JoinLogicalOperator *join_oper = new JoinLogicalOperator;
       join_oper->add_child(std::move(table_oper));
       join_oper->add_child(std::move(table_get_oper));
+      
+      // 添加 JOIN 条件到 JoinLogicalOperator
+      if (select_stmt->join_filter_stmt() != nullptr) {
+        const auto &filter_units = select_stmt->join_filter_stmt()->filter_units();
+        for (const auto &filter_unit : filter_units) {
+          // 将 FilterUnit 转换为 Expression
+          auto left_expr = LogicalPlanGenerator::create_expression_from_filter_obj(filter_unit->left());
+          auto right_expr = LogicalPlanGenerator::create_expression_from_filter_obj(filter_unit->right());
+          if (left_expr != nullptr && right_expr != nullptr) {
+            auto comp_expr = make_unique<ComparisonExpr>(filter_unit->comp(), std::move(left_expr), std::move(right_expr));
+            join_oper->add_join_predicate(std::move(comp_expr));
+          }
+        }
+      }
+      
       table_oper = unique_ptr<LogicalOperator>(join_oper);
     }
   }
@@ -393,4 +410,14 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
                                                            std::move(aggregate_expressions));
   logical_operator = std::move(group_by_oper);
   return RC::SUCCESS;
+}
+
+// 辅助方法：将 FilterObj 转换为 Expression
+unique_ptr<Expression> LogicalPlanGenerator::create_expression_from_filter_obj(const FilterObj &filter_obj)
+{
+  if (filter_obj.is_attr) {
+    return make_unique<FieldExpr>(filter_obj.field);
+  } else {
+    return make_unique<ValueExpr>(filter_obj.value);
+  }
 }

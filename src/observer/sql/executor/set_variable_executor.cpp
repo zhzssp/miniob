@@ -36,7 +36,7 @@ RC SetVariableExecutor::execute(SQLStageEvent *sql_event)
         rc = RC::INVALID_ARGUMENT;
       }
     } else if (strcasecmp(var_name, "hash_join") == 0) { // TODO: remove this configuration
-        bool bool_value = false;
+        bool bool_value = true;
         rc              = var_value_to_boolean(var_value, bool_value);
         if (rc == RC::SUCCESS) {
           session->set_hash_join(bool_value);

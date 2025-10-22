@@ -48,6 +48,7 @@ public:
   Index *find_index(const char *index_name) const override { return nullptr; }
   Index *find_index_by_field(const char *field_name) const override { return nullptr; }
   RC     open() override;
+  RC    close() override;
   RC     init() override { return RC::UNIMPLEMENTED; }
 
 private:

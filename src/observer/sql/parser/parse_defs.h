@@ -75,6 +75,30 @@ struct ConditionSqlNode
   Value          right_value;    ///< right-hand side value if right_is_attr = FALSE
 };
 
+
+/**
+ * @brief 描述一个 JOIN 条件
+ * @ingroup SQLParser
+ */
+struct JoinConditionSqlNode
+{
+  RelAttrSqlNode left_attr;   ///< 左表属性
+  RelAttrSqlNode right_attr;  ///< 右表属性
+  CompOp         comp;        ///< 比较操作符
+};
+
+/**
+ * @brief 描述一个表引用（可能是表名或子查询）
+ * @ingroup SQLParser
+ */
+struct TableReferenceSqlNode
+{
+  string table_name;                    ///< 表名
+  string alias;                         ///< 表别名
+  vector<JoinConditionSqlNode> join_conditions;  ///< JOIN 条件
+  bool is_join;                         ///< 是否为 JOIN 操作
+};
+
 /**
  * @brief 描述一个select语句
  * @ingroup SQLParser
@@ -89,7 +113,8 @@ struct ConditionSqlNode
 struct SelectSqlNode
 {
   vector<unique_ptr<Expression>> expressions;  ///< 查询的表达式
-  vector<string>                 relations;    ///< 查询的表
+  vector<string>                 relations;    ///< 查询的表（保持向后兼容）
+  vector<TableReferenceSqlNode>  table_references;  ///< 表引用（支持 JOIN）
   vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件
   vector<unique_ptr<Expression>> group_by;     ///< group by clause
 };
@@ -277,6 +302,7 @@ enum SqlCommandFlag
   SCF_UPDATE,
   SCF_DELETE,
   SCF_CREATE_TABLE,
+  // 已添加, = 7
   SCF_DROP_TABLE,
   SCF_ANALYZE_TABLE,
   SCF_CREATE_INDEX,
