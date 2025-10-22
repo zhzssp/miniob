@@ -195,6 +195,7 @@ void HashJoinPhysicalOperator::set_join_fields(FieldExpr *left_field, FieldExpr 
   // 复制字段信息而不是存储指针
   left_join_field_ = left_field->field();
   right_join_field_ = right_field->field();
+  
 }
 
 void HashJoinPhysicalOperator::set_filter_expressions(const vector<unique_ptr<Expression>> &expressions)
@@ -232,9 +233,14 @@ unique_ptr<ValueListTuple> HashJoinPhysicalOperator::materialize_tuple(Tuple *tu
     rc = tuple->spec_at(i, spec);
     if (rc != RC::SUCCESS) {
       LOG_WARN("Failed to get spec at index %d: %s", i, strrc(rc));
-      // 创建一个默认的规范
-      spec = TupleCellSpec();
+      // 创建一个默认的规范，使用字段索引作为字段名
+      string field_name = std::to_string(i);
+      spec = TupleCellSpec("", field_name.c_str());
     }
+    
+    // 调试信息：显示 TupleCellSpec 的内容
+    //LOG_INFO("TupleCellSpec[%d]: table='%s', field='%s'", i, spec.table_name(), spec.field_name());
+    
     specs.push_back(spec);
   }
   
@@ -255,9 +261,11 @@ RC HashJoinPhysicalOperator::get_field_value(const Tuple &tuple, const Field &fi
     return RC::INVALID_ARGUMENT;
   }
   
+  
   RC rc = tuple.find_cell(spec, value);
   if (rc != RC::SUCCESS) {
     LOG_WARN("Failed to find field %s.%s in tuple: %s", field.table_name(), field.field_name(), strrc(rc));
+    
   }
   
   return rc;

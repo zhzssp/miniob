@@ -43,6 +43,9 @@ public:
   const vector<Table *> &tables() const { return tables_; }
   FilterStmt            *filter_stmt() const { return filter_stmt_; }
   FilterStmt            *join_filter_stmt() const { return join_filter_stmt_; }
+  FilterStmt            *get_table_join_filter(size_t table_index) const { 
+    return (table_index < table_join_filters_.size()) ? table_join_filters_[table_index] : nullptr; 
+  }
 
   vector<unique_ptr<Expression>> &query_expressions() { return query_expressions_; }
   vector<unique_ptr<Expression>> &group_by() { return group_by_; }
@@ -52,5 +55,6 @@ private:
   vector<Table *>                tables_;
   FilterStmt                    *filter_stmt_ = nullptr;
   FilterStmt                    *join_filter_stmt_ = nullptr;  ///< JOIN 条件过滤器
+  vector<FilterStmt*>            table_join_filters_;         ///< 每个表的 JOIN 条件过滤器
   vector<unique_ptr<Expression>> group_by_;
 };

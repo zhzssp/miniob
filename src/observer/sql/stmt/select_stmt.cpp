@@ -94,15 +94,6 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     
     // 处理 JOIN 条件
     if (table_ref.is_join && !table_ref.join_conditions.empty()) {
-      LOG_INFO("Found JOIN conditions for table %s: %zu conditions", table_name, table_ref.join_conditions.size());
-      for (const auto &join_cond : table_ref.join_conditions) {
-        LOG_INFO("JOIN condition: %s.%s %d %s.%s", 
-                 join_cond.left_attr.relation_name.c_str(),
-                 join_cond.left_attr.attribute_name.c_str(),
-                 join_cond.comp,
-                 join_cond.right_attr.relation_name.c_str(),
-                 join_cond.right_attr.attribute_name.c_str());
-      }
     }
   }
 
@@ -147,9 +138,11 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
   // 处理 JOIN 条件
   FilterStmt *join_filter_stmt = nullptr;
+  vector<FilterStmt*> table_join_filters; // 临时存储，稍后设置到 SelectStmt 对象中
+  
   if (!select_sql.table_references.empty()) {
-    // 收集所有 JOIN 条件
-    vector<ConditionSqlNode> join_conditions;
+    // 收集所有 JOIN 条件到一个全局的 FilterStmt 中
+    vector<ConditionSqlNode> all_join_conditions;
     for (const auto &table_ref : select_sql.table_references) {
       if (table_ref.is_join && !table_ref.join_conditions.empty()) {
         for (const auto &join_cond : table_ref.join_conditions) {
@@ -161,23 +154,28 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
           condition.right_attr = join_cond.right_attr;
           condition.right_value = join_cond.right_value;
           condition.comp = join_cond.comp;
-          join_conditions.push_back(condition);
+          all_join_conditions.push_back(condition);
         }
       }
     }
     
-    // 创建 JOIN 条件过滤器
-    if (!join_conditions.empty()) {
+    // 创建全局的 JOIN 条件过滤器
+    if (!all_join_conditions.empty()) {
       rc = FilterStmt::create(db,
           default_table,
           &table_map,
-          join_conditions.data(),
-          static_cast<int>(join_conditions.size()),
+          all_join_conditions.data(),
+          static_cast<int>(all_join_conditions.size()),
           join_filter_stmt);
       if (rc != RC::SUCCESS) {
         LOG_WARN("cannot construct join filter stmt");
         return rc;
       }
+    }
+    
+    // 为每个表创建空的 JOIN 条件过滤器（保持接口兼容性）
+    for (size_t k = 0; k < select_sql.table_references.size(); k++) {
+      table_join_filters.push_back(nullptr);
     }
   }
 
@@ -185,6 +183,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   SelectStmt *select_stmt = new SelectStmt();
 
   select_stmt->tables_.swap(tables);
+  select_stmt->table_join_filters_.swap(table_join_filters);
   select_stmt->query_expressions_.swap(bound_expressions);
   select_stmt->filter_stmt_ = filter_stmt;
   select_stmt->join_filter_stmt_ = join_filter_stmt;
