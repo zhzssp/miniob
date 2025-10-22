@@ -142,7 +142,108 @@ ComparisonExpr::~ComparisonExpr() {}
 RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &result) const
 {
   RC  rc         = RC::SUCCESS;
-  int cmp_result = left.compare(right);
+  int cmp_result = 0;
+
+  // 安全类型对齐：在比较前尽量将不同类型转换为可比较的同一类型
+  // 规则：
+  // - INTS vs FLOATS -> 都转为 FLOATS
+  // - CHARS vs numeric -> 若可解析为数字，则都转为 FLOATS；否则按不可比处理（结果为 false）
+  // - 其他不同类型 -> 不可比（结果为 false）
+  AttrType lt = left.attr_type();
+  AttrType rt = right.attr_type();
+
+  if (lt != rt) {
+    // INTS/FLOATS 对齐为浮点比较
+    if ((lt == AttrType::INTS && rt == AttrType::FLOATS) || (lt == AttrType::FLOATS && rt == AttrType::INTS)) {
+      Value l2 = left;
+      Value r2 = right;
+      if (lt == AttrType::INTS) {
+        // 提升左为float
+        Value tmp;
+        tmp.set_float(static_cast<float>(left.get_int()));
+        l2 = tmp;
+      }
+      if (rt == AttrType::INTS) {
+        Value tmp;
+        tmp.set_float(static_cast<float>(right.get_int()));
+        r2 = tmp;
+      }
+      cmp_result = l2.compare(r2);
+    } else if ((lt == AttrType::CHARS && (rt == AttrType::INTS || rt == AttrType::FLOATS)) ||
+               (rt == AttrType::CHARS && (lt == AttrType::INTS || lt == AttrType::FLOATS))) {
+      // 解析字符串为数字
+      auto parse_to_double = [](const Value &v, double &out, bool &ok) {
+        ok = false;
+        if (v.attr_type() == AttrType::FLOATS) {
+          out = static_cast<double>(v.get_float());
+          ok = true;
+          return;
+        }
+        if (v.attr_type() == AttrType::INTS) {
+          out = static_cast<double>(v.get_int());
+          ok = true;
+          return;
+        }
+        if (v.attr_type() == AttrType::CHARS) {
+          std::string s = v.to_string();
+          // 去除可能的引号
+          if (!s.empty() && s.front() == '\'' && s.back() == '\'' && s.size() >= 2) {
+            s = s.substr(1, s.size() - 2);
+          }
+          char *endptr = nullptr;
+          const char *cstr = s.c_str();
+          errno = 0;
+          double val = strtod(cstr, &endptr);
+          if (errno == 0 && endptr != cstr && *endptr == '\0') {
+            out = val;
+            ok = true;
+          } else if (s.size() == 1) {
+            // 单字符，按 ASCII 码进行数值比较
+            out = static_cast<unsigned char>(s[0]);
+            ok = true;
+          }
+          return;
+        }
+      };
+
+      double dl = 0.0, dr = 0.0;
+      bool ok_l = false, ok_r = false;
+      parse_to_double(left, dl, ok_l);
+      parse_to_double(right, dr, ok_r);
+      if (ok_l && ok_r) {
+        Value l2; l2.set_float(static_cast<float>(dl));
+        Value r2; r2.set_float(static_cast<float>(dr));
+        cmp_result = l2.compare(r2);
+      } else {
+        // 无法比较的异类型，返回 false 结果
+        cmp_result = 0;
+        switch (comp_) {
+          case EQUAL_TO:      result = false; return RC::SUCCESS;
+          case NOT_EQUAL:     result = false; return RC::SUCCESS;
+          case LESS_EQUAL:    result = false; return RC::SUCCESS;
+          case LESS_THAN:     result = false; return RC::SUCCESS;
+          case GREAT_EQUAL:   result = false; return RC::SUCCESS;
+          case GREAT_THAN:    result = false; return RC::SUCCESS;
+          default: break;
+        }
+      }
+    } else {
+      // 未支持的跨类型比较，按不可比处理
+      cmp_result = 0;
+      switch (comp_) {
+        case EQUAL_TO:      result = false; return RC::SUCCESS;
+        case NOT_EQUAL:     result = false; return RC::SUCCESS;
+        case LESS_EQUAL:    result = false; return RC::SUCCESS;
+        case LESS_THAN:     result = false; return RC::SUCCESS;
+        case GREAT_EQUAL:   result = false; return RC::SUCCESS;
+        case GREAT_THAN:    result = false; return RC::SUCCESS;
+        default: break;
+      }
+    }
+  } else {
+    // 相同类型，直接比较
+    cmp_result = left.compare(right);
+  }
   result         = false;
   switch (comp_) {
     case EQUAL_TO: {
