@@ -689,6 +689,26 @@ join_condition:
       delete $1;
       delete $3;
     }
+    | rel_attr comp_op value {
+      $$ = new ConditionSqlNode();
+      $$->left_is_attr = true;
+      $$->left_attr = *$1;
+      $$->right_is_attr = false;
+      $$->right_value = *$3;
+      $$->comp = $2;
+      delete $1;
+      delete $3;
+    }
+    | value comp_op rel_attr {
+      $$ = new ConditionSqlNode();
+      $$->left_is_attr = false;
+      $$->left_value = *$1;
+      $$->right_is_attr = true;
+      $$->right_attr = *$3;
+      $$->comp = $2;
+      delete $1;
+      delete $3;
+    }
     ;
 
 // 添加 JOIN 条件列表处理
@@ -696,8 +716,12 @@ join_condition_list:
     join_condition {
       $$ = new vector<JoinConditionSqlNode>();
       JoinConditionSqlNode join_cond;
+      join_cond.left_is_attr = $1->left_is_attr;
       join_cond.left_attr = $1->left_attr;
+      join_cond.left_value = $1->left_value;
+      join_cond.right_is_attr = $1->right_is_attr;
       join_cond.right_attr = $1->right_attr;
+      join_cond.right_value = $1->right_value;
       join_cond.comp = $1->comp;
       $$->push_back(join_cond);
       delete $1;
@@ -709,8 +733,12 @@ join_condition_list:
         $$ = new vector<JoinConditionSqlNode>();
       }
       JoinConditionSqlNode join_cond;
+      join_cond.left_is_attr = $3->left_is_attr;
       join_cond.left_attr = $3->left_attr;
+      join_cond.left_value = $3->left_value;
+      join_cond.right_is_attr = $3->right_is_attr;
       join_cond.right_attr = $3->right_attr;
+      join_cond.right_value = $3->right_value;
       join_cond.comp = $3->comp;
       $$->push_back(join_cond);
       delete $3;

@@ -102,6 +102,14 @@ RC HashJoinPhysicalOperator::next()
     return rc;
   }
 
+  // 应用过滤条件
+  if (!filter_expressions_.empty()) {
+    if (!evaluate_filter_conditions()) {
+      // 当前记录不满足过滤条件，继续下一个匹配
+      return next();
+    }
+  }
+
   return RC::SUCCESS;
 }
 
@@ -138,6 +146,14 @@ void HashJoinPhysicalOperator::set_join_fields(FieldExpr *left_field, FieldExpr 
   // 复制字段信息而不是存储指针
   left_join_field_ = left_field->field();
   right_join_field_ = right_field->field();
+}
+
+void HashJoinPhysicalOperator::set_filter_expressions(const vector<unique_ptr<Expression>> &expressions)
+{
+  // 复制过滤条件
+  for (const auto &expr : expressions) {
+    filter_expressions_.push_back(expr->copy());
+  }
 }
 
 unique_ptr<ValueListTuple> HashJoinPhysicalOperator::materialize_tuple(Tuple *tuple)
@@ -196,6 +212,26 @@ RC HashJoinPhysicalOperator::get_field_value(const Tuple &tuple, const Field &fi
   }
   
   return rc;
+}
+
+bool HashJoinPhysicalOperator::evaluate_filter_conditions()
+{
+  // 评估所有过滤条件，所有条件都必须为真
+  for (const auto &expr : filter_expressions_) {
+    Value result;
+    RC rc = expr->get_value(joined_tuple_, result);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("Failed to evaluate filter condition: %s", strrc(rc));
+      return false;
+    }
+    
+    // 检查结果是否为真
+    if (result.attr_type() == AttrType::UNDEFINED || !result.get_boolean()) {
+      return false;
+    }
+  }
+  
+  return true;
 }
 
 RC HashJoinPhysicalOperator::build_hash_table()
