@@ -27,6 +27,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/table_get_logical_operator.h"
 #include "sql/operator/group_by_logical_operator.h"
 
+#include "sql/expr/expression.h"
+
 #include "sql/stmt/calc_stmt.h"
 #include "sql/stmt/delete_stmt.h"
 #include "sql/stmt/explain_stmt.h"
@@ -146,6 +148,11 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       }
       
       table_oper = unique_ptr<LogicalOperator>(join_oper);
+      
+      // 如果有过滤条件，将其设置到 JoinLogicalOperator 中
+      if (predicate_oper) {
+        join_oper->add_predicate_op(predicate_oper.get());
+      }
     }
   }
 

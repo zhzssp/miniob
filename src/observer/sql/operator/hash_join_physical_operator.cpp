@@ -65,6 +65,55 @@ RC HashJoinPhysicalOperator::next()
     return RC::RECORD_EOF;
   }
 
+  // 检查是否使用嵌套循环行为（没有等值条件）
+  if (left_join_field_.meta() == nullptr) {
+    // 嵌套循环行为：遍历左表和右表的所有组合
+    while (true) {
+      RC rc = RC::SUCCESS;
+      
+      // 获取下一个左表记录
+      if (left_tuple_ == nullptr) {
+        rc = left_->next();
+        if (rc != RC::SUCCESS) {
+          if (rc == RC::RECORD_EOF) {
+            left_exhausted_ = true;
+            return RC::RECORD_EOF;
+          }
+          return rc;
+        }
+        left_tuple_ = left_->current_tuple();
+        joined_tuple_.set_left(left_tuple_);
+      }
+      
+      // 获取下一个右表记录
+      rc = right_->next();
+      if (rc != RC::SUCCESS) {
+        if (rc == RC::RECORD_EOF) {
+          // 右表遍历完，重置左表和右表
+          left_tuple_ = nullptr;
+          right_->close();
+          right_->open(trx_);
+          continue; // 继续循环获取下一个左表记录
+        }
+        return rc;
+      }
+      
+      right_tuple_ = right_->current_tuple();
+      joined_tuple_.set_right(right_tuple_);
+      
+      // 应用过滤条件
+      if (!filter_expressions_.empty()) {
+        if (!evaluate_filter_conditions()) {
+          // 当前记录不满足过滤条件，继续下一个匹配
+          continue;
+        }
+      }
+      
+      return RC::SUCCESS;
+    }
+  }
+
+  // 正常的 Hash Join 行为
   // 如果当前没有匹配的记录，尝试获取下一个左表记录
   if (current_matches_ == nullptr || current_match_index_ >= current_matches_->size()) {
     RC rc = probe_hash_table();
@@ -241,8 +290,10 @@ RC HashJoinPhysicalOperator::build_hash_table()
   }
 
   if (right_join_field_.meta() == nullptr) {
-    LOG_WARN("Right join field not set, cannot build hash table");
-    return RC::INTERNAL;
+    //LOG_WARN("Right join field not set, using nested loop join behavior");
+    // 没有等值条件时，不构建哈希表，直接返回成功
+    hash_table_built_ = true;
+    return RC::SUCCESS;
   }
   
   // 遍历右表，构建哈希表
@@ -288,8 +339,26 @@ RC HashJoinPhysicalOperator::build_hash_table()
 RC HashJoinPhysicalOperator::probe_hash_table()
 {
   if (left_join_field_.meta() == nullptr) {
-    LOG_WARN("Left join field not set, cannot probe hash table");
-    return RC::INTERNAL;
+    //LOG_WARN("Left join field not set, using nested loop join behavior");
+    // 没有等值条件时，直接获取下一个右表记录
+    RC rc = right_->next();
+    if (rc != RC::SUCCESS) {
+      if (rc == RC::RECORD_EOF) {
+        right_exhausted_ = true;
+        return RC::RECORD_EOF;
+      }
+      return rc;
+    }
+    
+    right_tuple_ = right_->current_tuple();
+    if (right_tuple_ == nullptr) {
+      return RC::SUCCESS;
+    }
+    
+    // 设置当前匹配为单个记录
+    current_matches_ = nullptr; // 表示使用嵌套循环行为
+    current_match_index_ = 0;
+    return RC::SUCCESS;
   }
 
   // 获取下一个左表记录

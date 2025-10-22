@@ -360,15 +360,10 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
       }
     }
     
-    // 设置过滤条件 - 从 JoinLogicalOperator 的子操作符中获取 PredicateLogicalOperator
-    for (const auto &child_oper : child_opers) {
-      if (child_oper->type() == LogicalOperatorType::PREDICATE) {
-        auto *predicate_oper = dynamic_cast<PredicateLogicalOperator*>(child_oper.get());
-        if (predicate_oper != nullptr) {
-          hash_join_oper->set_filter_expressions(predicate_oper->expressions());
-          break;
-        }
-      }
+    // 设置过滤条件 - 从 JoinLogicalOperator 的 predicate_op_ 中获取
+    auto *predicate_oper = dynamic_cast<PredicateLogicalOperator*>(join_oper.get_predicate_op());
+    if (predicate_oper != nullptr) {
+      hash_join_oper->set_filter_expressions(predicate_oper->expressions());
     }
     
     for (auto &child_oper : child_opers) {
@@ -406,33 +401,10 @@ bool PhysicalPlanGenerator::can_use_hash_join(JoinLogicalOperator &join_oper)
 {
   //LOG_INFO("Checking if can use hash join...");
   
-  // 检查 JOIN 条件
-  const auto &join_predicates = join_oper.get_join_predicates();
-  
-  //LOG_INFO("Join predicates count: %zu", join_predicates.size());
-  
-  if (join_predicates.empty()) {
-    LOG_INFO("No join predicates found, cannot use hash join");
-    return false;
-  }
-
-  // 检查所有条件都是比较表达式
-  for (const auto &predicate : join_predicates) {
-    //LOG_INFO("Predicate type: %d", static_cast<int>(predicate->type()));
-    
-    if (predicate->type() != ExprType::COMPARISON) {
-      LOG_INFO("Non-comparison predicate found, cannot use hash join");
-      return false;
-    }
-    
-    auto comp_expr = dynamic_cast<ComparisonExpr*>(predicate.get());
-    if (comp_expr == nullptr) {
-      LOG_INFO("Failed to cast to ComparisonExpr, cannot use hash join");
-      return false;
-    }
-  }
-
-  //LOG_INFO("All predicates are comparison expressions, can use hash join");
+  // 总是使用 Hash Join，因为它可以处理所有情况：
+  // 1. 等值条件：使用正常的 Hash Join 算法
+  // 2. 非等值条件：退化为 Nested Loop Join 行为
+  // 3. 混合条件：Hash Join + 过滤
   return true;
 }
 
