@@ -154,10 +154,12 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
       if (table_ref.is_join && !table_ref.join_conditions.empty()) {
         for (const auto &join_cond : table_ref.join_conditions) {
           ConditionSqlNode condition;
-          condition.left_is_attr = true;
+          condition.left_is_attr = join_cond.left_is_attr;
           condition.left_attr = join_cond.left_attr;
-          condition.right_is_attr = true;
+          condition.left_value = join_cond.left_value;
+          condition.right_is_attr = join_cond.right_is_attr;
           condition.right_attr = join_cond.right_attr;
+          condition.right_value = join_cond.right_value;
           condition.comp = join_cond.comp;
           join_conditions.push_back(condition);
         }

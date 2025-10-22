@@ -82,9 +82,13 @@ struct ConditionSqlNode
  */
 struct JoinConditionSqlNode
 {
-  RelAttrSqlNode left_attr;   ///< 左表属性
-  RelAttrSqlNode right_attr;  ///< 右表属性
-  CompOp         comp;        ///< 比较操作符
+  int left_is_attr;              ///< TRUE if left-hand side is an attribute
+  RelAttrSqlNode left_attr;      ///< 左表属性 (if left_is_attr = true)
+  Value left_value;              ///< 左表值 (if left_is_attr = false)
+  int right_is_attr;             ///< TRUE if right-hand side is an attribute
+  RelAttrSqlNode right_attr;     ///< 右表属性 (if right_is_attr = true)
+  Value right_value;             ///< 右表值 (if right_is_attr = false)
+  CompOp comp;                   ///< 比较操作符
 };
 
 /**

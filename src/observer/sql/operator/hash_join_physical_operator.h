@@ -46,6 +46,9 @@ public:
 
   // 设置 JOIN 字段表达式
   void set_join_fields(FieldExpr *left_field, FieldExpr *right_field);
+  
+  // 设置额外的过滤条件
+  void set_filter_expressions(const vector<unique_ptr<Expression>> &expressions);
 
 private:
   // 构建哈希表（使用右表）
@@ -62,6 +65,9 @@ private:
   
   // 从 Tuple 中获取字段值
   RC get_field_value(const Tuple &tuple, const Field &field, Value &value);
+  
+  // 评估过滤条件
+  bool evaluate_filter_conditions();
 
   Trx *trx_ = nullptr;
   
@@ -82,6 +88,9 @@ private:
   unordered_map<string, vector<unique_ptr<ValueListTuple>>> hash_table_;  // 哈希表，存储物化的右表记录
   vector<unique_ptr<ValueListTuple>>* current_matches_ = nullptr;        // 当前匹配的右表记录（指向哈希表中的数据）
   size_t current_match_index_ = 0;                                       // 当前匹配记录索引
+  
+  // 过滤条件
+  vector<unique_ptr<Expression>> filter_expressions_;
   
   // 状态标志
   bool hash_table_built_ = false;       // 哈希表是否已构建

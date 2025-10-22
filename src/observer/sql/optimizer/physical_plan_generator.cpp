@@ -18,6 +18,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/aggregate_vec_physical_operator.h"
 #include "sql/operator/calc_logical_operator.h"
 #include "sql/operator/calc_physical_operator.h"
+#include "sql/operator/predicate_logical_operator.h"
 #include "sql/operator/delete_logical_operator.h"
 #include "sql/operator/delete_physical_operator.h"
 #include "sql/operator/explain_logical_operator.h"
@@ -345,15 +346,27 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
     // 创建哈希连接操作符
     unique_ptr<HashJoinPhysicalOperator> hash_join_oper(new HashJoinPhysicalOperator());
     
-    // 设置 JOIN 字段
+    // 设置 JOIN 字段 - 找到第一个等值条件
     const auto &join_predicates = join_oper.get_join_predicates();
-    if (!join_predicates.empty()) {
-      auto *comp_expr = dynamic_cast<ComparisonExpr*>(join_predicates[0].get());
+    for (const auto &predicate : join_predicates) {
+      auto *comp_expr = dynamic_cast<ComparisonExpr*>(predicate.get());
       if (comp_expr != nullptr && comp_expr->comp() == CompOp::EQUAL_TO) {
         auto *left_field = dynamic_cast<FieldExpr*>(comp_expr->left().get());
         auto *right_field = dynamic_cast<FieldExpr*>(comp_expr->right().get());
         if (left_field != nullptr && right_field != nullptr) {
           hash_join_oper->set_join_fields(left_field, right_field);
+          break; // 只使用第一个等值条件
+        }
+      }
+    }
+    
+    // 设置过滤条件 - 从 JoinLogicalOperator 的子操作符中获取 PredicateLogicalOperator
+    for (const auto &child_oper : child_opers) {
+      if (child_oper->type() == LogicalOperatorType::PREDICATE) {
+        auto *predicate_oper = dynamic_cast<PredicateLogicalOperator*>(child_oper.get());
+        if (predicate_oper != nullptr) {
+          hash_join_oper->set_filter_expressions(predicate_oper->expressions());
+          break;
         }
       }
     }
@@ -393,7 +406,7 @@ bool PhysicalPlanGenerator::can_use_hash_join(JoinLogicalOperator &join_oper)
 {
   //LOG_INFO("Checking if can use hash join...");
   
-  // 检查 JOIN 条件是否为等值连接
+  // 检查 JOIN 条件
   const auto &join_predicates = join_oper.get_join_predicates();
   
   //LOG_INFO("Join predicates count: %zu", join_predicates.size());
@@ -403,7 +416,7 @@ bool PhysicalPlanGenerator::can_use_hash_join(JoinLogicalOperator &join_oper)
     return false;
   }
 
-  // 检查所有 JOIN 条件都是等值连接
+  // 检查所有条件都是比较表达式
   for (const auto &predicate : join_predicates) {
     //LOG_INFO("Predicate type: %d", static_cast<int>(predicate->type()));
     
@@ -417,16 +430,9 @@ bool PhysicalPlanGenerator::can_use_hash_join(JoinLogicalOperator &join_oper)
       LOG_INFO("Failed to cast to ComparisonExpr, cannot use hash join");
       return false;
     }
-    
-    //LOG_INFO("Comparison operator: %d", static_cast<int>(comp_expr->comp()));
-    
-    if (comp_expr->comp() != CompOp::EQUAL_TO) {
-      LOG_INFO("Non-equality comparison found, cannot use hash join");
-      return false;
-    }
   }
 
-  //LOG_INFO("All join predicates are equality comparisons, can use hash join");
+  //LOG_INFO("All predicates are comparison expressions, can use hash join");
   return true;
 }
 
