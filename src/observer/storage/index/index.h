@@ -44,6 +44,12 @@ public:
   {
     return RC::UNSUPPORTED;
   }
+
+  virtual RC clear()
+  {
+    return RC::UNSUPPORTED;
+  }
+
   virtual RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
   {
     return RC::UNSUPPORTED;

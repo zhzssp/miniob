@@ -45,6 +45,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/update_logical_operator.h"
 #include "sql/operator/update_physical_operator.h"
 #include "sql/optimizer/physical_plan_generator.h"
+#include "sql/operator/hash_join_physical_operator.h"
 
 using namespace std;
 
@@ -338,9 +339,39 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
     LOG_WARN("join operator should have 2 children, but have %d", child_opers.size());
     return RC::INTERNAL;
   }
+  //LOG_INFO("Session hash_join_on: %s", session->hash_join_on() ? "true" : "false");
   if (session->hash_join_on() && can_use_hash_join(join_oper)) {
-    // your code here
+    //LOG_INFO("Using Hash Join for this query");
+    // 创建哈希连接操作符
+    unique_ptr<HashJoinPhysicalOperator> hash_join_oper(new HashJoinPhysicalOperator());
+    
+    // 设置 JOIN 字段
+    const auto &join_predicates = join_oper.get_join_predicates();
+    if (!join_predicates.empty()) {
+      auto *comp_expr = dynamic_cast<ComparisonExpr*>(join_predicates[0].get());
+      if (comp_expr != nullptr && comp_expr->comp() == CompOp::EQUAL_TO) {
+        auto *left_field = dynamic_cast<FieldExpr*>(comp_expr->left().get());
+        auto *right_field = dynamic_cast<FieldExpr*>(comp_expr->right().get());
+        if (left_field != nullptr && right_field != nullptr) {
+          hash_join_oper->set_join_fields(left_field, right_field);
+        }
+      }
+    }
+    
+    for (auto &child_oper : child_opers) {
+      unique_ptr<PhysicalOperator> child_physical_oper;
+      rc = create(*child_oper, child_physical_oper, session);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to create physical child oper. rc=%s", strrc(rc));
+        return rc;
+      }
+      hash_join_oper->add_child(std::move(child_physical_oper));
+    }
+    
+    oper = std::move(hash_join_oper);
+    //LOG_INFO("Created HashJoinPhysicalOperator");
   } else {
+    LOG_INFO("Using Nested Loop Join for this query");
     unique_ptr<PhysicalOperator> join_physical_oper(new NestedLoopJoinPhysicalOperator());
     for (auto &child_oper : child_opers) {
       unique_ptr<PhysicalOperator> child_physical_oper;
@@ -360,8 +391,43 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
 
 bool PhysicalPlanGenerator::can_use_hash_join(JoinLogicalOperator &join_oper)
 {
-  // your code here
-  return false;
+  //LOG_INFO("Checking if can use hash join...");
+  
+  // 检查 JOIN 条件是否为等值连接
+  const auto &join_predicates = join_oper.get_join_predicates();
+  
+  //LOG_INFO("Join predicates count: %zu", join_predicates.size());
+  
+  if (join_predicates.empty()) {
+    LOG_INFO("No join predicates found, cannot use hash join");
+    return false;
+  }
+
+  // 检查所有 JOIN 条件都是等值连接
+  for (const auto &predicate : join_predicates) {
+    //LOG_INFO("Predicate type: %d", static_cast<int>(predicate->type()));
+    
+    if (predicate->type() != ExprType::COMPARISON) {
+      LOG_INFO("Non-comparison predicate found, cannot use hash join");
+      return false;
+    }
+    
+    auto comp_expr = dynamic_cast<ComparisonExpr*>(predicate.get());
+    if (comp_expr == nullptr) {
+      LOG_INFO("Failed to cast to ComparisonExpr, cannot use hash join");
+      return false;
+    }
+    
+    //LOG_INFO("Comparison operator: %d", static_cast<int>(comp_expr->comp()));
+    
+    if (comp_expr->comp() != CompOp::EQUAL_TO) {
+      LOG_INFO("Non-equality comparison found, cannot use hash join");
+      return false;
+    }
+  }
+
+  //LOG_INFO("All join predicates are equality comparisons, can use hash join");
+  return true;
 }
 
 RC PhysicalPlanGenerator::create_plan(CalcLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session* session)

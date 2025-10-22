@@ -43,3 +43,8 @@ RC LsmTableEngine::open()
 {
   return RC::UNIMPLEMENTED;
 }
+
+RC LsmTableEngine::close()
+{
+  return RC::UNIMPLEMENTED;
+}
