@@ -346,24 +346,84 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
     // 创建哈希连接操作符
     unique_ptr<HashJoinPhysicalOperator> hash_join_oper(new HashJoinPhysicalOperator());
     
-    // 设置 JOIN 字段 - 找到第一个等值条件
+    // 智能选择 JOIN 字段 - 找到与当前 JOIN 相关的等值条件
     const auto &join_predicates = join_oper.get_join_predicates();
+    
     for (const auto &predicate : join_predicates) {
       auto *comp_expr = dynamic_cast<ComparisonExpr*>(predicate.get());
       if (comp_expr != nullptr && comp_expr->comp() == CompOp::EQUAL_TO) {
         auto *left_field = dynamic_cast<FieldExpr*>(comp_expr->left().get());
         auto *right_field = dynamic_cast<FieldExpr*>(comp_expr->right().get());
         if (left_field != nullptr && right_field != nullptr) {
-          hash_join_oper->set_join_fields(left_field, right_field);
-          break; // 只使用第一个等值条件
+          // 检查字段是否与当前 JOIN 相关
+          const char *left_table = left_field->field().table_name();
+          const char *right_table = right_field->field().table_name();
+          
+          
+          // 获取当前 JOIN 的子操作符
+          const auto &children = join_oper.children();
+          if (children.size() >= 2) {
+            // 检查字段来源：是否分别来自左/右子树
+            bool left_from_left = false;
+            bool right_from_right = false;
+            bool left_from_right = false;
+            bool right_from_left = false;
+
+            // 检查左子树（可能是单个表或之前 JOIN 的结果）
+            if (children[0]->type() == LogicalOperatorType::TABLE_GET) {
+              auto *left_table_get = dynamic_cast<TableGetLogicalOperator*>(children[0].get());
+              if (left_table_get != nullptr) {
+                const char *lt_name = left_table_get->table()->name();
+                if (strcmp(lt_name, left_table) == 0) {
+                  left_from_left = true;
+                }
+                if (strcmp(lt_name, right_table) == 0) {
+                  right_from_left = true;
+                }
+              }
+            } else if (children[0]->type() == LogicalOperatorType::JOIN) {
+              // 左子树是 JOIN 结果，保守认为可能包含两侧字段
+              left_from_left = true;
+              right_from_left = true;
+            }
+
+            // 检查右子树（当前表）
+            if (children[1]->type() == LogicalOperatorType::TABLE_GET) {
+              auto *right_table_get = dynamic_cast<TableGetLogicalOperator*>(children[1].get());
+              if (right_table_get != nullptr) {
+                const char *rt_name = right_table_get->table()->name();
+                if (strcmp(rt_name, right_table) == 0) {
+                  right_from_right = true;
+                }
+                if (strcmp(rt_name, left_table) == 0) {
+                  left_from_right = true;
+                }
+              }
+            }
+
+
+            // 顺序匹配：左字段来自左子树，右字段来自右子树
+            if (left_from_left && right_from_right) {
+              hash_join_oper->set_join_fields(left_field, right_field);
+              break;
+            }
+            // 反向匹配：左字段来自右子树，右字段来自左子树 -> 交换
+            if (left_from_right && right_from_left) {
+              hash_join_oper->set_join_fields(right_field, left_field);
+              break;
+            }
+          }
         }
       }
     }
     
     // 设置过滤条件 - 从 JoinLogicalOperator 的 predicate_op_ 中获取
-    auto *predicate_oper = dynamic_cast<PredicateLogicalOperator*>(join_oper.get_predicate_op());
-    if (predicate_oper != nullptr) {
-      hash_join_oper->set_filter_expressions(predicate_oper->expressions());
+    auto *predicate_op = join_oper.get_predicate_op();
+    if (predicate_op != nullptr) {
+      auto *predicate_oper = dynamic_cast<PredicateLogicalOperator*>(predicate_op);
+      if (predicate_oper != nullptr) {
+        hash_join_oper->set_filter_expressions(predicate_oper->expressions());
+      }
     }
     
     for (auto &child_oper : child_opers) {
@@ -379,7 +439,6 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
     oper = std::move(hash_join_oper);
     //LOG_INFO("Created HashJoinPhysicalOperator");
   } else {
-    LOG_INFO("Using Nested Loop Join for this query");
     unique_ptr<PhysicalOperator> join_physical_oper(new NestedLoopJoinPhysicalOperator());
     for (auto &child_oper : child_opers) {
       unique_ptr<PhysicalOperator> child_physical_oper;

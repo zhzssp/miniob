@@ -103,9 +103,10 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   }
 
   const vector<Table *> &tables = select_stmt->tables();
-  for (Table *table : tables) {
-
+  for (size_t i = 0; i < tables.size(); i++) {
+    Table *table = tables[i];
     unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_ONLY));
+    
     if (table_oper == nullptr) {
       table_oper = std::move(table_get_oper);
     } else {
@@ -113,34 +114,80 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       join_oper->add_child(std::move(table_oper));
       join_oper->add_child(std::move(table_get_oper));
       
-      // 添加 JOIN 条件到 JoinLogicalOperator
+      // 精确条件分配：只处理与当前 JOIN 相关的条件
       if (select_stmt->join_filter_stmt() != nullptr) {
         const auto &filter_units = select_stmt->join_filter_stmt()->filter_units();
+        
         for (const auto &filter_unit : filter_units) {
-          // 将 FilterUnit 转换为 Expression
-          auto left_expr = LogicalPlanGenerator::create_expression_from_filter_obj(filter_unit->left());
-          auto right_expr = LogicalPlanGenerator::create_expression_from_filter_obj(filter_unit->right());
-          if (left_expr != nullptr && right_expr != nullptr) {
-            auto comp_expr = make_unique<ComparisonExpr>(filter_unit->comp(), std::move(left_expr), std::move(right_expr));
+          // 检查条件是否与当前 JOIN 相关
+          bool is_relevant = false;
+          
+          // 获取当前 JOIN 涉及的表
+          Table *left_table = nullptr;
+          Table *right_table = table; // 右表是当前表
+          
+          
+          // 左子树：可能是单个表或之前 JOIN 的结果
+          if (table_oper != nullptr && table_oper->type() == LogicalOperatorType::TABLE_GET) {
+            auto *left_table_get = dynamic_cast<TableGetLogicalOperator*>(table_oper.get());
+            if (left_table_get != nullptr) {
+              left_table = left_table_get->table();
+            }
+          } else if (table_oper != nullptr && table_oper->type() == LogicalOperatorType::JOIN) {
+            // 对于 JOIN 类型的左子树，我们无法直接确定左表
+            // 但我们可以通过检查条件中的字段来确定
+            // 暂时跳过左表检查，让条件匹配逻辑自己处理
+          }
+          
+          // 检查条件是否涉及当前 JOIN 的表
+          if (filter_unit->left().is_attr && filter_unit->right().is_attr) {
+            const Table *left_field_table = filter_unit->left().field.table();
+            const Table *right_field_table = filter_unit->right().field.table();
             
-            // 只有等值条件用于 JOIN，非等值条件用于后续过滤
-            if (filter_unit->comp() == CompOp::EQUAL_TO) {
-              join_oper->add_join_predicate(std::move(comp_expr));
-            } else {
-              // 非等值条件添加到 predicate_oper 中
-              if (predicate_oper == nullptr) {
-                predicate_oper = make_unique<PredicateLogicalOperator>(std::move(comp_expr));
+            
+            // 条件涉及左表和右表
+            if (left_table != nullptr) {
+              // 左表已知，检查条件是否涉及左表和右表
+              if ((left_field_table == left_table && right_field_table == right_table) ||
+                  (left_field_table == right_table && right_field_table == left_table)) {
+                is_relevant = true;
               } else {
-                // 如果已经有 predicate_oper，需要创建 ConjunctionExpr 来组合条件
-                auto existing_expr = std::move(predicate_oper->expressions()[0]);
-                predicate_oper->expressions().clear();
-                
-                vector<unique_ptr<Expression>> conjunction_children;
-                conjunction_children.push_back(std::move(existing_expr));
-                conjunction_children.push_back(std::move(comp_expr));
-                
-                auto conjunction_expr = make_unique<ConjunctionExpr>(ConjunctionExpr::Type::AND, conjunction_children);
-                predicate_oper = make_unique<PredicateLogicalOperator>(std::move(conjunction_expr));
+              }
+            } else {
+              // 左表未知（可能是 JOIN 结果），检查条件是否涉及右表
+              if (left_field_table == right_table || right_field_table == right_table) {
+                is_relevant = true;
+              } else {
+              }
+            }
+          }
+          
+          if (is_relevant) {
+            // 将 FilterUnit 转换为 Expression
+            auto left_expr = LogicalPlanGenerator::create_expression_from_filter_obj(filter_unit->left());
+            auto right_expr = LogicalPlanGenerator::create_expression_from_filter_obj(filter_unit->right());
+            if (left_expr != nullptr && right_expr != nullptr) {
+              auto comp_expr = make_unique<ComparisonExpr>(filter_unit->comp(), std::move(left_expr), std::move(right_expr));
+              
+              // 只有等值条件用于 JOIN，非等值条件用于后续过滤
+              if (filter_unit->comp() == CompOp::EQUAL_TO) {
+                join_oper->add_join_predicate(std::move(comp_expr));
+              } else {
+                // 非等值条件添加到 predicate_oper 中
+                if (predicate_oper == nullptr) {
+                  predicate_oper = make_unique<PredicateLogicalOperator>(std::move(comp_expr));
+                } else {
+                  // 如果已经有 predicate_oper，需要创建 ConjunctionExpr 来组合条件
+                  auto existing_expr = std::move(predicate_oper->expressions()[0]);
+                  predicate_oper->expressions().clear();
+                  
+                  vector<unique_ptr<Expression>> conjunction_children;
+                  conjunction_children.push_back(std::move(existing_expr));
+                  conjunction_children.push_back(std::move(comp_expr));
+                  
+                  auto conjunction_expr = make_unique<ConjunctionExpr>(ConjunctionExpr::Type::AND, conjunction_children);
+                  predicate_oper = make_unique<PredicateLogicalOperator>(std::move(conjunction_expr));
+                }
               }
             }
           }
