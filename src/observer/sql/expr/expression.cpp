@@ -194,7 +194,8 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
           const char *cstr = s.c_str();
           errno = 0;
           double val = strtod(cstr, &endptr);
-          if (errno == 0 && endptr != cstr && *endptr == '\0') {
+          if (errno == 0 && endptr != cstr) {
+            // 允许部分数字解析，如 '16a' -> 16.0
             out = val;
             ok = true;
           } else if (s.size() == 1) {
