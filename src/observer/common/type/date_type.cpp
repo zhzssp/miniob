@@ -13,18 +13,20 @@
 
 int DateType::compare(const Value &left, const Value &right) const
 {
-  ASSERT(left.attr_type() == AttrType::DATES && right.attr_type() == AttrType::DATES, "invalid type");
-  int i1 = left.value_.int_value_;
-  int i2 = right.value_.int_value_;
-  if (i1 > i2)
-  {
-    return 1;
-  }
-  if (i1 < i2)
-  {
-    return -1;
-  }
-  return 0;
+  // ASSERT(left.attr_type() == AttrType::DATES && right.attr_type() == AttrType::DATES, "invalid type");
+  // int i1 = left.value_.int_value_;
+  // int i2 = right.value_.int_value_;
+  // if (i1 > i2)
+  // {
+  //   return 1;
+  // }
+  // if (i1 < i2)
+  // {
+  //   return -1;
+  // }
+  // return 0;
+  LOG_INFO("compare from DateType");
+  return common::compare_int((void *)&left.value_.int_value_, (void *)&right.value_.int_value_);
 }
 
 RC DateType::set_value_from_str(Value &val, const string &data) const
@@ -98,11 +100,11 @@ int DateType::cast_cost(AttrType type)
 
 RC DateType::to_string(const Value &val, string &result) const
 {
-  int          year  = val.value_.int_value_ / 10000;
-  int          month = val.value_.int_value_ % 10000 / 100;
-  int          day   = val.value_.int_value_ % 100;
+  int year  = val.value_.int_value_ / 10000;
+  int month = val.value_.int_value_ % 10000 / 100;
+  int day   = val.value_.int_value_ % 100;
   stringstream ss;
-  ss << year << "-" << setfill('0') << setw(2) << month << "-" << setw(2) << day;
+  ss << setw(4) <<year << "-" << setfill('0') << setw(2) << month << "-" << setw(2) << day;
   result = ss.str();
   return RC::SUCCESS;
 }
