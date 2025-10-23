@@ -48,8 +48,7 @@ RC CommandExecutor::execute(SQLStageEvent *sql_event)
     case StmtType::UPDATE: {
       UpdateExecutor executor;
       rc = executor.execute(sql_event);
-      break;
-    }
+    } break;
 
     case StmtType::DROP_TABLE: {
       DropTableExecutor executor;

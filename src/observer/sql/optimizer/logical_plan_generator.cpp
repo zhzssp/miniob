@@ -26,7 +26,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/project_logical_operator.h"
 #include "sql/operator/table_get_logical_operator.h"
 #include "sql/operator/group_by_logical_operator.h"
-#include "sql/operator/update_logical_operator.h"
+
+#include "sql/expr/expression.h"
 
 #include "sql/stmt/calc_stmt.h"
 #include "sql/stmt/delete_stmt.h"
@@ -35,7 +36,6 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/insert_stmt.h"
 #include "sql/stmt/select_stmt.h"
 #include "sql/stmt/stmt.h"
-#include "sql/stmt/update_stmt.h"
 
 #include "sql/expr/expression_iterator.h"
 
@@ -68,12 +68,6 @@ RC LogicalPlanGenerator::create(Stmt *stmt, unique_ptr<LogicalOperator> &logical
       DeleteStmt *delete_stmt = static_cast<DeleteStmt *>(stmt);
 
       rc = create_plan(delete_stmt, logical_operator);
-    } break;
-
-    case StmtType::UPDATE: {
-      UpdateStmt *update_stmt = static_cast<UpdateStmt *>(stmt);
-
-      rc = create_plan(update_stmt, logical_operator);
     } break;
 
     case StmtType::EXPLAIN: {
@@ -109,16 +103,103 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   }
 
   const vector<Table *> &tables = select_stmt->tables();
-  for (Table *table : tables) {
-
+  for (size_t i = 0; i < tables.size(); i++) {
+    Table *table = tables[i];
     unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_ONLY));
+    
     if (table_oper == nullptr) {
       table_oper = std::move(table_get_oper);
     } else {
       JoinLogicalOperator *join_oper = new JoinLogicalOperator;
       join_oper->add_child(std::move(table_oper));
       join_oper->add_child(std::move(table_get_oper));
+      
+      // 精确条件分配：只处理与当前 JOIN 相关的条件
+      if (select_stmt->join_filter_stmt() != nullptr) {
+        const auto &filter_units = select_stmt->join_filter_stmt()->filter_units();
+        
+        for (const auto &filter_unit : filter_units) {
+          // 检查条件是否与当前 JOIN 相关
+          bool is_relevant = false;
+          
+          // 获取当前 JOIN 涉及的表
+          Table *left_table = nullptr;
+          Table *right_table = table; // 右表是当前表
+          
+          
+          // 左子树：可能是单个表或之前 JOIN 的结果
+          if (table_oper != nullptr && table_oper->type() == LogicalOperatorType::TABLE_GET) {
+            auto *left_table_get = dynamic_cast<TableGetLogicalOperator*>(table_oper.get());
+            if (left_table_get != nullptr) {
+              left_table = left_table_get->table();
+            }
+          } else if (table_oper != nullptr && table_oper->type() == LogicalOperatorType::JOIN) {
+            // 对于 JOIN 类型的左子树，我们无法直接确定左表
+            // 但我们可以通过检查条件中的字段来确定
+            // 暂时跳过左表检查，让条件匹配逻辑自己处理
+          }
+          
+          // 检查条件是否涉及当前 JOIN 的表
+          if (filter_unit->left().is_attr && filter_unit->right().is_attr) {
+            const Table *left_field_table = filter_unit->left().field.table();
+            const Table *right_field_table = filter_unit->right().field.table();
+            
+            
+            // 条件涉及左表和右表
+            if (left_table != nullptr) {
+              // 左表已知，检查条件是否涉及左表和右表
+              if ((left_field_table == left_table && right_field_table == right_table) ||
+                  (left_field_table == right_table && right_field_table == left_table)) {
+                is_relevant = true;
+              } else {
+              }
+            } else {
+              // 左表未知（可能是 JOIN 结果），检查条件是否涉及右表
+              if (left_field_table == right_table || right_field_table == right_table) {
+                is_relevant = true;
+              } else {
+              }
+            }
+          }
+          
+          if (is_relevant) {
+            // 将 FilterUnit 转换为 Expression
+            auto left_expr = LogicalPlanGenerator::create_expression_from_filter_obj(filter_unit->left());
+            auto right_expr = LogicalPlanGenerator::create_expression_from_filter_obj(filter_unit->right());
+            if (left_expr != nullptr && right_expr != nullptr) {
+              auto comp_expr = make_unique<ComparisonExpr>(filter_unit->comp(), std::move(left_expr), std::move(right_expr));
+              
+              // 只有等值条件用于 JOIN，非等值条件用于后续过滤
+              if (filter_unit->comp() == CompOp::EQUAL_TO) {
+                join_oper->add_join_predicate(std::move(comp_expr));
+              } else {
+                // 非等值条件添加到 predicate_oper 中
+                if (predicate_oper == nullptr) {
+                  predicate_oper = make_unique<PredicateLogicalOperator>(std::move(comp_expr));
+                } else {
+                  // 如果已经有 predicate_oper，需要创建 ConjunctionExpr 来组合条件
+                  auto existing_expr = std::move(predicate_oper->expressions()[0]);
+                  predicate_oper->expressions().clear();
+                  
+                  vector<unique_ptr<Expression>> conjunction_children;
+                  conjunction_children.push_back(std::move(existing_expr));
+                  conjunction_children.push_back(std::move(comp_expr));
+                  
+                  auto conjunction_expr = make_unique<ConjunctionExpr>(ConjunctionExpr::Type::AND, conjunction_children);
+                  predicate_oper = make_unique<PredicateLogicalOperator>(std::move(conjunction_expr));
+                }
+              }
+            }
+          }
+        }
+      }
+      
       table_oper = unique_ptr<LogicalOperator>(join_oper);
+      
+      // 如果有过滤条件，将其设置到 JoinLogicalOperator 中
+      if (predicate_oper) {
+        join_oper->add_predicate_op(predicate_oper.get());
+      }
     }
   }
 
@@ -271,35 +352,6 @@ RC LogicalPlanGenerator::create_plan(DeleteStmt *delete_stmt, unique_ptr<Logical
   return rc;
 }
 
-RC LogicalPlanGenerator::create_plan(UpdateStmt *update_stmt, unique_ptr<LogicalOperator> &logical_operator)
-{
-  Table                      *table       = update_stmt->table();
-  FilterStmt                 *filter_stmt = update_stmt->filter_stmt();
-  unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_WRITE));
-
-  unique_ptr<LogicalOperator> predicate_oper;
-
-  RC rc = RC::SUCCESS;
-  if (filter_stmt != nullptr) {
-    rc = create_plan(filter_stmt, predicate_oper);
-    if (rc != RC::SUCCESS) {
-      return rc;
-    }
-  }
-
-  unique_ptr<LogicalOperator> update_oper(new UpdateLogicalOperator(table, update_stmt->attribute_name(), update_stmt->value()));
-
-  if (predicate_oper) {
-    predicate_oper->add_child(std::move(table_get_oper));
-    update_oper->add_child(std::move(predicate_oper));
-  } else {
-    update_oper->add_child(std::move(table_get_oper));
-  }
-
-  logical_operator = std::move(update_oper);
-  return rc;
-}
-
 RC LogicalPlanGenerator::create_plan(ExplainStmt *explain_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
   unique_ptr<LogicalOperator> child_oper;
@@ -393,4 +445,13 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
                                                            std::move(aggregate_expressions));
   logical_operator = std::move(group_by_oper);
   return RC::SUCCESS;
+}
+
+unique_ptr<Expression> LogicalPlanGenerator::create_expression_from_filter_obj(const FilterObj &filter_obj)
+{
+  if (filter_obj.is_attr) {
+    return make_unique<FieldExpr>(filter_obj.field);
+  } else {
+    return make_unique<ValueExpr>(filter_obj.value);
+  }
 }
