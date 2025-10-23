@@ -104,11 +104,21 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
   // return index_handler_.insert_entry(record + field_meta_.offset(), rid);
 
   // 构建复合键 --> 字节级存储
-  vector<char> composite_key;
+  int32_t total_key_length = 0;
   for (const FieldMeta *field_meta : field_metas_) {
-    // offset作用：获取record中对应field的数据位置
+    if (nullptr == field_meta) {
+      LOG_WARN("Found null field meta in index %s", index_meta_.name());
+      return RC::INTERNAL;
+    }
+    total_key_length += field_meta->len();
+  }
+
+  vector<char> composite_key;
+  composite_key.reserve(total_key_length);
+
+  for (const FieldMeta *field_meta : field_metas_) {
+    // offset：获取record中对应field的数据位置
     const char *field_data = record + field_meta->offset();
-    // 将字段一个一个插入
     composite_key.insert(composite_key.end(), field_data, field_data + field_meta->len());
   }
 

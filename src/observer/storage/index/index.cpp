@@ -16,6 +16,18 @@ See the Mulan PSL v2 for more details. */
 
 RC Index::init(const IndexMeta &index_meta, const vector<const FieldMeta *> &field_metas)
 {
+  if (field_metas.empty()) {
+    LOG_WARN("Failed to init index %s due to empty field metas", index_meta.name());
+    return RC::INVALID_ARGUMENT;
+  }
+
+  for (const FieldMeta *field_meta : field_metas) {
+    if (nullptr == field_meta) {
+      LOG_WARN("Found null field meta when init index %s", index_meta.name());
+      return RC::INVALID_ARGUMENT;
+    }
+  }
+
   index_meta_  = index_meta;
   field_metas_ = field_metas;
   return RC::SUCCESS;

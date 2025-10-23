@@ -313,6 +313,18 @@ RC Table::get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadWriteMode m
 
 RC Table::create_index(Trx *trx, const vector<const FieldMeta *> &field_metas, const char *index_name)
 {
+  if (field_metas.empty()) {
+    LOG_WARN("Failed to create index %s due to empty field metas", index_name);
+    return RC::INVALID_ARGUMENT;
+  }
+
+  for (const FieldMeta *field_meta : field_metas) {
+    if (nullptr == field_meta) {
+      LOG_WARN("Found null field meta when init index %s", index_name);
+      return RC::INVALID_ARGUMENT;
+    }
+  }
+
   return engine_->create_index(trx, field_metas, index_name);
 }
 

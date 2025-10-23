@@ -299,7 +299,13 @@ RC DiskDoubleWriteBuffer::load_pages()
     }
   }
 
-  LOG_INFO("double write buffer load pages done. page num=%d", dblwr_pages_.size());
+  if (!dblwr_pages_.empty()) {
+    LOG_INFO("Successfully loaded %zu valid pages from double write buffer", dblwr_pages_.size());
+  }
+  else {
+    LOG_WARN("Cannot load pages: no valid pages found in double write buffer");
+  }
+  // LOG_INFO("double write buffer load pages done. page num=%d", dblwr_pages_.size());
   return RC::SUCCESS;
 }
 
