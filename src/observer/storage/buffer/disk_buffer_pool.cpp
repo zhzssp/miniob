@@ -222,12 +222,14 @@ DiskBufferPool::DiskBufferPool(
 
 DiskBufferPool::~DiskBufferPool()
 {
+  LOG_INFO("disk buffer pool 开始析构");
   close_file();
-  LOG_INFO("disk buffer pool exit");
+  LOG_INFO("disk buffer pool 析构完成");
 }
 
 RC DiskBufferPool::open_file(const char *file_name)
 {
+  // 获取文件描述符
   int fd = open(file_name, O_RDWR);
   if (fd < 0) {
     LOG_ERROR("Failed to open file %s, because %s.", file_name, strerror(errno));
@@ -239,6 +241,7 @@ RC DiskBufferPool::open_file(const char *file_name)
   // 保存文件描述符
   file_desc_ = fd;
 
+  // 通过文件描述符（readn据此找到对应地址）获取文件头，读取buffer pool id --> 放置到DiskBufferPool对象的属性中
   Page header_page;
   int ret = readn(file_desc_, &header_page, sizeof(header_page));
   if (ret != 0) {
@@ -250,6 +253,7 @@ RC DiskBufferPool::open_file(const char *file_name)
 
   BPFileHeader *tmp_file_header = reinterpret_cast<BPFileHeader *>(header_page.data);
   buffer_pool_id_ = tmp_file_header->buffer_pool_id;
+  LOG_INFO("Get and store buffer pool id = %d in DiskBufferPool::open_file()", buffer_pool_id_);
 
   // 分配页帧
   RC rc = allocate_frame(BP_HEADER_PAGE, &hdr_frame_);
@@ -260,6 +264,7 @@ RC DiskBufferPool::open_file(const char *file_name)
     return rc;
   }
 
+  // frame的buffer pool id一同设置
   hdr_frame_->set_buffer_pool_id(id());
   hdr_frame_->access();
 
@@ -273,7 +278,7 @@ RC DiskBufferPool::open_file(const char *file_name)
 
   file_header_ = (BPFileHeader *)hdr_frame_->data();
 
-  LOG_INFO("Successfully open %s. file_desc=%d, hdr_frame=%p, file header=%s",
+  LOG_INFO("Successfully open %s in Buffer Pool. file_desc=%d, hdr_frame=%p, file header=%s",
            file_name, file_desc_, hdr_frame_, file_header_->to_string().c_str());
   return RC::SUCCESS;
 }
@@ -818,6 +823,7 @@ RC BufferPoolManager::create_file(const char *file_name)
   Page page;
   memset(&page, 0, BP_PAGE_SIZE);
 
+  // 设置buffer pool相关的头部信息
   BPFileHeader *file_header    = (BPFileHeader *)page.data;
   file_header->allocated_pages = 1;
   file_header->page_count      = 1;
@@ -904,6 +910,8 @@ RC BufferPoolManager::open_file(LogHandler &log_handler, const char *_file_name,
 
   // 构建.index/.data/.table文件对应的BufferPool
   DiskBufferPool *bp = new DiskBufferPool(*this, frame_manager_, *dblwr_buffer_, log_handler);
+
+  // 调用底层的Disk Buffer Pool: 保存文件描述符、id等信息，同时分配页帧
   RC              rc = bp->open_file(_file_name);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to open file name");
@@ -915,9 +923,11 @@ RC BufferPoolManager::open_file(LogHandler &log_handler, const char *_file_name,
     next_buffer_pool_id_.store(bp->id() + 1);
   }
 
+  // 将file_namm, id和对应的buffer pool映射进行注册
   buffer_pools_.insert(pair<string, DiskBufferPool *>(file_name, bp));
   id_to_buffer_pools_.insert(pair<int32_t, DiskBufferPool *>(bp->id(), bp));
-  LOG_DEBUG("insert buffer pool into fd buffer pools. fd=%d, bp=%p, lbt=%s", bp->file_desc(), bp, lbt());
+  LOG_DEBUG("insert buffer pool into fd buffer pools using id = %d. fd=%d, bp=%p, lbt=%s", bp->id(), bp->file_desc(), bp, lbt());
+  // 将构建好的DiskBufferPool保存在传入的引用中
   _bp = bp;
   return RC::SUCCESS;
 }
@@ -928,12 +938,14 @@ RC BufferPoolManager::close_file(const char *_file_name)
 
   lock_.lock();
 
+  // 缓冲池中找不到目标文件
   auto iter = buffer_pools_.find(file_name);
   if (iter == buffer_pools_.end()) {
-    LOG_TRACE("file has not opened: %s", _file_name);
+    LOG_TRACE("Cannot find buffer pool to close, file name = %s", _file_name);
     lock_.unlock();
     return RC::INTERNAL;
   }
+  LOG_TRACE("Found buffer pool to close. file name = %s", _file_name);
 
   id_to_buffer_pools_.erase(iter->second->id());
 
@@ -966,6 +978,7 @@ RC BufferPoolManager::get_buffer_pool(int32_t id, DiskBufferPool *&bp)
 
   scoped_lock lock_guard(lock_);
 
+  // 找不到test对应的buffer pool ???
   auto iter = id_to_buffer_pools_.find(id);
   if (iter == id_to_buffer_pools_.end()) {
     LOG_WARN("unknown buffer pool of id %d", id);

@@ -38,10 +38,15 @@ RC BplusTreeIndex::create(
     total_key_length += field_meta->len();
   }
 
-  // 暂定使用第一个字段的类型作为复合键类型（简化处理）
-  AttrType composite_type = field_metas[0]->type();
+  vector<AttrType> attr_type;
+  vector<int32_t> attr_length;
+  for (const FieldMeta *field_meta : field_metas) {
+    attr_type.push_back(field_meta->type());
+    attr_length.push_back(field_meta->len());
+  }
 
-  RC rc = index_handler_.create(table->db()->log_handler(), bpm, file_name, composite_type, total_key_length);
+  // internal_max_size和leaf_max_size使用默认值?
+  RC rc = index_handler_.create(table->db()->log_handler(), bpm, file_name, attr_type, attr_length);
   if (RC::SUCCESS != rc) {
     LOG_WARN("Failed to create index_handler, file_name:%s, index:%s, rc:%s",
         file_name, index_meta.name(), strrc(rc));
@@ -55,6 +60,7 @@ RC BplusTreeIndex::create(
   return RC::SUCCESS;
 }
 
+// file_name = miniob/db/sys/test-test_index.index
 RC BplusTreeIndex::open(
     Table *table, const char *file_name, const IndexMeta &index_meta, const vector<const FieldMeta *> &field_metas)
 {
@@ -67,9 +73,10 @@ RC BplusTreeIndex::open(
   Index::init(index_meta, field_metas);
 
   BufferPoolManager &bpm = table->db()->buffer_pool_manager();
+  // 具体打开操作交由handler完成
   RC                 rc  = index_handler_.open(table->db()->log_handler(), bpm, file_name);
   if (RC::SUCCESS != rc) {
-    LOG_WARN("Failed to open index_handler, file_name:%s, index:%s, rc:%s",
+    LOG_WARN("Failed to open index_handler, file_name: %s, index: %s, rc: %s",
         file_name, index_meta.name(), strrc(rc));
     return rc;
   }
@@ -95,15 +102,17 @@ RC BplusTreeIndex::close()
 RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 {
   // return index_handler_.insert_entry(record + field_meta_.offset(), rid);
-  // 构建复合键
+
+  // 构建复合键 --> 字节级存储
   vector<char> composite_key;
   for (const FieldMeta *field_meta : field_metas_) {
-    // offset作用是什么？
+    // offset作用：获取record中对应field的数据位置
     const char *field_data = record + field_meta->offset();
+    // 将字段一个一个插入
     composite_key.insert(composite_key.end(), field_data, field_data + field_meta->len());
   }
 
-  // data将多个键拼接在一起？ --> 内置函数
+  // data()获得指向底层数组的指针
   return index_handler_.insert_entry(composite_key.data(), rid);
 }
 

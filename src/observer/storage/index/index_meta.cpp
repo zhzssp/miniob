@@ -24,7 +24,7 @@ const static Json::StaticString FIELD_FIELD_NAMES("field_names");
 const static Json::StaticString FIELD_TYPES("field_types");
 const static Json::StaticString FIELD_LENGTHS("field_lengths");
 
-RC IndexMeta::init(const char *name, const vector<FieldMeta> &fields)
+RC IndexMeta::init(const char *name, const vector<const FieldMeta *> &fields)
 {
   if (common::is_blank(name)) {
     LOG_ERROR("Failed to init index, name is empty.");
@@ -42,10 +42,10 @@ RC IndexMeta::init(const char *name, const vector<FieldMeta> &fields)
   fields_.reserve(fields.size());
   field_types_.reserve(fields.size());
   field_lengths_.reserve(fields.size());
-  for (const FieldMeta &f : fields) {
-    fields_.push_back(f.name());
-    field_types_.push_back(f.type());
-    field_lengths_.push_back(f.len());
+  for (const FieldMeta *f : fields) {
+    fields_.push_back(f->name());
+    field_types_.push_back(f->type());
+    field_lengths_.push_back(f->len());
   }
   return RC::SUCCESS;
 }
@@ -74,7 +74,7 @@ RC IndexMeta::from_json(const TableMeta &table, const Json::Value &json_value, I
     return RC::INTERNAL;
   }
 
-  vector<FieldMeta>  fields;
+  vector<const FieldMeta *>  fields;
   const Json::Value &names   = json_value[FIELD_FIELD_NAMES];
   const Json::Value &types   = json_value[FIELD_TYPES];
   const Json::Value &lengths = json_value[FIELD_LENGTHS];
@@ -87,7 +87,7 @@ RC IndexMeta::from_json(const TableMeta &table, const Json::Value &json_value, I
         LOG_ERROR("Deserialize index [%s]: no such field: %s", name_value.asCString(), fname);
         return RC::SCHEMA_FIELD_MISSING;
       }
-      fields.push_back(*fm);
+      fields.push_back(fm);
     }
     return index.init(name_value.asCString(), fields);
   }
@@ -100,7 +100,7 @@ RC IndexMeta::from_json(const TableMeta &table, const Json::Value &json_value, I
       LOG_ERROR("Deserialize index [%s]: no such field: %s", name_value.asCString(), field_value.asCString());
       return RC::SCHEMA_FIELD_MISSING;
     }
-    vector<FieldMeta> one{*field};
+    vector<const FieldMeta *> one{field};
     return index.init(name_value.asCString(), one);
   }
 
@@ -159,4 +159,42 @@ int IndexMeta::field_offset(int field_index) const
     offset += field_lengths_[i];
   }
   return offset;
+}
+
+const char *IndexMeta::fields() const
+{
+  // static???
+  static string field_list;
+  field_list.clear();
+  for (size_t i = 0; i < fields_.size(); i++) {
+    if (i > 0) {
+      field_list.append(",");
+    }
+    field_list.append(fields_[i]);
+  }
+  return field_list.c_str();
+}
+
+const char *IndexMeta::field(int index) const
+{
+  if (index < 0 || index >= static_cast<int>(fields_.size())) {
+    return nullptr;
+  }
+  return fields_[index].c_str();
+}
+
+AttrType IndexMeta::field_type(int index) const
+{
+  if (index < 0 || index >= static_cast<int>(field_types_.size())) {
+    return AttrType::UNDEFINED;
+  }
+  return field_types_[index];
+}
+
+int IndexMeta::field_length(int index) const
+{
+  if (index < 0 || index >= static_cast<int>(field_lengths_.size())) {
+    return -1;
+  }
+  return field_lengths_[index];
 }

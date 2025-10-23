@@ -52,6 +52,12 @@ DiskDoubleWriteBuffer::DiskDoubleWriteBuffer(BufferPoolManager &bp_manager, int 
 
 DiskDoubleWriteBuffer::~DiskDoubleWriteBuffer()
 {
+  // 非智能指针，避免内存泄漏
+  for (auto &pair : dblwr_pages_) {
+    delete pair.second;
+  }
+  dblwr_pages_.clear();
+
   flush_page();
   close(file_desc_);
 }
@@ -159,6 +165,7 @@ RC DiskDoubleWriteBuffer::write_page_internal(DoubleWritePage *page)
   return RC::SUCCESS;
 }
 
+// 将备份的数据给写入到disk_buffer
 RC DiskDoubleWriteBuffer::write_page(DoubleWritePage *dblwr_page)
 {
   DiskBufferPool *disk_buffer = nullptr;
@@ -168,8 +175,15 @@ RC DiskDoubleWriteBuffer::write_page(DoubleWritePage *dblwr_page)
               dblwr_page->key.buffer_pool_id, dblwr_page->key.page_num, dblwr_page->page.lsn);
     return RC::SUCCESS;
   }
+  // 传入buffer pool id，获取对应的buffer pool存入disk_buffer引用中
   RC rc = bp_manager_.get_buffer_pool(dblwr_page->key.buffer_pool_id, disk_buffer);
-  ASSERT(OB_SUCC(rc) && disk_buffer != nullptr, "failed to get disk buffer pool of %d", dblwr_page->key.buffer_pool_id);
+  if (rc != RC::SUCCESS || disk_buffer == nullptr)
+  {
+    // 对应的 buffer pool 未打开或已被删除，跳过此页面的写盘操作，继续写入其余页面
+    LOG_WARN("Failed to get disk buffer pool of %d, skip writing this page. rc=%s",
+            dblwr_page->key.buffer_pool_id, strrc(rc));
+    return RC::SUCCESS;
+  }
 
   LOG_TRACE("double write buffer write page. buffer_pool_id:%d,page_num:%d,lsn=%d",
             dblwr_page->key.buffer_pool_id, dblwr_page->key.page_num, dblwr_page->page.lsn);

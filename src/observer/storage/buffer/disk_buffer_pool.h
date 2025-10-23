@@ -300,7 +300,7 @@ private:
   BufferPoolLogHandler log_handler_;    /// BufferPool 日志处理器
 
   int file_desc_ = -1;  /// 文件描述符
-  /// 由于在最开始打开文件时，没有正确的buffer pool id不能加载header frame，所以单独从文件中读取此标识
+  /// 由于在最开始打开文件时，没有正确的buffer pool id不能加载header frame，所以单独从文件中读取此标识 --> ???
   int32_t       buffer_pool_id_ = -1;
   Frame        *hdr_frame_      = nullptr;  /// 文件头页面
   BPFileHeader *file_header_    = nullptr;  /// 文件头

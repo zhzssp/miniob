@@ -41,7 +41,7 @@ public:
 
   ~Value() { reset(); }
 
-  Value(AttrType attr_type, char *data, int length = 4) : attr_type_(attr_type) { this->set_data(data, length); }
+  Value(const AttrType attr_type, const char * data, const int32_t length) : attr_type_(attr_type) { this->set_data(data, length); }
 
   explicit Value(int val);
   explicit Value(float val);
@@ -88,8 +88,7 @@ public:
   }
 
   void set_type(AttrType type) { this->attr_type_ = type; }
-  void set_data(char *data, int length);
-  void set_data(const char *data, int length) { this->set_data(const_cast<char *>(data), length); }
+  void set_data(const char *data, const int length);
   void set_value(const Value &value);
   void set_boolean(bool val);
 
@@ -99,7 +98,7 @@ public:
 
   char *data() const;
 
-  int      length() const { return length_; }
+  int32_t      length() const { return length_; }
   AttrType attr_type() const { return attr_type_; }
 
 public:
@@ -121,8 +120,8 @@ public:
   void set_string_from_other(const Value &other);
 
 private:
-  AttrType attr_type_ = AttrType::UNDEFINED;
-  int      length_    = 0;
+  AttrType attr_type_;
+  int32_t length_;
 
   union Val
   {

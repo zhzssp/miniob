@@ -34,6 +34,168 @@ class BplusTreeHandler;
 class BplusTreeMiniTransaction;
 
 /**
+ * @brief the meta information of bplus tree
+ * @ingroup BPlusTree
+ * @details this is the first page of bplus tree.
+ * only one field can be supported, can you extend it to multi-fields?
+ */
+struct IndexFileHeader
+{
+  IndexFileHeader()
+  {
+    internal_max_size = 0;
+    leaf_max_size     = 0;
+    key_length        = 0;
+    attr_length = vector<int32_t>();
+    attr_type   = vector<AttrType>();
+    root_page   = BP_INVALID_PAGE_NUM;
+  }
+  PageNum root_page;          ///< 根节点在磁盘中的页号
+  int32_t internal_max_size;  ///< 内部节点最大的键值对数
+  int32_t leaf_max_size;      ///< 叶子节点最大的键值对数
+  vector<int32_t> attr_length;        ///< 键值的长度
+  int32_t  key_length;  ///< total attr length + sizeof(RID)
+  vector<AttrType> attr_type;   ///< 键值的类型
+
+  // 计算字段偏移量
+  int field_offset(int field_index) const
+  {
+    // 参数检查
+    if (field_index < 0 || field_index >= 6) {
+      return -1;  // 无效的字段索引
+    }
+
+    // 计算偏移量
+    int offset = 0;
+    for (int i = 0; i < field_index; i++) {
+      offset += attr_length[i];
+    }
+    return offset;
+  }
+
+  const string to_string() const
+  {
+    stringstream ss;
+
+    ss << "attr_length of the first field: " << attr_length[0] << ", "
+       << "key_length: " << key_length << ","
+       << "attr_type of the first field: " << attr_type_to_string(attr_type[0]) << ", "
+       << "root_page: " << root_page << ", "
+       << "internal_max_size: " << internal_max_size << ", "
+       << "leaf_max_size: " << leaf_max_size << ";";
+
+    return ss.str();
+  }
+
+  int32_t total_attr_length() const
+  {
+    int32_t total_length = 0;
+    for (size_t i = 0; i < attr_length.size(); i++) {
+      total_length += attr_length[i];
+    }
+    return total_length;
+  }
+
+  // 序列化，结果存储在pdata
+  void serialize_to(char *pdata) const
+  {
+    if(!pdata) {
+      LOG_ERROR("pdata in serialize_to is null");
+    }
+
+    char *p = pdata;
+
+    // 写入基本字段
+    memcpy(p, &internal_max_size, sizeof(int32_t));
+    p += sizeof(int32_t);
+
+    memcpy(p, &leaf_max_size, sizeof(int32_t));
+    p += sizeof(int32_t);
+
+    memcpy(p, &key_length, sizeof(int32_t));
+    p += sizeof(int32_t);
+
+    // 写入 attr_length
+    int32_t n_attr_length = attr_length.size();
+    memcpy(p, &n_attr_length, sizeof(int32_t));
+    p += sizeof(int32_t);
+    if (n_attr_length > 0) {
+      memcpy(p, attr_length.data(), n_attr_length * sizeof(int32_t));
+      p += n_attr_length * sizeof(int32_t);
+    }
+
+    if (n_attr_length <= 0 || n_attr_length > 32) {  // sanity check
+      LOG_ERROR("Invalid n_attr_length=%d", n_attr_length);
+      return;
+    }
+
+    // 写入 attr_type
+    int32_t n_attr_type = attr_type.size();
+    memcpy(p, &n_attr_type, sizeof(int32_t));
+    p += sizeof(int32_t);
+    if (n_attr_type > 0) {
+      memcpy(p, attr_type.data(), n_attr_type * sizeof(AttrType));
+      p += n_attr_type * sizeof(AttrType);
+    }
+
+    // 写入 root_page
+    memcpy(p, &root_page, sizeof(PageNum));
+  }
+
+  // 反序列化，将存储在pdata的结果读入到当前对象
+  void deserialize_from(char *pdata)
+  {
+    if(!pdata) {
+      LOG_ERROR("Invalid pdata for deserialize_from IndexFileHeader");
+      return;
+    }
+    char *p = pdata;
+
+    memcpy(&internal_max_size, p, sizeof(int32_t));
+    p += sizeof(int32_t);
+
+    memcpy(&leaf_max_size, p, sizeof(int32_t));
+    p += sizeof(int32_t);
+
+    memcpy(&key_length, p, sizeof(int32_t));
+    p += sizeof(int32_t);
+
+    // 读取 attr_length
+    int32_t n_attr_length;
+    memcpy(&n_attr_length, p, sizeof(int32_t));
+    p += sizeof(int32_t);
+    try{
+      attr_length.resize(n_attr_length);
+    } catch (const std::bad_alloc &e) {
+      LOG_ERROR("Failed to resize attr_length vector, n_attr_length=%d", n_attr_length);
+      return;
+    }
+    if (n_attr_length > 0) {
+      memcpy(attr_length.data(), p, n_attr_length * sizeof(int32_t));
+      p += n_attr_length * sizeof(int32_t);
+    }
+
+    // 读取 attr_type
+    int32_t n_attr_type;
+    memcpy(&n_attr_type, p, sizeof(int32_t));
+    p += sizeof(int32_t);
+    try {
+      attr_type.resize(n_attr_type);
+    } catch (const std::bad_alloc &e) {
+      LOG_ERROR("Failed to resize attr_type vector, n_attr_type=%d", n_attr_type);
+      return;
+    }
+    if (n_attr_type > 0) {
+      memcpy(attr_type.data(), p, n_attr_type * sizeof(AttrType));
+      p += n_attr_type * sizeof(AttrType);
+    }
+
+    // 读取 root_page
+    memcpy(&root_page, p, sizeof(PageNum));
+  }
+};
+
+/**
  * @brief B+树的实现
  * @defgroup BPlusTree
  */
@@ -56,96 +218,96 @@ enum class BplusTreeOperationType
 class AttrComparator
 {
 public:
-  void init(AttrType type, int length)
-  {
-    attr_type_   = type;
-    attr_length_ = length;
+  void init() {
+    attr_type_ = vector<AttrType>();
+    attr_length_ = vector<int32_t>();
   }
 
-  int attr_length() const { return attr_length_; }
-
-  int operator()(const char *v1, const char *v2) const
+  void init(vector<AttrType> attr_type, vector<int32_t> attr_length)
   {
-    // TODO: optimized the comparison
-    Value left;
-    left.set_type(attr_type_);
-    left.set_data(v1, attr_length_);
-    Value right;
-    right.set_type(attr_type_);
-    right.set_data(v2, attr_length_);
-    return DataType::type_instance(attr_type_)->compare(left, right);
+    attr_type_   = attr_type;
+    attr_length_ = attr_length;
   }
 
-private:
-  AttrType attr_type_;
-  int      attr_length_;
-};
-
-/**
- * @brief 键值比较(BplusTree)
- * @details BplusTree的键值除了字段属性，还有RID，是为了避免属性值重复而增加的。
- * @ingroup BPlusTree
- */
-class KeyComparator
-{
-public:
-  void init(AttrType type, int length) { attr_comparator_.init(type, length); }
-
-  const AttrComparator &attr_comparator() const { return attr_comparator_; }
-
-  int operator()(const char *v1, const char *v2) const
+  int attr_length() const 
   {
-    int result = attr_comparator_(v1, v2);
-    if (result != 0) {
-      return result;
+    int total_attr_length = 0;
+    for(int i = 0; i < attr_length_.size(); i++) 
+    {
+      total_attr_length += attr_length_[i];
     }
-
-    const RID *rid1 = (const RID *)(v1 + attr_comparator_.attr_length());
-    const RID *rid2 = (const RID *)(v2 + attr_comparator_.attr_length());
-    return RID::compare(rid1, rid2);
-  }
-
-private:
-  AttrComparator attr_comparator_;
-};
-
-// 多键值比较
-class CompositeKeyComparator
-{
-public:
-  void init(const IndexFileHeader &header)
-  {
-    field_count_ = 0;
-    for (int i = 0; i < 3; i++) {
-      if (header.key_length[i] > 0) {
-        field_count_++;
-        AttrComparator comparator;
-        comparator.init(header.attr_type[i], header.key_length[i]);
-        field_comparators_.push_back(comparator);
-        field_offsets_.push_back(header.field_offset(i));
-      }
-    }
+    return total_attr_length;
   }
 
   int operator()(const char *v1, const char *v2) const
   {
-    for (int i = 0; i < field_count_; i++) {
-      const char *key1   = v1 + field_offsets_[i];
-      const char *key2   = v2 + field_offsets_[i];
-      int         result = field_comparators_[i](key1, key2);
+    // 遍历所有字段进行比较
+    int offset = 0;
+    for (size_t i = 0; i < attr_type_.size(); i++) {
+      Value left, right;
+      left.set_type(attr_type_[i]);
+      right.set_type(attr_type_[i]);
+
+      left.set_data(v1 + offset, attr_length_[i]);
+      right.set_data(v2 + offset, attr_length_[i]);
+
+      int result = DataType::type_instance(attr_type_[i])->compare(left, right);
       if (result != 0) {
         return result;
       }
-    }
 
-    // 所有字段都相等,最后比较RID
-    const RID *rid1 = (const RID *)(v1 + field_offsets_[field_count_]);
-    const RID *rid2 = (const RID *)(v2 + field_offsets_[field_count_]);
-    return RID::compare(rid1, rid2);
+       offset += attr_length_[i];
+    }
+    return 0;
   }
 
 private:
-  vector<AttrComparator> field_comparators_;
+  vector<AttrType> attr_type_;
+  vector<int32_t> attr_length_;
+};
+
+// /**
+//  * @brief 键值比较(BplusTree)
+//  * @details BplusTree的键值除了字段属性，还有RID，是为了避免属性值重复而增加的。
+//  * @ingroup BPlusTree
+//  */
+// class KeyComparator
+// {
+// public:
+//   void init(AttrType type, int length) { attr_comparator_.init(type, length); }
+
+//   const AttrComparator &attr_comparator() const { return attr_comparator_; }
+
+//   int operator()(const char *v1, const char *v2) const
+//   {
+//     int result = attr_comparator_(v1, v2);
+//     if (result != 0) {
+//       return result;
+//     }
+
+//     const RID *rid1 = (const RID *)(v1 + attr_comparator_.attr_length());
+//     const RID *rid2 = (const RID *)(v2 + attr_comparator_.attr_length());
+//     return RID::compare(rid1, rid2);
+//   }
+
+// private:
+//   AttrComparator attr_comparator_;
+// };
+
+/**
+ * @brief 多字段键值比较(BplusTree)
+ * @details BplusTree的键值除了字段属性，还有RID，是为了避免属性值重复而增加的。
+ * @ingroup BPlusTree
+ */
+class CompositeKeyComparator
+{
+public:
+  void init();
+  void init(const IndexFileHeader &header);
+  int operator()(const char *v1, const char *v2) const;
+
+private:
+  AttrComparator field_comparators_;
   vector<int>            field_offsets_;
   int                    field_count_;
 };
@@ -176,42 +338,46 @@ private:
   int      attr_length_;
 };
 
-/**
- * @brief 键值打印,调试使用(BplusTree)
- * @ingroup BPlusTree
- */
-class KeyPrinter
-{
-public:
-  void init(AttrType type, int length) { attr_printer_.init(type, length); }
+// /**
+//  * @brief 键值打印,调试使用(BplusTree)
+//  * @ingroup BPlusTree
+//  */
+// class KeyPrinter
+// {
+// public:
+//   void init(AttrType type, int length) { attr_printer_.init(type, length); }
 
-  const AttrPrinter &attr_printer() const { return attr_printer_; }
+//   const AttrPrinter &attr_printer() const { return attr_printer_; }
 
-  string operator()(const char *v) const
-  {
-    stringstream ss;
-    ss << "{key:" << attr_printer_(v) << ",";
+//   string operator()(const char *v) const
+//   {
+//     stringstream ss;
+//     ss << "{key:" << attr_printer_(v) << ",";
 
-    const RID *rid = (const RID *)(v + attr_printer_.attr_length());
-    ss << "rid:{" << rid->to_string() << "}}";
-    return ss.str();
-  }
+//     const RID *rid = (const RID *)(v + attr_printer_.attr_length());
+//     ss << "rid:{" << rid->to_string() << "}}";
+//     return ss.str();
+//   }
 
-private:
-  AttrPrinter attr_printer_;
-};
+// private:
+//   AttrPrinter attr_printer_;
+// };
 
 class CompositeKeyPrinter
 {
 public:
   void init(const IndexFileHeader &header)
   {
+    if(header.attr_type.empty() || header.attr_length.empty()) {
+      LOG_ERROR("Invalid IndexFileHeader in CompositeKeyPrinter: attr_type or attr_length is empty");
+      return;
+    }
     field_count_ = 0;
-    for (int i = 0; i < 3; i++) {
-      if (header.key_length[i] > 0) {
+    for (int i = 0; i < header.attr_length.size(); i++) {
+      if (header.key_length > 0) {
         field_count_++;
         AttrPrinter printer;
-        printer.init(header.attr_type[i], header.key_length[i]);
+        printer.init(header.attr_type[i], header.attr_length[i]);
         field_printers_.push_back(printer);
         field_offsets_.push_back(header.field_offset(i));
       }
@@ -238,61 +404,10 @@ public:
   }
 
 private:
+  // 每个AttrPrinter对应一个字段
   vector<AttrPrinter> field_printers_;
   vector<int>         field_offsets_;
   int                 field_count_;
-};
-
-/**
- * @brief the meta information of bplus tree
- * @ingroup BPlusTree
- * @details this is the first page of bplus tree.
- * only one field can be supported, can you extend it to multi-fields?
- */
-struct IndexFileHeader
-{
-  IndexFileHeader()
-  {
-    memset(this, 0, sizeof(IndexFileHeader));
-    root_page = BP_INVALID_PAGE_NUM;
-  }
-  PageNum root_page;          ///< 根节点在磁盘中的页号
-  int32_t internal_max_size;  ///< 内部节点最大的键值对数
-  int32_t leaf_max_size;      ///< 叶子节点最大的键值对数
-  int32_t attr_length;        ///< 键值的长度
-  // key暂定最多同时拥有三个字段
-  int32_t  key_length[3];  ///< attr length + sizeof(RID)
-  AttrType attr_type[3];   ///< 键值的类型
-
-  // 计算字段偏移量
-  int field_offset(int field_index) const
-  {
-    // 参数检查
-    if (field_index < 0 || field_index >= 3) {
-      return -1;  // 无效的字段索引
-    }
-
-    // 计算偏移量
-    int offset = 0;
-    for (int i = 0; i < field_index; i++) {
-      offset += key_length[i];
-    }
-    return offset;
-  }
-
-  const string to_string() const
-  {
-    stringstream ss;
-
-    ss << "attr_length:" << attr_length << ","
-       << "key_length of the first field:" << key_length[0] << ","
-       << "attr_type of the first field:" << attr_type_to_string(attr_type[0]) << ","
-       << "root_page:" << root_page << ","
-       << "internal_max_size:" << internal_max_size << ","
-       << "leaf_max_size:" << leaf_max_size << ";";
-
-    return ss.str();
-  }
 };
 
 /**
@@ -419,7 +534,7 @@ protected:
    * @note 这并不是一个纯虚函数，是为了可以直接使用 IndexNodeHandler 类。
    * 但是使用这个类时，注意不能使用与这个函数相关的函数。
    */
-  virtual char *__item_at(int index) const { return nullptr; }
+  virtual char *__item_at(int index) const { return nullptr; }  // 直接返回nullptr?
   char         *__key_at(int index) const { return __item_at(index); }
   char         *__value_at(int index) const { return __item_at(index) + key_size(); };
 
@@ -451,11 +566,11 @@ public:
    * 查找指定key的插入位置(注意不是key本身)
    * 如果key已经存在，会设置found的值。
    */
-  int lookup(const KeyComparator &comparator, const char *key, bool *found = nullptr) const;
+  int lookup(const CompositeKeyComparator &comparator, const char *key, bool *found = nullptr) const;
 
   RC  insert(int index, const char *key, const char *value);
   RC  remove(int index);
-  int remove(const char *key, const KeyComparator &comparator);
+  int remove(const char *key, const CompositeKeyComparator &comparator);
   RC  move_half_to(LeafIndexNodeHandler &other);
   RC  move_first_to_end(LeafIndexNodeHandler &other);
   RC  move_last_to_front(LeafIndexNodeHandler &other);
@@ -464,9 +579,9 @@ public:
    */
   RC move_to(LeafIndexNodeHandler &other);
 
-  bool validate(const KeyComparator &comparator, DiskBufferPool *bp) const;
+  bool validate(const CompositeKeyComparator &comparator, DiskBufferPool *bp) const;
 
-  friend string to_string(const LeafIndexNodeHandler &handler, const KeyPrinter &printer);
+  friend string to_string(const LeafIndexNodeHandler &handler, const CompositeKeyPrinter &printer);
 
 protected:
   char *__item_at(int index) const override;
@@ -492,7 +607,7 @@ public:
   RC init_empty();
   RC create_new_root(PageNum first_page_num, const char *key, PageNum page_num);
 
-  RC      insert(const char *key, PageNum page_num, const KeyComparator &comparator);
+  RC      insert(const char *key, PageNum page_num, const CompositeKeyComparator &comparator);
   char   *key_at(int index);
   PageNum value_at(int index);
 
@@ -512,7 +627,7 @@ public:
    * @param[out] insert_position 如果是有效指针，将会返回可以插入指定键值的位置
    */
   int lookup(
-      const KeyComparator &comparator, const char *key, bool *found = nullptr, int *insert_position = nullptr) const;
+      const CompositeKeyComparator &comparator, const char *key, bool *found = nullptr, int *insert_position = nullptr) const;
 
   /**
    * @brief 把当前节点的所有数据都迁移到另一个节点上
@@ -524,9 +639,9 @@ public:
   RC move_last_to_front(InternalIndexNodeHandler &other);
   RC move_half_to(InternalIndexNodeHandler &other);
 
-  bool validate(const KeyComparator &comparator, DiskBufferPool *bp) const;
+  bool validate(const CompositeKeyComparator &comparator, DiskBufferPool *bp) const;
 
-  friend string to_string(const InternalIndexNodeHandler &handler, const KeyPrinter &printer);
+  friend string to_string(const InternalIndexNodeHandler &handler, const CompositeKeyPrinter &printer);
 
 private:
   RC insert_items(int index, const char *items, int num);
@@ -561,9 +676,9 @@ public:
    * @param internal_max_size 内部节点最大大小
    * @param leaf_max_size 叶子节点最大大小
    */
-  RC create(LogHandler &log_handler, BufferPoolManager &bpm, const char *file_name, AttrType attr_type, int attr_length,
+  RC create(LogHandler &log_handler, BufferPoolManager &bpm, const char *file_name, vector<AttrType> attr_type, vector<int> attr_length,
       int internal_max_size = -1, int leaf_max_size = -1);
-  RC create(LogHandler &log_handler, DiskBufferPool &buffer_pool, AttrType attr_type, int attr_length,
+  RC create(LogHandler &log_handler, DiskBufferPool &buffer_pool, vector<AttrType> attr_type, vector<int> attr_length,
       int internal_max_size = -1, int leaf_max_size = -1);
 
   /**

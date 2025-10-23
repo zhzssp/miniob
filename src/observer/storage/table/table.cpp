@@ -184,9 +184,9 @@ RC Table::drop(Db *db, int32_t table_id, const char *meta_path, const char *tabl
   return RC::SUCCESS;
 }
 
+// 加载元数据文件 --> 初始化engine, 设置元数据信息
 RC Table::open(Db *db, const char *meta_file, const char *base_dir)
 {
-  // 加载元数据文件
   fstream fs;
   string  meta_file_path = string(base_dir) + common::FILE_PATH_SPLIT_STR + meta_file;
   fs.open(meta_file_path, ios_base::in | ios_base::binary);
@@ -203,13 +203,6 @@ RC Table::open(Db *db, const char *meta_file, const char *base_dir)
 
   db_ = db;
 
-  // // 加载数据文件
-  // RC rc = init_record_handler(base_dir);
-  // if (rc != RC::SUCCESS) {
-  //   LOG_ERROR("Failed to open table %s due to init record handler failed.", base_dir);
-  //   // don't need to remove the data_file
-  //   return rc;
-  // }
   RC rc = RC::SUCCESS;
 
   if (table_meta_.storage_engine() == StorageEngine::HEAP) {

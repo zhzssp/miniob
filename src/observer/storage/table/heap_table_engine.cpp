@@ -121,6 +121,7 @@ RC HeapTableEngine::get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadW
   return rc;
 }
 
+// Trx为事务接口
 RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &field_metas, const char *index_name)
 {
   if (common::is_blank(index_name) || field_metas.empty()) {
@@ -128,6 +129,7 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
     return RC::INVALID_ARGUMENT;
   }
 
+  // 包含field相关信息
   IndexMeta new_index_metas;
 
   RC rc = new_index_metas.init(index_name, field_metas);
@@ -137,7 +139,7 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
     return rc;
   }
 
-  // 创建索引相关数据
+  // 创建索引相关数据结构
   BplusTreeIndex *index      = new BplusTreeIndex();
   string          index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_name);
 
@@ -158,6 +160,7 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
   }
 
   Record record;
+  // 将扫描得到的record逐条插入到新建的索引中 
   while (OB_SUCC(rc = scanner->next(record))) {
     rc = index->insert_entry(record.data(), &record.rid());
     if (rc != RC::SUCCESS) {
@@ -177,6 +180,7 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
   delete scanner;
   LOG_INFO("inserted all records into new index. table=%s, index=%s", table_meta_->name(), index_name);
 
+  // 添加到表的索引列表中
   indexes_.push_back(index);
 
   /// 接下来将这个索引放到表的元数据中
@@ -308,7 +312,7 @@ RC HeapTableEngine::init()
   return rc;
 }
 
-// 创建field and index --> 索引还unsupported
+// 根据表的元数据信息构建index --> 创建索引的B+树并初始化
 RC HeapTableEngine::open()
 {
   RC rc = RC::SUCCESS;
@@ -332,17 +336,20 @@ RC HeapTableEngine::open()
     }
 
     BplusTreeIndex *index      = new BplusTreeIndex();
+    // 设置.index索引文件路径
     string          index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_meta->name());
 
     rc = index->open(table_, index_file.c_str(), *index_meta, field_metas);
+    // 没有正确打开索引文件等
     if (rc != RC::SUCCESS) {
       delete index;
-      LOG_ERROR("Failed to open index. table=%s, index=%s, file=%s, rc=%s",
+      LOG_ERROR("Table Engine failed to open index. table= %s, index= %s, file= %s, rc= %s",
                 table_meta_->name(), index_meta->name(), index_file.c_str(), strrc(rc));
       // skip cleanup
       //  do all cleanup action in destructive Table function.
       return rc;
     }
+    LOG_INFO("Table engine opens table's index %s successfully !", index_file.c_str());
     indexes_.push_back(index);
   }
   return rc;
@@ -388,7 +395,7 @@ RC HeapTableEngine::update_record_with_trx(const Record &old_record, const Recor
 
   return RC::SUCCESS;
 }
-// 清除field and index --> 索引还unsupported
+// 清除field and index
 RC HeapTableEngine::close()
 {
   // 关闭索引
@@ -401,13 +408,9 @@ RC HeapTableEngine::close()
     delete record_handler_;
     record_handler_ = nullptr;
   }
-
-  // // 关闭磁盘数据缓冲池 DiskDataPool --> 与table.cpp中的drop方法无冲突
-  // if (data_buffer_pool_ != nullptr) {
-  //   data_buffer_pool_->close_file();
-  //   delete data_buffer_pool_;
-  //   data_buffer_pool_ = nullptr;
-  // }
+  else {
+    LOG_WARN("record_handler_ is nullptr when close table engine. table=%s", table_meta_->name());
+  }
 
   LOG_INFO("Table has been closed: %s", table_meta_->name());
   return RC::SUCCESS;

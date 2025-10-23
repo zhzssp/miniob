@@ -220,7 +220,7 @@ char *LeafIndexNodeHandler::value_at(int index)
   return __value_at(index);
 }
 
-int LeafIndexNodeHandler::lookup(const KeyComparator &comparator, const char *key, bool *found /* = nullptr */) const
+int LeafIndexNodeHandler::lookup(const CompositeKeyComparator &comparator, const char *key, bool *found /* = nullptr */) const
 {
   const int                    size = this->size();
   common::BinaryIterator<char> iter_begin(item_size(), __key_at(0));
@@ -259,7 +259,7 @@ RC LeafIndexNodeHandler::remove(int index)
   return RC::SUCCESS;
 }
 
-int LeafIndexNodeHandler::remove(const char *key, const KeyComparator &comparator)
+int LeafIndexNodeHandler::remove(const char *key, const CompositeKeyComparator &comparator)
 {
   bool found = false;
   int  index = lookup(comparator, key, &found);
@@ -344,7 +344,7 @@ RC LeafIndexNodeHandler::preappend(const char *item) { return insert(0, item, it
 
 char *LeafIndexNodeHandler::__item_at(int index) const { return leaf_node_->array + (index * item_size()); }
 
-string to_string(const LeafIndexNodeHandler &handler, const KeyPrinter &printer)
+string to_string(const LeafIndexNodeHandler &handler, const CompositeKeyPrinter &printer)
 {
   stringstream ss;
   ss << to_string((const IndexNodeHandler &)handler) << ",next page:" << handler.next_page();
@@ -356,7 +356,7 @@ string to_string(const LeafIndexNodeHandler &handler, const KeyPrinter &printer)
   return ss.str();
 }
 
-bool LeafIndexNodeHandler::validate(const KeyComparator &comparator, DiskBufferPool *bp) const
+bool LeafIndexNodeHandler::validate(const CompositeKeyComparator &comparator, DiskBufferPool *bp) const
 {
   bool result = IndexNodeHandler::validate();
   if (false == result) {
@@ -424,7 +424,7 @@ InternalIndexNodeHandler::InternalIndexNodeHandler(
     : IndexNodeHandler(mtr, header, frame), internal_node_((InternalIndexNode *)frame->data())
 {}
 
-string to_string(const InternalIndexNodeHandler &node, const KeyPrinter &printer)
+string to_string(const InternalIndexNodeHandler &node, const CompositeKeyPrinter &printer)
 {
   stringstream ss;
   ss << to_string((const IndexNodeHandler &)node);
@@ -470,7 +470,7 @@ RC InternalIndexNodeHandler::create_new_root(PageNum first_page_num, const char 
  * @NOTE We don't need to set child's parent page num here. You can see the callers for details
  * It's also friendly to unittest that we don't set the child's parent page num.
  */
-RC InternalIndexNodeHandler::insert(const char *key, PageNum page_num, const KeyComparator &comparator)
+RC InternalIndexNodeHandler::insert(const char *key, PageNum page_num, const CompositeKeyComparator &comparator)
 {
   int insert_position = -1;
   lookup(comparator, key, nullptr, &insert_position);
@@ -511,7 +511,7 @@ RC InternalIndexNodeHandler::move_half_to(InternalIndexNodeHandler &other)
  * @return unlike the leafNode, the return value is not the insert position,
  * but only the index of child to find.
  */
-int InternalIndexNodeHandler::lookup(const KeyComparator &comparator, const char *key, bool *found /* = nullptr */,
+int InternalIndexNodeHandler::lookup(const CompositeKeyComparator &comparator, const char *key, bool *found /* = nullptr */,
     int *insert_position /*= nullptr */) const
 {
   const int size = this->size();
@@ -677,7 +677,7 @@ int InternalIndexNodeHandler::value_size() const { return sizeof(PageNum); }
 
 int InternalIndexNodeHandler::item_size() const { return key_size() + this->value_size(); }
 
-bool InternalIndexNodeHandler::validate(const KeyComparator &comparator, DiskBufferPool *bp) const
+bool InternalIndexNodeHandler::validate(const CompositeKeyComparator &comparator, DiskBufferPool *bp) const
 {
   bool result = IndexNodeHandler::validate();
   if (false == result) {
@@ -789,8 +789,8 @@ RC BplusTreeHandler::sync()
   return disk_buffer_pool_->flush_all_pages();
 }
 
-RC BplusTreeHandler::create(LogHandler &log_handler, BufferPoolManager &bpm, const char *file_name, AttrType attr_type,
-    int attr_length, int internal_max_size /* = -1*/, int leaf_max_size /* = -1 */)
+RC BplusTreeHandler::create(LogHandler &log_handler, BufferPoolManager &bpm, const char *file_name, vector<AttrType> attr_type,
+    vector<int32_t> attr_length, int internal_max_size /* = -1*/, int leaf_max_size /* = -1 */)
 {
   RC rc = bpm.create_file(file_name);
   if (OB_FAIL(rc)) {
@@ -808,6 +808,7 @@ RC BplusTreeHandler::create(LogHandler &log_handler, BufferPoolManager &bpm, con
   }
   LOG_INFO("Successfully open index file %s.", file_name);
 
+  // 使用下面的重载版本
   rc = this->create(log_handler, *bp, attr_type, attr_length, internal_max_size, leaf_max_size);
   if (OB_FAIL(rc)) {
     bpm.close_file(file_name);
@@ -818,14 +819,21 @@ RC BplusTreeHandler::create(LogHandler &log_handler, BufferPoolManager &bpm, con
   return rc;
 }
 
-RC BplusTreeHandler::create(LogHandler &log_handler, DiskBufferPool &buffer_pool, AttrType attr_type, int attr_length,
+RC BplusTreeHandler::create(LogHandler &log_handler, DiskBufferPool &buffer_pool, vector<AttrType> attr_type, vector<int32_t> attr_length,
     int internal_max_size /* = -1 */, int leaf_max_size /* = -1 */)
 {
+  // attr_length --> total_attr_length
+  int total_attr_length = 0;
+  for (size_t i = 0; i < attr_length.size() && i < 3; i++)
+  {
+    total_attr_length += attr_length[i];
+  }
+  // 根据键值的长度计算空间
   if (internal_max_size < 0) {
-    internal_max_size = calc_internal_page_capacity(attr_length);
+    internal_max_size = calc_internal_page_capacity(total_attr_length);
   }
   if (leaf_max_size < 0) {
-    leaf_max_size = calc_leaf_page_capacity(attr_length);
+    leaf_max_size = calc_leaf_page_capacity(total_attr_length);
   }
 
   log_handler_      = &log_handler;
@@ -849,21 +857,31 @@ RC BplusTreeHandler::create(LogHandler &log_handler, DiskBufferPool &buffer_pool
     return RC::INTERNAL;
   }
 
-  char            *pdata         = header_frame->data();
-  IndexFileHeader *file_header   = (IndexFileHeader *)pdata;
-  file_header->attr_length       = attr_length;
-  file_header->key_length        = attr_length + sizeof(RID);
-  file_header->attr_type         = attr_type;
+  // 原本的思想是分配一个帧来存储file_header对象 --> 现在使用序列化+反序列化
+  IndexFileHeader *file_header   = new IndexFileHeader();
   file_header->internal_max_size = internal_max_size;
   file_header->leaf_max_size     = leaf_max_size;
+  // 键的总长度
+  file_header->key_length        = total_attr_length + sizeof(RID);
+  // 各个字段的长度
+  file_header->attr_length       = attr_length;
+  file_header->attr_type         = attr_type;
   file_header->root_page         = BP_INVALID_PAGE_NUM;
+
+  char *pdata = header_frame->data();
+  // 将内部的字段信息写入page data中
+  file_header->serialize_to(pdata);
+
+  LOG_INFO("------------------ IndexFileHeader is defined, and data is serialized to corresponding page ------------------");
 
   // 取消记录日志的原因请参考下面的sync调用的地方。
   // mtr.logger().init_header_page(header_frame, *file_header);
 
   header_frame->mark_dirty();
 
-  memcpy(&file_header_, pdata, sizeof(file_header_));
+  // 将页面中的的数据读取进属性中存起来
+  file_header_ = *file_header;
+  LOG_INFO("Bplus tree file header: %s", file_header_.to_string().c_str());
   header_dirty_ = false;
 
   mem_pool_item_ = make_unique<common::MemPoolItem>("b+tree");
@@ -900,6 +918,7 @@ RC BplusTreeHandler::open(LogHandler &log_handler, BufferPoolManager &bpm, const
 
   DiskBufferPool *disk_buffer_pool = nullptr;
 
+  // 根据文件信息初始化buffer pool
   RC rc = bpm.open_file(log_handler, file_name, disk_buffer_pool);
   if (OB_FAIL(rc)) {
     LOG_WARN("Failed to open file name=%s, rc=%d:%s", file_name, rc, strrc(rc));
@@ -913,6 +932,7 @@ RC BplusTreeHandler::open(LogHandler &log_handler, BufferPoolManager &bpm, const
   return rc;
 }
 
+// 从buffer pool中获取保存好的frame, 将其中的头部信息读入file_header_
 RC BplusTreeHandler::open(LogHandler &log_handler, DiskBufferPool &buffer_pool)
 {
   if (disk_buffer_pool_ != nullptr) {
@@ -930,12 +950,19 @@ RC BplusTreeHandler::open(LogHandler &log_handler, DiskBufferPool &buffer_pool)
   }
 
   char *pdata = frame->data();
-  memcpy(&file_header_, pdata, sizeof(IndexFileHeader));
+  file_header_.deserialize_from(pdata);
+  if (file_header_.attr_type.empty() || file_header_.attr_length.empty()) {
+    LOG_WARN("Empty file_header_ --> cannot get data from frame, use default format");
+    file_header_.attr_type   = {AttrType::INTS};
+    file_header_.attr_length = {4};
+  }
   header_dirty_     = false;
+
   disk_buffer_pool_ = &buffer_pool;
   log_handler_      = &log_handler;
 
   mem_pool_item_ = make_unique<common::MemPoolItem>("b+tree");
+  // 暂时只使用第一个字段所占长度判断
   if (mem_pool_item_->init(file_header_.key_length) < 0) {
     LOG_WARN("Failed to init memory pool for index");
     close();
@@ -945,6 +972,7 @@ RC BplusTreeHandler::open(LogHandler &log_handler, DiskBufferPool &buffer_pool)
   // close old page_handle
   buffer_pool.unpin_page(frame);
 
+  // file_header_ == nullptr ???
   key_comparator_.init(file_header_);
   key_printer_.init(file_header_);
   LOG_INFO("Successfully open index");
@@ -1023,7 +1051,7 @@ RC BplusTreeHandler::print_tree()
 
   RC rc = disk_buffer_pool_->get_this_page(page_num, &frame);
   if (OB_FAIL(rc)) {
-    LOG_WARN("failed to fetch page. page id=%d, rc=%d:%s", page_num, rc, strrc(rc));
+    LOG_WARN("failed to fetch page --> page id=%d, rc=%d:%s", page_num, rc, strrc(rc));
     return rc;
   }
 
@@ -1120,6 +1148,7 @@ bool BplusTreeHandler::validate_leaf_link(BplusTreeMiniTransaction &mtr)
   PageNum              next_page_num = leaf_node.next_page();
 
   MemPoolItem::item_unique_ptr prev_key = mem_pool_item_->alloc_unique_ptr();
+  // 作用是什么？--> 暂时使用第一个字段
   memcpy(prev_key.get(), leaf_node.key_at(leaf_node.size() - 1), file_header_.key_length);
 
   bool result = true;
@@ -1137,6 +1166,7 @@ bool BplusTreeHandler::validate_leaf_link(BplusTreeMiniTransaction &mtr)
     }
 
     next_page_num = leaf_node.next_page();
+    // ???
     memcpy(prev_key.get(), leaf_node.key_at(leaf_node.size() - 1), file_header_.key_length);
   }
 
@@ -1421,14 +1451,17 @@ RC BplusTreeHandler::recover_update_root_page(BplusTreeMiniTransaction &mtr, Pag
 RC BplusTreeHandler::recover_init_header_page(
     BplusTreeMiniTransaction &mtr, Frame *frame, const IndexFileHeader &header)
 {
-  IndexFileHeader *file_header = reinterpret_cast<IndexFileHeader *>(frame->data());
-  memcpy(file_header, &header, sizeof(IndexFileHeader));
+  // IndexFileHeader *file_header = reinterpret_cast<IndexFileHeader *>(frame->data());
+  // memcpy(file_header, &header, sizeof(IndexFileHeader));
+  char *pdata = frame->data();
+  header.serialize_to(pdata); // header 序列化到页面中
+  
   file_header_  = header;
   header_dirty_ = false;
   frame->mark_dirty();
 
-  key_comparator_.init(file_header_.attr_type, file_header_.attr_length);
-  key_printer_.init(file_header_.attr_type, file_header_.attr_length);
+  key_comparator_.init(file_header_);
+  key_printer_.init(file_header_);
 
   return RC::SUCCESS;
 }
@@ -1481,8 +1514,8 @@ MemPoolItem::item_unique_ptr BplusTreeHandler::make_key(const char *user_key, co
     LOG_WARN("Failed to alloc memory for key.");
     return nullptr;
   }
-  memcpy(static_cast<char *>(key.get()), user_key, file_header_.attr_length);
-  memcpy(static_cast<char *>(key.get()) + file_header_.attr_length, &rid, sizeof(rid));
+  memcpy(static_cast<char *>(key.get()), user_key, file_header_.total_attr_length());
+  memcpy(static_cast<char *>(key.get()) + file_header_.total_attr_length(), &rid, sizeof(rid));
   return key;
 }
 
@@ -1783,8 +1816,8 @@ RC BplusTreeHandler::delete_entry(const char *user_key, const RID *rid)
   }
   char *key = static_cast<char *>(pkey.get());
 
-  memcpy(key, user_key, file_header_.attr_length);
-  memcpy(key + file_header_.attr_length, rid, sizeof(*rid));
+  memcpy(key, user_key, file_header_.total_attr_length());
+  memcpy(key + file_header_.total_attr_length(), rid, sizeof(*rid));
 
   BplusTreeOperationType op = BplusTreeOperationType::DELETE;
 
@@ -1831,8 +1864,9 @@ RC BplusTreeScanner::open(const char *left_user_key, int left_len, bool left_inc
 
   // 校验输入的键值是否是合法范围
   if (left_user_key && right_user_key) {
-    const auto &attr_comparator = tree_handler_.key_comparator_.attr_comparator();
-    const int   result          = attr_comparator(left_user_key, right_user_key);
+    // const auto &attr_comparator = tree_handler_.key_comparator_.attr_comparator();
+    // 被比较的类型是否与接口兼容？
+    const int result = tree_handler_.key_comparator_(left_user_key, right_user_key);
     if (result > 0 ||  // left < right
                        // left == right but is (left,right)/[left,right) or (left,right]
         (result == 0 && (left_inclusive == false || right_inclusive == false))) {
@@ -1856,7 +1890,7 @@ RC BplusTreeScanner::open(const char *left_user_key, int left_len, bool left_inc
   } else {
 
     char *fixed_left_key = const_cast<char *>(left_user_key);
-    if (tree_handler_.file_header_.attr_type == AttrType::CHARS) {
+    if (tree_handler_.file_header_.attr_type[0] == AttrType::CHARS) {
       bool should_inclusive_after_fix = false;
       rc = fix_user_key(left_user_key, left_len, true /*greater*/, &fixed_left_key, &should_inclusive_after_fix);
       if (OB_FAIL(rc)) {
@@ -1923,7 +1957,7 @@ RC BplusTreeScanner::open(const char *left_user_key, int left_len, bool left_inc
 
     char *fixed_right_key          = const_cast<char *>(right_user_key);
     bool  should_include_after_fix = false;
-    if (tree_handler_.file_header_.attr_type == AttrType::CHARS) {
+    if (tree_handler_.file_header_.attr_type[0] == AttrType::CHARS) {
       rc = fix_user_key(right_user_key, right_len, false /*want_greater*/, &fixed_right_key, &should_include_after_fix);
       if (OB_FAIL(rc)) {
         LOG_WARN("failed to fix right user key. rc=%s", strrc(rc));
@@ -2046,24 +2080,24 @@ RC BplusTreeScanner::fix_user_key(
 
   *should_inclusive = false;
 
-  int32_t attr_length = tree_handler_.file_header_.attr_length;
-  char   *key_buf     = new char[attr_length];
+  int32_t total_attr_length = tree_handler_.file_header_.total_attr_length();
+  char   *key_buf     = new char[total_attr_length];
   if (nullptr == key_buf) {
     return RC::NOMEM;
   }
 
-  if (key_len <= attr_length) {
+  if (key_len <= total_attr_length) {
     memcpy(key_buf, user_key, key_len);
-    memset(key_buf + key_len, 0, attr_length - key_len);
+    memset(key_buf + key_len, 0, total_attr_length - key_len);
 
     *fixed_key = key_buf;
     return RC::SUCCESS;
   }
 
   // key_len > attr_length
-  memcpy(key_buf, user_key, attr_length);
+  memcpy(key_buf, user_key, total_attr_length);
 
-  char c = user_key[attr_length];
+  char c = user_key[total_attr_length];
   if (c == 0) {
     *fixed_key = key_buf;
     return RC::SUCCESS;
@@ -2077,9 +2111,52 @@ RC BplusTreeScanner::fix_user_key(
   // NOTE: 假设都是普通的ASCII字符，不包含二进制字符，使用char不会溢出
   *should_inclusive = true;
   if (want_greater) {
-    key_buf[attr_length - 1]++;
+    key_buf[total_attr_length - 1]++;
   }
 
   *fixed_key = key_buf;
   return RC::SUCCESS;
+}
+
+void CompositeKeyComparator::init() {
+  field_count_ = 0;
+  field_comparators_.init();
+  field_offsets_ = vector<int32_t>(6);
+}
+
+void CompositeKeyComparator::init(const IndexFileHeader &header)
+{
+  // 安全检查
+  if (header.attr_type.empty() || header.attr_length.empty()) {
+    LOG_ERROR("Invalid index file header: attr_type or attr_length is empty");
+    return;
+  }
+
+  field_count_ = header.attr_length.size();
+  field_comparators_.init(header.attr_type, header.attr_length);
+  for(unsigned int i = 0; i < field_count_; i++) {
+    field_offsets_.push_back(header.field_offset(i));
+  }
+}
+
+int CompositeKeyComparator::operator()(const char *v1, const char *v2) const
+{
+  if(v1 == nullptr || v2 == nullptr) {
+    LOG_ERROR("Invalid argument of comparator: null key");
+    return 0;
+  }
+
+  for (int i = 0; i < field_count_; i++) {
+    const char *key1   = v1 + field_offsets_[i];
+    const char *key2   = v2 + field_offsets_[i];
+    int         result = field_comparators_(key1, key2);
+    if (result != 0) {
+      return result;
+    }
+  }
+
+  // 所有字段都相等,最后比较RID
+  const RID *rid1 = (const RID *)(v1 + field_offsets_[field_count_]);
+  const RID *rid2 = (const RID *)(v2 + field_offsets_[field_count_]);
+  return RID::compare(rid1, rid2);
 }

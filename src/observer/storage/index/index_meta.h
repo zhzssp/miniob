@@ -16,6 +16,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/sys/rc.h"
 #include "common/lang/string.h"
+#include "common/type/attr_type.h"
 
 class TableMeta;
 class FieldMeta;
@@ -35,7 +36,7 @@ class IndexMeta
 public:
   IndexMeta() = default;
 
-  RC init(const char *name, const vector<FieldMeta> &fields);
+  RC init(const char *name, const vector<const FieldMeta *> &fields);
 
 public:
   const char *name() const;
@@ -45,6 +46,7 @@ public:
   const char *field(int index) const;
   AttrType    field_type(int index) const;
   int         field_length(int index) const;
+  const char *fields() const;
 
   // 复合键操作
   /**
@@ -83,5 +85,5 @@ protected:
   // 只有一个字段 --> 可扩展到两个
   vector<string>   fields_;  // field's name
   vector<AttrType> field_types_;
-  vector<int>      field_lengths_;
+  vector<int32_t>      field_lengths_;
 };
