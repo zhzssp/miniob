@@ -18,3 +18,8 @@ UpdateLogicalOperator::UpdateLogicalOperator(Table *table, const char *attribute
     : table_(table), attribute_name_(attribute_name), value_(value)
 {}
 
+
+
+
+
+

@@ -53,12 +53,14 @@ RC FilterStmt::create(Db *db, Table *default_table, unordered_map<string, Table 
 RC get_table_and_field(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
     const RelAttrSqlNode &attr, Table *&table, const FieldMeta *&field)
 {
+  
   if (common::is_blank(attr.relation_name.c_str())) {
     table = default_table;
   } else if (nullptr != tables) {
     auto iter = tables->find(attr.relation_name);
     if (iter != tables->end()) {
       table = iter->second;
+    } else {
     }
   } else {
     table = db->find_table(attr.relation_name.c_str());

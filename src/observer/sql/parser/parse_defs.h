@@ -75,6 +75,34 @@ struct ConditionSqlNode
   Value          right_value;    ///< right-hand side value if right_is_attr = FALSE
 };
 
+
+/**
+ * @brief 描述一个 JOIN 条件
+ * @ingroup SQLParser
+ */
+struct JoinConditionSqlNode
+{
+  int left_is_attr;              ///< TRUE if left-hand side is an attribute
+  RelAttrSqlNode left_attr;      ///< 左表属性 (if left_is_attr = true)
+  Value left_value;              ///< 左表值 (if left_is_attr = false)
+  int right_is_attr;             ///< TRUE if right-hand side is an attribute
+  RelAttrSqlNode right_attr;     ///< 右表属性 (if right_is_attr = true)
+  Value right_value;             ///< 右表值 (if right_is_attr = false)
+  CompOp comp;                   ///< 比较操作符
+};
+
+/**
+ * @brief 描述一个表引用（可能是表名或子查询）
+ * @ingroup SQLParser
+ */
+struct TableReferenceSqlNode
+{
+  string table_name;                    ///< 表名
+  string alias;                         ///< 表别名
+  vector<JoinConditionSqlNode> join_conditions;  ///< JOIN 条件
+  bool is_join;                         ///< 是否为 JOIN 操作
+};
+
 /**
  * @brief 描述一个select语句
  * @ingroup SQLParser
@@ -89,7 +117,8 @@ struct ConditionSqlNode
 struct SelectSqlNode
 {
   vector<unique_ptr<Expression>> expressions;  ///< 查询的表达式
-  vector<string>                 relations;    ///< 查询的表
+  vector<string>                 relations;    ///< 查询的表（保持向后兼容）
+  vector<TableReferenceSqlNode>  table_references;  ///< 表引用（支持 JOIN）
   vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件
   vector<unique_ptr<Expression>> group_by;     ///< group by clause
 };
