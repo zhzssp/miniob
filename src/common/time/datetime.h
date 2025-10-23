@@ -45,6 +45,44 @@ namespace common {
  *  \sa http://scienceworld.wolfram.com/astronomy/Weekday.html
  */
 
+inline bool is_invalid_date(int year, int month, int day)
+{
+  // 检查年份范围（通常数据库支持1900-9999年）
+  if (year < 1900 || year > 9999) {
+    return true;
+  }
+
+  // 检查月份范围
+  if (month < 1 || month > 12) {
+    return true;
+  }
+
+  // 检查日期范围
+  if (day < 1) {
+    return true;
+  }
+
+  // 获取指定月份的最大天数
+  int max_days = 31;
+  if (month == 4 || month == 6 || month == 9 || month == 11) {
+    max_days = 30;
+  } else if (month == 2) {
+    // 2月特殊处理，考虑闰年
+    if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)) {
+      max_days = 29;  // 闰年2月有29天
+    } else {
+      max_days = 28;  // 平年2月有28天
+    }
+  }
+
+  // 检查日期是否超出该月的最大天数
+  if (day > max_days) {
+    return true;
+  }
+
+  return false;
+}
+
 struct DateTime
 {
   int m_date;
