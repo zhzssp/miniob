@@ -2,11 +2,12 @@
 
 #include "common/sys/rc.h"
 #include "common/type/data_type.h"
-
+#include "common/value.h"
 /**
  * @brief 日期类型
  * @ingroup DataType
  */
+
 class DateType : public DataType
 {
 public:
