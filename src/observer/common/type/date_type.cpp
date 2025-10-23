@@ -14,7 +14,17 @@
 int DateType::compare(const Value &left, const Value &right) const
 {
   ASSERT(left.attr_type() == AttrType::DATES && right.attr_type() == AttrType::DATES, "invalid type");
-  return common::compare_int((void *)&left.value_.int_value_, (void *)&right.value_.int_value_);
+  int i1 = left.value_.int_value_;
+  int i2 = right.value_.int_value_;
+  if (i1 > i2)
+  {
+    return 1;
+  }
+  if (i1 < i2)
+  {
+    return -1;
+  }
+  return 0;
 }
 
 RC DateType::set_value_from_str(Value &val, const string &data) const
