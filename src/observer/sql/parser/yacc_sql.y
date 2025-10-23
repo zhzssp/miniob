@@ -14,6 +14,10 @@
 
 using namespace std;
 
+// 全局变量用于存储 JOIN 条件
+static vector<JoinConditionSqlNode> g_join_conditions;
+static vector<TableReferenceSqlNode> g_table_references;
+
 string token_name(const char *sql_string, YYLTYPE *llocp)
 {
   return string(sql_string + llocp->first_column, llocp->last_column - llocp->first_column + 1);
@@ -117,6 +121,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         LE
         GE
         NE
+        INNER
+        JOIN
 
 /** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
 %union {
@@ -134,6 +140,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   vector<RelAttrSqlNode> *                   rel_attr_list;
   vector<string> *                           relation_list;
   vector<string> *                           key_list;
+  vector<JoinConditionSqlNode> *             join_condition_list;
   char *                                     cstring;
   int                                        number;
   float                                      floats;
@@ -205,6 +212,11 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 // commands should be a list but I use a single command instead
 %type <sql_node>            commands
 
+// JOIN 相关类型
+%type <cstring>             table_name
+%type <condition>            join_condition
+%type <join_condition_list>  join_condition_list
+
 %left '+' '-'
 %left '*' '/'
 %right UMINUS
@@ -214,6 +226,10 @@ commands: command_wrapper opt_semicolon  //commands or sqls. parser starts here.
   {
     unique_ptr<ParsedSqlNode> sql_node = unique_ptr<ParsedSqlNode>($1);
     sql_result->add_sql_node(std::move(sql_node));
+    
+    // 清理全局变量
+    g_join_conditions.clear();
+    g_table_references.clear();
   }
   ;
 
@@ -505,6 +521,12 @@ select_stmt:        /*  select 语句的语法解析树*/
         $$->selection.group_by.swap(*$6);
         delete $6;
       }
+      
+      // 处理 JOIN 条件
+      if (!g_table_references.empty()) {
+        $$->selection.table_references = g_table_references;
+        g_table_references.clear();
+      }
     }
     ;
 calc_stmt:
@@ -605,8 +627,127 @@ rel_list:
       } else {
         $$ = new vector<string>;
       }
-
       $$->insert($$->begin(), $1);
+    }
+    | relation INNER JOIN relation ON join_condition_list {
+      $$ = new vector<string>();
+      $$->push_back($1);
+      $$->push_back($4);
+      
+      // 创建表引用并存储 JOIN 条件
+      TableReferenceSqlNode left_table;
+      left_table.table_name = $1;
+      left_table.is_join = false;
+      
+      TableReferenceSqlNode right_table;
+      right_table.table_name = $4;
+      right_table.is_join = true;
+      right_table.join_conditions = *$6;
+      
+      g_table_references.push_back(left_table);
+      g_table_references.push_back(right_table);
+      
+      delete $6;
+    }
+    | rel_list INNER JOIN relation ON join_condition_list {
+      if ($1 != nullptr) {
+        $$ = $1;
+      } else {
+        $$ = new vector<string>;
+      }
+      $$->push_back($4);
+      
+      // 创建表引用并存储 JOIN 条件
+      TableReferenceSqlNode right_table;
+      right_table.table_name = $4;
+      right_table.is_join = true;
+      right_table.join_conditions = *$6;
+      
+      g_table_references.push_back(right_table);
+      
+      delete $6;
+    }
+    | rel_list COMMA relation {
+      if ($1 != nullptr) {
+        $$ = $1;
+      } else {
+        $$ = new vector<string>;
+      }
+      $$->push_back($3);
+    }
+    ;
+
+// 添加 JOIN 条件处理规则
+join_condition:
+    rel_attr comp_op rel_attr {
+      $$ = new ConditionSqlNode();
+      $$->left_is_attr = true;
+      $$->left_attr = *$1;
+      $$->right_is_attr = true;
+      $$->right_attr = *$3;
+      $$->comp = $2;
+      delete $1;
+      delete $3;
+    }
+    | rel_attr comp_op value {
+      $$ = new ConditionSqlNode();
+      $$->left_is_attr = true;
+      $$->left_attr = *$1;
+      $$->right_is_attr = false;
+      $$->right_value = *$3;
+      $$->comp = $2;
+      delete $1;
+      delete $3;
+    }
+    | value comp_op rel_attr {
+      $$ = new ConditionSqlNode();
+      $$->left_is_attr = false;
+      $$->left_value = *$1;
+      $$->right_is_attr = true;
+      $$->right_attr = *$3;
+      $$->comp = $2;
+      delete $1;
+      delete $3;
+    }
+    ;
+
+// 添加 JOIN 条件列表处理
+join_condition_list:
+    join_condition {
+      $$ = new vector<JoinConditionSqlNode>();
+      JoinConditionSqlNode join_cond;
+      join_cond.left_is_attr = $1->left_is_attr;
+      join_cond.left_attr = $1->left_attr;
+      join_cond.left_value = $1->left_value;
+      join_cond.right_is_attr = $1->right_is_attr;
+      join_cond.right_attr = $1->right_attr;
+      join_cond.right_value = $1->right_value;
+      join_cond.comp = $1->comp;
+      $$->push_back(join_cond);
+      delete $1;
+    }
+    | join_condition_list AND join_condition {
+      if ($1 != nullptr) {
+        $$ = $1;
+      } else {
+        $$ = new vector<JoinConditionSqlNode>();
+      }
+      JoinConditionSqlNode join_cond;
+      join_cond.left_is_attr = $3->left_is_attr;
+      join_cond.left_attr = $3->left_attr;
+      join_cond.left_value = $3->left_value;
+      join_cond.right_is_attr = $3->right_is_attr;
+      join_cond.right_attr = $3->right_attr;
+      join_cond.right_value = $3->right_value;
+      join_cond.comp = $3->comp;
+      $$->push_back(join_cond);
+      delete $3;
+    }
+    ;
+
+table_name:
+    ID {
+      $$ = $1;
     }
     ;
 
