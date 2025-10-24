@@ -134,11 +134,16 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
 
   Index     *index      = nullptr;
   ValueExpr *value_expr = nullptr;
+  bool       has_not_equal = false;  // 检查是否有NOT_EQUAL查询
+  
   for (auto &expr : predicates) {
     if (expr->type() == ExprType::COMPARISON) {
       auto comparison_expr = static_cast<ComparisonExpr *>(expr.get());
-      // 简单处理，就找等值查询
-      if (comparison_expr->comp() != EQUAL_TO && comparison_expr->comp() != NOT_EQUAL) {
+      // 检查
+      if (comparison_expr->comp() == NOT_EQUAL) {
+        has_not_equal = true;
+      }
+      if (comparison_expr->comp() != EQUAL_TO) {
         continue;
       }
 
@@ -173,20 +178,35 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
   }
 
   if (index != nullptr) {
-    ASSERT(value_expr != nullptr, "got an index but value expr is null ?");
+    if (has_not_equal) {
+      // 使用索引全表扫描在过滤阶段应用条件
+      IndexScanPhysicalOperator *index_scan_oper = new IndexScanPhysicalOperator(table,
+          index,
+          table_get_oper.read_write_mode(),
+          nullptr,  // left_value = nullptr 表示全表扫描
+          true,     // left_inclusive
+          nullptr,  // right_value = nullptr 表示全表扫描
+          true);    // right_inclusive
 
-    const Value               &value           = value_expr->get_value();
-    IndexScanPhysicalOperator *index_scan_oper = new IndexScanPhysicalOperator(table,
-        index,
-        table_get_oper.read_write_mode(),
-        &value,
-        true /*left_inclusive*/,
-        &value,
-        true /*right_inclusive*/);
+      index_scan_oper->set_predicates(std::move(predicates));
+      oper = unique_ptr<PhysicalOperator>(index_scan_oper);
+      LOG_TRACE("use index scan for NOT_EQUAL query (full table scan)");
+    } else {
+      // 对于等值查询，使用索引范围扫描
+      ASSERT(value_expr != nullptr, "got an index but value expr is null ?");
+      const Value               &value           = value_expr->get_value();
+      IndexScanPhysicalOperator *index_scan_oper = new IndexScanPhysicalOperator(table,
+          index,
+          table_get_oper.read_write_mode(),
+          &value,
+          true /*left_inclusive*/,
+          &value,
+          true /*right_inclusive*/);
 
-    index_scan_oper->set_predicates(std::move(predicates));
-    oper = unique_ptr<PhysicalOperator>(index_scan_oper);
-    LOG_TRACE("use index scan");
+      index_scan_oper->set_predicates(std::move(predicates));
+      oper = unique_ptr<PhysicalOperator>(index_scan_oper);
+      LOG_TRACE("use index scan for EQUAL query");
+    }
   } else {
     auto table_scan_oper = new TableScanPhysicalOperator(table, table_get_oper.read_write_mode());
     table_scan_oper->set_predicates(std::move(predicates));
