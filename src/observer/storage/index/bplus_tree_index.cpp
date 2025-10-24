@@ -105,12 +105,20 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 
   // 构建复合键 --> 字节级存储
   int32_t total_key_length = 0;
+  int32_t count = 1;
   for (const FieldMeta *field_meta : field_metas_) {
     if (nullptr == field_meta) {
-      LOG_WARN("Found null field meta in index %s", index_meta_.name());
-      return RC::INTERNAL;
+      LOG_ERROR("Found null field meta in index %s", index_meta_.name());
+      return RC::INVALID_ARGUMENT;
     }
+    LOG_DEBUG("Get attr %d's length = %d when computing total key length in BplusTreeIndex::insert_entry()", count, field_meta->len());
     total_key_length += field_meta->len();
+
+    // 防止累加溢出
+    if (total_key_length > INT32_MAX) {
+      LOG_ERROR("Total key length overflow for index %s, total = %d", index_meta_.name(), total_key_length);
+      return RC::INVALID_ARGUMENT;
+    }
   }
 
   vector<char> composite_key;
@@ -137,6 +145,12 @@ RC BplusTreeIndex::delete_entry(const char *record, const RID *rid)
       return RC::INTERNAL;
     }
     total_key_length += field_meta->len();
+
+    // 防止累加溢出
+    if (total_key_length > INT32_MAX) {
+      LOG_ERROR("Total key length overflow for index %s, total = %d", index_meta_.name(), total_key_length);
+      return RC::INVALID_ARGUMENT;
+    }
   }
 
   vector<char> composite_key;

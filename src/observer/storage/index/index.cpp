@@ -21,14 +21,23 @@ RC Index::init(const IndexMeta &index_meta, const vector<const FieldMeta *> &fie
     return RC::INVALID_ARGUMENT;
   }
 
+  // field_metas的生命周期可能产生问题
+  int count = 1;
   for (const FieldMeta *field_meta : field_metas) {
     if (nullptr == field_meta) {
       LOG_WARN("Found null field meta when init index %s", index_meta.name());
       return RC::INVALID_ARGUMENT;
     }
+    LOG_INFO("GET field %d when init Index, length = %d", count, field_meta->len());
+    count++;
   }
 
   index_meta_  = index_meta;
+
+  // 清空之前的字段元数据（如果有）
+  field_metas_.clear();
+  // 确保 field_metas_ 有足够容量
+  field_metas_.reserve(field_metas.size());
   field_metas_ = field_metas;
   return RC::SUCCESS;
 }

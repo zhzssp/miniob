@@ -228,8 +228,10 @@ RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid)
 {
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
+    LOG_INFO("Insert record = %s into Index %s. Location is table engine.", record, index->index_meta_->name());
     rc = index->insert_entry(record, &rid);
     if (rc != RC::SUCCESS) {
+      LOG_ERROR("Cannot insert record = %s into Index %s. Location is table engine.", record, index->index_meta_->name());
       break;
     }
   }
