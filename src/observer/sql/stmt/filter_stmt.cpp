@@ -67,7 +67,6 @@ RC get_table_and_field(Db *db, Table *default_table, unordered_map<string, Table
     auto iter = tables->find(attr.relation_name);
     if (iter != tables->end()) {
       table = iter->second;
-    } else {
     }
   } else {
     table = db->find_table(attr.relation_name.c_str());

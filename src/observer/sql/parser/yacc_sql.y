@@ -527,6 +527,13 @@ select_stmt:        /*  select 语句的语法解析树*/
       // 处理 JOIN 条件
       if (!g_table_references.empty()) {
         $$->selection.table_references = g_table_references;
+        // 同时填充 ALIASES 字段
+        for (const auto& table_ref : g_table_references) {
+          RelationSqlNode alias_node;
+          alias_node.name = table_ref.table_name;
+          alias_node.alias = table_ref.alias;
+          $$->selection.ALIASES.push_back(alias_node);
+        }
         g_table_references.clear();
       }
     }
@@ -543,12 +550,17 @@ calc_stmt:
 expression_list:
     expression
     {
-      $$ = new vector<unique_ptr<Expression>>;
+      $$ = new std::vector<std::unique_ptr<Expression>>;
       $$->emplace_back($1);
     }
     | expression ID{
       $$ = new std::vector<std::unique_ptr<Expression>>;
       $1->set_alias($2);
+      $$->emplace_back($1);
+    }
+    | expression AS ID{
+      $$ = new std::vector<std::unique_ptr<Expression>>;
+      $1->set_alias($3);
       $$->emplace_back($1);
     }
     | expression ID COMMA expression_list
@@ -571,17 +583,12 @@ expression_list:
       $1->set_alias($3);
       $$->emplace($$->begin(), $1);
     }
-    | expression AS ID{
-      $$ = new std::vector<std::unique_ptr<Expression>>;
-      $1->set_alias($3);
-      $$->emplace_back($1);
-    }
     | expression COMMA expression_list
     {
       if ($3 != nullptr) {
         $$ = $3;
       } else {
-        $$ = new vector<unique_ptr<Expression>>;
+        $$ = new std::vector<std::unique_ptr<Expression>>;
       }
       $$->emplace($$->begin(), $1);
     }

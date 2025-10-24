@@ -131,9 +131,6 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
   
   // 
-  unordered_map<string, string> table_alias_map;  // 别名 -> 表名映射
-  unordered_map<string, string> field_alias_map;  // 字段别名映射
-
   std::shared_ptr<std::unordered_map<string, string>> name2alias = std::make_shared<std::unordered_map<string, string>>();
   std::shared_ptr<std::unordered_map<string, string>> alias2name = std::make_shared<std::unordered_map<string, string>>();
   std::shared_ptr<std::vector<string>> loaded_relation_names = std::make_shared<std::vector<string>>();
@@ -146,68 +143,87 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   unordered_map<string, Table *> table_map;
 
   std::vector<std::string> tables_alias;
+  
+  // 处理有表别名的查询（ALIASES 不为空且包含别名）
+  bool has_table_aliases = false;
   for (size_t i = 0; i < select_sql.ALIASES.size(); i++) {
-    const char *table_name = select_sql.ALIASES[i].name.c_str();
-    // const char *table_alias = select_sql.ALIASES[i].alias.c_str();
-    if (nullptr == table_name) {
-      LOG_WARN("invalid argument. relation name is null. index=%d", i);
-      return RC::INVALID_ARGUMENT;
+    if (!select_sql.ALIASES[i].alias.empty()) {
+      has_table_aliases = true;
+      break;
     }
-
-    Table *table = db->find_table(table_name);
-    // table->set_table_alias(table_alias);
-    if (nullptr == table) {
-      LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
-      return RC::SCHEMA_TABLE_NOT_EXIST;
-    }
-
-    binder_context.add_table(table);
-    tables.push_back(table);
-    tables_alias.push_back(select_sql.ALIASES[i].alias);
-    table_map.insert({table_name, table});
-
-    // 检查 alias 重复
-    for (size_t j = i + 1; j < select_sql.ALIASES.size(); j++) {
-      if (select_sql.ALIASES[i].alias.empty() || select_sql.ALIASES[j].alias.empty()) continue;
-      if (select_sql.ALIASES[i].alias == select_sql.ALIASES[j].alias) {
-        LOG_WARN("duplicate alias: %s", select_sql.ALIASES[i].alias.c_str());
+  }
+  
+  if (has_table_aliases) {
+    for (size_t i = 0; i < select_sql.ALIASES.size(); i++) {
+      const char *table_name = select_sql.ALIASES[i].name.c_str();
+      
+      if (nullptr == table_name) {
+        LOG_WARN("invalid argument. relation name is null. index=%d", i);
         return RC::INVALID_ARGUMENT;
       }
-    }
 
-    if (!select_sql.ALIASES[i].alias.empty()) {
-      // 非空才存，防止重复存到空的 alias 导致 duplicate error。
-      // 在alias2name中检查 alias 是否重复
-      // UPDATE: 不需要子表和外表的 alias 重复检查，因为外表的 alias 可以被子表的 alias 覆盖。
-      // if (alias2name->find(select_sql.relations[i].alias) != alias2name->end()) {
-      //   LOG_WARN("duplicate alias found in from statement: %s", select_sql.relations[i].alias.c_str());
-      //   return RC::INVALID_ARGUMENT;
-      // }
-      // 一切没问题之后，
-      // 备用表名和别名的映射
-      name2alias->insert({table_name, select_sql.ALIASES[i].alias});
-      alias2name->insert({select_sql.ALIASES[i].alias, table_name});
+      Table *table = db->find_table(table_name);
+      if (nullptr == table) {
+        LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
+        return RC::SCHEMA_TABLE_NOT_EXIST;
+      }
+
+      binder_context.add_table(table);
+      tables.push_back(table);
+      tables_alias.push_back(select_sql.ALIASES[i].alias);
+      table_map.insert({table_name, table});
+      
+      // 添加表别名到 BinderContext 和 table_map
+      if (!select_sql.ALIASES[i].alias.empty()) {
+        binder_context.add_table_alias(select_sql.ALIASES[i].alias.c_str(), table);
+        table_map.insert({select_sql.ALIASES[i].alias, table});
+      }
+
+      // 检查 alias 重复
+      for (size_t j = i + 1; j < select_sql.ALIASES.size(); j++) {
+        if (select_sql.ALIASES[i].alias.empty() || select_sql.ALIASES[j].alias.empty()) continue;
+        if (select_sql.ALIASES[i].alias == select_sql.ALIASES[j].alias) {
+          LOG_WARN("duplicate alias: %s", select_sql.ALIASES[i].alias.c_str());
+          return RC::INVALID_ARGUMENT;
+        }
+      }
+
+      if (!select_sql.ALIASES[i].alias.empty()) {
+        // 非空才存，防止重复存到空的 alias 导致 duplicate error。
+        // 在alias2name中检查 alias 是否重复
+        // UPDATE: 不需要子表和外表的 alias 重复检查，因为外表的 alias 可以被子表的 alias 覆盖。
+        // if (alias2name->find(select_sql.relations[i].alias) != alias2name->end()) {
+        //   LOG_WARN("duplicate alias found in from statement: %s", select_sql.relations[i].alias.c_str());
+        //   return RC::INVALID_ARGUMENT;
+        // }
+        // 一切没问题之后，
+        // 备用表名和别名的映射
+        name2alias->insert({table_name, select_sql.ALIASES[i].alias});
+        alias2name->insert({select_sql.ALIASES[i].alias, table_name});
+      }
     }
-    loaded_relation_names->push_back(table_name);
   }
 
-  // 处理传统的 relations（向后兼容）
-  for (size_t i = 0; i < select_sql.relations.size(); i++) {
-    const char *table_name = select_sql.relations[i].c_str();
-    if (nullptr == table_name) {
-      LOG_WARN("invalid argument. relation name is null. index=%d", i);
-      return RC::INVALID_ARGUMENT;
-    }
+  // 处理传统的 relations（向后兼容）- 只在没有表别名时处理
+  if (!has_table_aliases) {
+    for (size_t i = 0; i < select_sql.relations.size(); i++) {
+      const char *table_name = select_sql.relations[i].c_str();
+      
+      if (nullptr == table_name) {
+        LOG_WARN("invalid argument. relation name is null. index=%d", i);
+        return RC::INVALID_ARGUMENT;
+      }
 
-    Table *table = db->find_table(table_name);
-    if (nullptr == table) {
-      LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
-      return RC::SCHEMA_TABLE_NOT_EXIST;
-    }
+      Table *table = db->find_table(table_name);
+      if (nullptr == table) {
+        LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
+        return RC::SCHEMA_TABLE_NOT_EXIST;
+      }
 
-    binder_context.add_table(table);
-    tables.push_back(table);
-    table_map.insert({table_name, table});
+      binder_context.add_table(table);
+      tables.push_back(table);
+      table_map.insert({table_name, table});
+    }
   }
   
   // 将 expressions（要 select 的表达式）中带有别名的表名替换为真实的表名

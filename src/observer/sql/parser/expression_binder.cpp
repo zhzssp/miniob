@@ -22,6 +22,14 @@ using namespace common;
 
 Table *BinderContext::find_table(const char *table_name) const
 {
+  
+  // 首先尝试通过别名查找
+  auto alias_iter = table_aliases_.find(table_name);
+  if (alias_iter != table_aliases_.end()) {
+    return alias_iter->second;
+  }
+  
+  // 然后尝试通过表名查找
   auto pred = [table_name](Table *table) { return 0 == strcasecmp(table_name, table->name()); };
   auto iter = ranges::find_if(query_tables_, pred);
   if (iter == query_tables_.end()) {
@@ -169,7 +177,15 @@ RC ExpressionBinder::bind_unbound_field_expression(
 
     Field      field(table, field_meta);
     FieldExpr *field_expr = new FieldExpr(field);
-    field_expr->set_name(field_name);
+    
+    // 使用别名（如果有的话），否则使用原始字段名
+    const std::string alias = unbound_field_expr->alias_std_string();
+    if (!alias.empty()) {
+      field_expr->set_name(alias.c_str());
+    } else {
+      field_expr->set_name(field_name);
+    }
+    
     bound_expressions.emplace_back(field_expr);
   }
 
