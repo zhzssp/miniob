@@ -247,13 +247,23 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
     const FilterObj &filter_obj_left  = filter_unit->left();
     const FilterObj &filter_obj_right = filter_unit->right();
 
-    unique_ptr<Expression> left(filter_obj_left.is_attr
-                                    ? static_cast<Expression *>(new FieldExpr(filter_obj_left.field))
-                                    : static_cast<Expression *>(new ValueExpr(filter_obj_left.value)));
+    unique_ptr<Expression> left;
+    if (filter_obj_left.is_expr) {
+      left = unique_ptr<Expression>(filter_obj_left.expression->copy().release());
+    } else if (filter_obj_left.is_attr) {
+      left = make_unique<FieldExpr>(filter_obj_left.field);
+    } else {
+      left = make_unique<ValueExpr>(filter_obj_left.value);
+    }
 
-    unique_ptr<Expression> right(filter_obj_right.is_attr
-                                     ? static_cast<Expression *>(new FieldExpr(filter_obj_right.field))
-                                     : static_cast<Expression *>(new ValueExpr(filter_obj_right.value)));
+    unique_ptr<Expression> right;
+    if (filter_obj_right.is_expr) {
+      right = unique_ptr<Expression>(filter_obj_right.expression->copy().release());
+    } else if (filter_obj_right.is_attr) {
+      right = make_unique<FieldExpr>(filter_obj_right.field);
+    } else {
+      right = make_unique<ValueExpr>(filter_obj_right.value);
+    }
 
     if (left->value_type() != right->value_type()) {
       auto left_to_right_cost = implicit_cast_cost(left->value_type(), right->value_type());

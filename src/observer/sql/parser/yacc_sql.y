@@ -109,6 +109,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         EXPLAIN
         STORAGE
         FORMAT
+        AS
         PRIMARY
         KEY
         ANALYZE
@@ -131,6 +132,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   Value *                                    value;
   enum CompOp                                comp;
   RelAttrSqlNode *                           rel_attr;
+  RelationSqlNode *                          relation_sql_node;
   vector<AttrInfoSqlNode> *                  attr_infos;
   AttrInfoSqlNode *                          attr_info;
   Expression *                               expression;
@@ -169,7 +171,6 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <condition>           condition
 %type <value>               value
 %type <number>              number
-%type <cstring>             relation
 %type <comp>                comp_op
 %type <rel_attr>            rel_attr
 %type <attr_infos>          attr_def_list
@@ -181,6 +182,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <key_list>            primary_key
 %type <key_list>            attr_list
 %type <relation_list>       rel_list
+%type <relation_sql_node>   relation
 %type <expression>          expression
 %type <expression>          aggregate_expression
 %type <expression_list>     expression_list
@@ -544,6 +546,36 @@ expression_list:
       $$ = new vector<unique_ptr<Expression>>;
       $$->emplace_back($1);
     }
+    | expression ID{
+      $$ = new std::vector<std::unique_ptr<Expression>>;
+      $1->set_alias($2);
+      $$->emplace_back($1);
+    }
+    | expression ID COMMA expression_list
+    {
+      if ($4 != nullptr) {
+        $$ = $4;
+      } else {
+        $$ = new std::vector<std::unique_ptr<Expression>>;
+      }
+      $1->set_alias($2);
+      $$->emplace($$->begin(), $1);
+    }
+    | expression AS ID COMMA expression_list
+    {
+      if ($5 != nullptr) {
+        $$ = $5;
+      } else {
+        $$ = new std::vector<std::unique_ptr<Expression>>;
+      }
+      $1->set_alias($3);
+      $$->emplace($$->begin(), $1);
+    }
+    | expression AS ID{
+      $$ = new std::vector<std::unique_ptr<Expression>>;
+      $1->set_alias($3);
+      $$->emplace_back($1);
+    }
     | expression COMMA expression_list
     {
       if ($3 != nullptr) {
@@ -613,13 +645,30 @@ rel_attr:
 
 relation:
     ID {
-      $$ = $1;
+      $$ = new RelationSqlNode;
+      $$->name = $1;
+    }
+    | ID AS ID {
+      $$ = new RelationSqlNode;
+      $$->name = $1;
+      $$->alias = $3;
+    }
+    | ID ID {
+      $$ = new RelationSqlNode;
+      $$->name = $1;
+      $$->alias = $2;
     }
     ;
 rel_list:
     relation {
       $$ = new vector<string>();
-      $$->push_back($1);
+      $$->push_back($1->name);
+      // 存储表引用信息到全局变量
+      TableReferenceSqlNode table_ref;
+      table_ref.table_name = $1->name;
+      table_ref.alias = $1->alias;
+      g_table_references.push_back(table_ref);
+      delete $1;
     }
     | relation COMMA rel_list {
       if ($3 != nullptr) {
@@ -627,26 +676,36 @@ rel_list:
       } else {
         $$ = new vector<string>;
       }
-      $$->insert($$->begin(), $1);
+      $$->insert($$->begin(), $1->name);
+      // 存储表引用信息到全局变量
+      TableReferenceSqlNode table_ref;
+      table_ref.table_name = $1->name;
+      table_ref.alias = $1->alias;
+      g_table_references.push_back(table_ref);
+      delete $1;
     }
     | relation INNER JOIN relation ON join_condition_list {
       $$ = new vector<string>();
-      $$->push_back($1);
-      $$->push_back($4);
+      $$->push_back($1->name);
+      $$->push_back($4->name);
       
       // 创建表引用并存储 JOIN 条件
       TableReferenceSqlNode left_table;
-      left_table.table_name = $1;
+      left_table.table_name = $1->name;
+      left_table.alias = $1->alias;
       left_table.is_join = false;
       
       TableReferenceSqlNode right_table;
-      right_table.table_name = $4;
+      right_table.table_name = $4->name;
+      right_table.alias = $4->alias;
       right_table.is_join = true;
       right_table.join_conditions = *$6;
       
       g_table_references.push_back(left_table);
       g_table_references.push_back(right_table);
       
+      delete $1;
+      delete $4;
       delete $6;
     }
     | rel_list INNER JOIN relation ON join_condition_list {
@@ -655,16 +714,18 @@ rel_list:
       } else {
         $$ = new vector<string>;
       }
-      $$->push_back($4);
+      $$->push_back($4->name);
       
       // 创建表引用并存储 JOIN 条件
       TableReferenceSqlNode right_table;
-      right_table.table_name = $4;
+      right_table.table_name = $4->name;
+      right_table.alias = $4->alias;
       right_table.is_join = true;
       right_table.join_conditions = *$6;
       
       g_table_references.push_back(right_table);
       
+      delete $4;
       delete $6;
     }
     | rel_list COMMA relation {
@@ -673,7 +734,14 @@ rel_list:
       } else {
         $$ = new vector<string>;
       }
-      $$->push_back($3);
+      $$->push_back($3->name);
+      
+      // 存储表引用信息到全局变量
+      TableReferenceSqlNode table_ref;
+      table_ref.table_name = $3->name;
+      table_ref.alias = $3->alias;
+      g_table_references.push_back(table_ref);
+      delete $3;
     }
     ;
 
@@ -751,6 +819,12 @@ table_name:
     }
     ;
 
+table_references:
+    ID
+    {
+
+    }
+
 where:
     /* empty */
     {
@@ -813,17 +887,14 @@ condition:
       delete $1;
       delete $3;
     }
-    | value comp_op rel_attr
+    | expression comp_op expression
     {
       $$ = new ConditionSqlNode;
       $$->left_is_attr = 0;
-      $$->left_value = *$1;
-      $$->right_is_attr = 1;
-      $$->right_attr = *$3;
+      $$->left_expr = $1;
+      $$->right_is_attr = 0;
+      $$->right_expr = $3;
       $$->comp = $2;
-
-      delete $1;
-      delete $3;
     }
     ;
 
