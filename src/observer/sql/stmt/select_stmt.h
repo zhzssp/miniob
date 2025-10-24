@@ -38,7 +38,9 @@ public:
 
 public:
   static RC create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt);
-
+  static RC convert_alias_to_name(Expression *expr, 
+  std::shared_ptr<std::unordered_map<string, string>> alias2name,
+  std::shared_ptr<std::unordered_map<string, string>> field_alias2name);
 public:
   const vector<Table *> &tables() const { return tables_; }
   FilterStmt            *filter_stmt() const { return filter_stmt_; }

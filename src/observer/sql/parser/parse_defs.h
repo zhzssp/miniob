@@ -18,9 +18,10 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/vector.h"
 #include "common/lang/memory.h"
 #include "common/value.h"
-#include "common/lang/utility.h"
 
+// 前向声明
 class Expression;
+#include "common/lang/utility.h"
 
 /**
  * @defgroup SQLParser SQL Parser
@@ -37,6 +38,16 @@ struct RelAttrSqlNode
 {
   string relation_name;   ///< relation name (may be NULL) 表名
   string attribute_name;  ///< attribute name              属性名
+};
+
+/**
+ * @brief 描述一个关系（表）引用
+ * @ingroup SQLParser
+ */
+struct RelationSqlNode
+{
+  string name;    ///< 表名
+  string alias;   ///< 表别名
 };
 
 /**
@@ -68,11 +79,67 @@ struct ConditionSqlNode
                                  ///< 1时，操作符左边是属性名，0时，是属性值
   Value          left_value;     ///< left-hand side value if left_is_attr = FALSE
   RelAttrSqlNode left_attr;      ///< left-hand side attribute
+  Expression*    left_expr;      ///< left-hand side expression (if using expressions)
   CompOp         comp;           ///< comparison operator
   int            right_is_attr;  ///< TRUE if right-hand side is an attribute
                                  ///< 1时，操作符右边是属性名，0时，是属性值
   RelAttrSqlNode right_attr;     ///< right-hand side attribute if right_is_attr = TRUE 右边的属性
   Value          right_value;    ///< right-hand side value if right_is_attr = FALSE
+  Expression*    right_expr;     ///< right-hand side expression (if using expressions)
+  
+  // 默认构造函数
+  ConditionSqlNode() : left_expr(nullptr), right_expr(nullptr) {}
+  
+  // 拷贝构造函数
+  ConditionSqlNode(const ConditionSqlNode& other)
+    : left_is_attr(other.left_is_attr),
+      left_value(other.left_value),
+      left_attr(other.left_attr),
+      left_expr(nullptr),  // 暂时设为nullptr，避免不完整类型问题
+      comp(other.comp),
+      right_is_attr(other.right_is_attr),
+      right_attr(other.right_attr),
+      right_value(other.right_value),
+      right_expr(nullptr)  // 暂时设为nullptr，避免不完整类型问题
+  {
+    // 注意：这里不拷贝Expression指针，因为Expression是不完整类型
+    // 在实际使用中，应该避免拷贝包含Expression指针的ConditionSqlNode
+  }
+  
+  // 移动构造函数
+  ConditionSqlNode(ConditionSqlNode&& other) noexcept
+    : left_is_attr(other.left_is_attr),
+      left_value(std::move(other.left_value)),
+      left_attr(std::move(other.left_attr)),
+      left_expr(other.left_expr),
+      comp(other.comp),
+      right_is_attr(other.right_is_attr),
+      right_attr(std::move(other.right_attr)),
+      right_value(std::move(other.right_value)),
+      right_expr(other.right_expr)
+  {
+    other.left_expr = nullptr;
+    other.right_expr = nullptr;
+  }
+  
+  // 移动赋值操作符
+  ConditionSqlNode& operator=(ConditionSqlNode&& other) noexcept {
+    if (this != &other) {
+      left_is_attr = other.left_is_attr;
+      left_value = std::move(other.left_value);
+      left_attr = std::move(other.left_attr);
+      left_expr = other.left_expr;
+      comp = other.comp;
+      right_is_attr = other.right_is_attr;
+      right_attr = std::move(other.right_attr);
+      right_value = std::move(other.right_value);
+      right_expr = other.right_expr;
+      
+      other.left_expr = nullptr;
+      other.right_expr = nullptr;
+    }
+    return *this;
+  }
 };
 
 
@@ -118,9 +185,10 @@ struct SelectSqlNode
 {
   vector<unique_ptr<Expression>> expressions;  ///< 查询的表达式
   vector<string>                 relations;    ///< 查询的表（保持向后兼容）
-  vector<TableReferenceSqlNode>  table_references;  ///< 表引用（支持 JOIN）
+  vector<TableReferenceSqlNode>  table_references;  ///JOIN
   vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件
   vector<unique_ptr<Expression>> group_by;     ///< group by clause
+  vector<RelationSqlNode>        ALIASES;      ///< 别名列表
 };
 
 /**

@@ -22,6 +22,13 @@ See the Mulan PSL v2 for more details. */
 FilterStmt::~FilterStmt()
 {
   for (FilterUnit *unit : filter_units_) {
+    // 释放 FilterUnit 中的 Expression* 内存
+    if (unit->left().is_expr && unit->left().expression != nullptr) {
+      delete unit->left().expression;
+    }
+    if (unit->right().is_expr && unit->right().expression != nullptr) {
+      delete unit->right().expression;
+    }
     delete unit;
   }
   filter_units_.clear();
@@ -104,6 +111,10 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
     FilterObj filter_obj;
     filter_obj.init_attr(Field(table, field));
     filter_unit->set_left(filter_obj);
+  } else if (condition.left_expr != nullptr) {
+    FilterObj filter_obj;
+    filter_obj.init_expression(condition.left_expr->copy().release());
+    filter_unit->set_left(filter_obj);
   } else {
     FilterObj filter_obj;
     filter_obj.init_value(condition.left_value);
@@ -120,6 +131,10 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
     }
     FilterObj filter_obj;
     filter_obj.init_attr(Field(table, field));
+    filter_unit->set_right(filter_obj);
+  } else if (condition.right_expr != nullptr) {
+    FilterObj filter_obj;
+    filter_obj.init_expression(condition.right_expr->copy().release());
     filter_unit->set_right(filter_obj);
   } else {
     FilterObj filter_obj;
