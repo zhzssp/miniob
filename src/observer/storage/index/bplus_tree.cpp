@@ -1788,6 +1788,11 @@ RC BplusTreeHandler::redistribute(
 
 RC BplusTreeHandler::delete_entry_internal(BplusTreeMiniTransaction &mtr, Frame *leaf_frame, const char *key)
 {
+  if(key == nullptr) {
+    LOG_WARN("When deleting internal entry, key is null");
+    return RC::INVALID_ARGUMENT;
+  }
+
   LeafIndexNodeHandler leaf_index_node(mtr, file_header_, leaf_frame);
 
   const int remove_count = leaf_index_node.remove(key, key_comparator_);
@@ -1809,6 +1814,11 @@ RC BplusTreeHandler::delete_entry_internal(BplusTreeMiniTransaction &mtr, Frame 
 
 RC BplusTreeHandler::delete_entry(const char *user_key, const RID *rid)
 {
+  if (user_key == nullptr) {
+    LOG_WARN("BplusTreeHandler::delete_entry called with null user_key");
+    return RC::INVALID_ARGUMENT;
+  }
+
   MemPoolItem::item_unique_ptr pkey = mem_pool_item_->alloc_unique_ptr();
   if (nullptr == pkey) {
     LOG_WARN("Failed to alloc memory for key. size=%d", file_header_.key_length);
@@ -2121,7 +2131,7 @@ RC BplusTreeScanner::fix_user_key(
 void CompositeKeyComparator::init() {
   field_count_ = 0;
   field_comparators_.init();
-  field_offsets_ = vector<int32_t>(6);
+  field_offsets_.clear();
 }
 
 void CompositeKeyComparator::init(const IndexFileHeader &header)
@@ -2129,14 +2139,29 @@ void CompositeKeyComparator::init(const IndexFileHeader &header)
   // 安全检查
   if (header.attr_type.empty() || header.attr_length.empty()) {
     LOG_ERROR("Invalid index file header: attr_type or attr_length is empty");
+    this->init();
     return;
   }
 
   field_count_ = header.attr_length.size();
   field_comparators_.init(header.attr_type, header.attr_length);
+  field_offsets_.clear();
+  field_offsets_.resize(field_count_ + 1);
+
   for(unsigned int i = 0; i < field_count_; i++) {
-    field_offsets_.push_back(header.field_offset(i));
+    // 0~i-1字段的长度之和
+    int offset = header.field_offset(i); 
+    if(offset < 0) {
+      LOG_ERROR("Invalid field offset for field %d", i);
+      // 出错时避免崩溃
+      field_offsets_[i] = 0;
+    } else {
+      field_offsets_[i] = offset;
+    }
   }
+
+  // RID 偏移量
+  field_offsets_[field_count_] = field_offsets_[field_count_ - 1] + header.attr_length[field_count_ - 1];  
 }
 
 int CompositeKeyComparator::operator()(const char *v1, const char *v2) const

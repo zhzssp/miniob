@@ -62,7 +62,7 @@ struct IndexFileHeader
   int field_offset(int field_index) const
   {
     // 参数检查
-    if (field_index < 0 || field_index >= 6) {
+    if (field_index < 0 || static_cast<size_t>(field_index) >= attr_length.size()) {
       return -1;  // 无效的字段索引
     }
 
@@ -344,8 +344,8 @@ public:
 
 private:
   AttrComparator field_comparators_;
-  vector<int>            field_offsets_;
-  int                    field_count_;
+  vector<int>    field_offsets_;
+  unsigned int   field_count_;
 };
 
 /**
