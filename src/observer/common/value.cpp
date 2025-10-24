@@ -124,13 +124,13 @@ void Value::set_data(const char *data, const int length)
       value_.float_value_ = *(float *)data;
       length_             = length;
     } break;
-    case AttrType::BOOLEANS: {
-      value_.bool_value_ = *(int *)data != 0;
-      length_            = length;
-    } break;
     case AttrType::DATES: {
       value_.int_value_ = *(int *)data;
       length_           = length;
+    } break;
+    case AttrType::BOOLEANS: {
+      value_.bool_value_ = *(int *)data != 0;
+      length_            = length;
     } break;
     default: {
       LOG_WARN("unknown data type: %d", attr_type_);
@@ -287,11 +287,11 @@ int Value::get_int() const
     case AttrType::FLOATS: {
       return (int)(value_.float_value_);
     }
-    case AttrType::BOOLEANS: {
-      return (int)(value_.bool_value_);
-    }
     case AttrType::DATES: {
       return value_.int_value_;
+    }
+    case AttrType::BOOLEANS: {
+      return (int)(value_.bool_value_);
     }
     default: {
       LOG_WARN("unknown data type. type=%d", attr_type_);

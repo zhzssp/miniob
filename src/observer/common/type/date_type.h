@@ -2,11 +2,12 @@
 
 #include "common/sys/rc.h"
 #include "common/type/data_type.h"
-
+#include "common/value.h"
 /**
  * @brief 日期类型
  * @ingroup DataType
  */
+
 class DateType : public DataType
 {
 public:
@@ -23,4 +24,6 @@ public:
   int cast_cost(AttrType type) override;
 
   RC to_string(const Value &val, string &result) const override;
+
+  bool is_invalid_date(int year,int month,int day) const;
 };

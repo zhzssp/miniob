@@ -31,12 +31,12 @@ class Value final
 {
 public:
   friend class DataType;
+  friend class CharType;
   friend class IntegerType;
   friend class FloatType;
-  friend class BooleanType;
-  friend class CharType;
   friend class DateType;
   friend class VectorType;
+  friend class BooleanType;
 
   Value() = default;
 
