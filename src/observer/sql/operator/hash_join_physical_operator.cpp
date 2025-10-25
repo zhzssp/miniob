@@ -89,8 +89,10 @@ RC HashJoinPhysicalOperator::next()
       rc = right_->next();
       if (rc != RC::SUCCESS) {
         if (rc == RC::RECORD_EOF) {
-          // 右表遍历完，重置左表
+          // 右表遍历完，重置左表和右表
           left_tuple_ = nullptr;
+          right_->close();
+          right_->open(trx_);
           continue; // 继续循环获取下一个左表记录
         }
         return rc;
@@ -201,7 +203,7 @@ void HashJoinPhysicalOperator::set_filter_expressions(const vector<unique_ptr<Ex
   for (const auto &expr : expressions) {
     filter_expressions_.push_back(expr->copy());
   }
- // LOG_INFO("HashJoinPhysicalOperator: Set %zu filter expressions", filter_expressions_.size());
+  //LOG_INFO("HashJoinPhysicalOperator: Set %zu filter expressions", filter_expressions_.size());
 }
 
 unique_ptr<ValueListTuple> HashJoinPhysicalOperator::materialize_tuple(Tuple *tuple)
@@ -289,7 +291,6 @@ RC HashJoinPhysicalOperator::build_hash_table()
   }
 
   if (right_join_field_.meta() == nullptr) {
-    //LOG_WARN("Right join field not set, using nested loop join behavior");
     // 没有等值条件时，不构建哈希表，直接返回成功
     hash_table_built_ = true;
     return RC::SUCCESS;
@@ -338,7 +339,6 @@ RC HashJoinPhysicalOperator::build_hash_table()
 RC HashJoinPhysicalOperator::probe_hash_table()
 {
   if (left_join_field_.meta() == nullptr) {
-    LOG_WARN("Left join field not set, using nested loop join behavior");
     // 没有等值条件时，直接获取下一个右表记录
     RC rc = right_->next();
     if (rc != RC::SUCCESS) {
