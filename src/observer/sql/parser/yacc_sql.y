@@ -110,6 +110,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         STORAGE
         FORMAT
         AS
+        INNER
+        JOIN
         PRIMARY
         KEY
         ANALYZE
@@ -534,7 +536,7 @@ select_stmt:        /*  select 语句的语法解析树*/
           alias_node.alias = table_ref.alias;
           $$->selection.ALIASES.push_back(alias_node);
         }
-        g_table_references.clear();
+        // 不要在这里清空 g_table_references，让它在 sql_list 中统一清理
       }
     }
     ;
@@ -667,31 +669,7 @@ relation:
     }
     ;
 rel_list:
-    relation {
-      $$ = new vector<string>();
-      $$->push_back($1->name);
-      // 存储表引用信息到全局变量
-      TableReferenceSqlNode table_ref;
-      table_ref.table_name = $1->name;
-      table_ref.alias = $1->alias;
-      g_table_references.push_back(table_ref);
-      delete $1;
-    }
-    | relation COMMA rel_list {
-      if ($3 != nullptr) {
-        $$ = $3;
-      } else {
-        $$ = new vector<string>;
-      }
-      $$->insert($$->begin(), $1->name);
-      // 存储表引用信息到全局变量
-      TableReferenceSqlNode table_ref;
-      table_ref.table_name = $1->name;
-      table_ref.alias = $1->alias;
-      g_table_references.push_back(table_ref);
-      delete $1;
-    }
-    | relation INNER JOIN relation ON join_condition_list {
+    relation INNER JOIN relation ON join_condition_list {
       $$ = new vector<string>();
       $$->push_back($1->name);
       $$->push_back($4->name);
@@ -714,6 +692,30 @@ rel_list:
       delete $1;
       delete $4;
       delete $6;
+    }
+    | relation {
+      $$ = new vector<string>();
+      $$->push_back($1->name);
+      // 存储表引用信息到全局变量
+      TableReferenceSqlNode table_ref;
+      table_ref.table_name = $1->name;
+      table_ref.alias = $1->alias;
+      g_table_references.push_back(table_ref);
+      delete $1;
+    }
+    | relation COMMA rel_list {
+      if ($3 != nullptr) {
+        $$ = $3;
+      } else {
+        $$ = new vector<string>;
+      }
+      $$->insert($$->begin(), $1->name);
+      // 存储表引用信息到全局变量
+      TableReferenceSqlNode table_ref;
+      table_ref.table_name = $1->name;
+      table_ref.alias = $1->alias;
+      g_table_references.push_back(table_ref);
+      delete $1;
     }
     | rel_list INNER JOIN relation ON join_condition_list {
       if ($1 != nullptr) {

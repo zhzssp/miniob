@@ -370,12 +370,16 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
     
     // 智能选择 JOIN 字段 - 找到与当前 JOIN 相关的等值条件
     const auto &join_predicates = join_oper.get_join_predicates();
+    
     for (const auto &predicate : join_predicates) {
       auto *comp_expr = dynamic_cast<ComparisonExpr*>(predicate.get());
       if (comp_expr != nullptr && comp_expr->comp() == CompOp::EQUAL_TO) {
         auto *left_field = dynamic_cast<FieldExpr*>(comp_expr->left().get());
         auto *right_field = dynamic_cast<FieldExpr*>(comp_expr->right().get());
         if (left_field != nullptr && right_field != nullptr) {
+         // LOG_WARN("HashJoin: Found join condition: %s.%s = %s.%s", 
+                   left_field->field().table_name(), left_field->field().field_name(),
+                   right_field->field().table_name(), right_field->field().field_name();
           // 检查字段是否与当前 JOIN 相关
           const char *left_table = left_field->field().table_name();
           const char *right_table = right_field->field().table_name();

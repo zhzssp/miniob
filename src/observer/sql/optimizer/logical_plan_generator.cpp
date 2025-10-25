@@ -144,6 +144,12 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
             const Table *left_field_table = filter_unit->left().field.table();
             const Table *right_field_table = filter_unit->right().field.table();
             
+           // LOG_WARN("JOIN: Checking condition %s.%s = %s.%s", 
+                     left_field_table ? left_field_table->name() : "NULL",
+                     filter_unit->left().field.field_name(),
+                     right_field_table ? right_field_table->name() : "NULL",
+                     filter_unit->right().field.field_name();
+            
             
             // 条件涉及左表和右表
             if (left_table != nullptr) {
@@ -195,6 +201,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       }
       
       table_oper = unique_ptr<LogicalOperator>(join_oper);
+      
       
       // 如果有过滤条件，将其设置到 JoinLogicalOperator 中
       if (predicate_oper) {

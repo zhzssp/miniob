@@ -41,6 +41,8 @@ public:
   static RC convert_alias_to_name(Expression *expr, 
   std::shared_ptr<std::unordered_map<string, string>> alias2name,
   std::shared_ptr<std::unordered_map<string, string>> field_alias2name);
+  static RC convert_rel_attr_alias_to_name(RelAttrSqlNode &rel_attr, 
+  std::shared_ptr<std::unordered_map<string, string>> alias2name);
 public:
   const vector<Table *> &tables() const { return tables_; }
   FilterStmt            *filter_stmt() const { return filter_stmt_; }
