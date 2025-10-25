@@ -201,7 +201,7 @@ void HashJoinPhysicalOperator::set_filter_expressions(const vector<unique_ptr<Ex
   for (const auto &expr : expressions) {
     filter_expressions_.push_back(expr->copy());
   }
-  LOG_INFO("HashJoinPhysicalOperator: Set %zu filter expressions", filter_expressions_.size());
+  //LOG_INFO("HashJoinPhysicalOperator: Set %zu filter expressions", filter_expressions_.size());
 }
 
 unique_ptr<ValueListTuple> HashJoinPhysicalOperator::materialize_tuple(Tuple *tuple)
@@ -289,7 +289,7 @@ RC HashJoinPhysicalOperator::build_hash_table()
   }
 
   if (right_join_field_.meta() == nullptr) {
-    LOG_WARN("Right join field not set, using nested loop join behavior");
+    //LOG_WARN("Right join field not set, using nested loop join behavior");
     // 没有等值条件时，不构建哈希表，直接返回成功
     hash_table_built_ = true;
     return RC::SUCCESS;

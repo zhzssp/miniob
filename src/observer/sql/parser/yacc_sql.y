@@ -110,8 +110,6 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         STORAGE
         FORMAT
         AS
-        INNER
-        JOIN
         PRIMARY
         KEY
         ANALYZE
