@@ -201,7 +201,7 @@ void HashJoinPhysicalOperator::set_filter_expressions(const vector<unique_ptr<Ex
   for (const auto &expr : expressions) {
     filter_expressions_.push_back(expr->copy());
   }
-  //LOG_INFO("HashJoinPhysicalOperator: Set %zu filter expressions", filter_expressions_.size());
+ // LOG_INFO("HashJoinPhysicalOperator: Set %zu filter expressions", filter_expressions_.size());
 }
 
 unique_ptr<ValueListTuple> HashJoinPhysicalOperator::materialize_tuple(Tuple *tuple)

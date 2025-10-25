@@ -91,6 +91,34 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     table_map.insert({table_name, table});
   }
   
+  // 处理 ALIASES（多表查询的表别名）
+  for (size_t i = 0; i < select_sql.ALIASES.size(); i++) {
+    const char *table_name = select_sql.ALIASES[i].name.c_str();
+    if (nullptr == table_name) {
+      LOG_WARN("invalid argument. relation name is null. index=%d", i);
+      return RC::INVALID_ARGUMENT;
+    }
+
+    Table *table = db->find_table(table_name);
+    if (nullptr == table) {
+      LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
+      return RC::SCHEMA_TABLE_NOT_EXIST;
+    }
+
+    // 如果表还没有被添加，则添加它
+    if (table_map.find(table_name) == table_map.end()) {
+      binder_context.add_table(table);
+      tables.push_back(table);
+      table_map.insert({table_name, table});
+    }
+    
+    // 如果有别名，添加到table_map中
+    if (!select_sql.ALIASES[i].alias.empty()) {
+      table_map.insert({select_sql.ALIASES[i].alias, table});
+      binder_context.add_table_alias(select_sql.ALIASES[i].alias.c_str(), table);
+    }
+  }
+  
   // 处理新的 table_references（支持 JOIN）
   for (const auto &table_ref : select_sql.table_references) {
     const char *table_name = table_ref.table_name.c_str();
@@ -111,13 +139,19 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
       return RC::SCHEMA_TABLE_NOT_EXIST;
     }
 
-    binder_context.add_table(table);
-    tables.push_back(table);
-    table_map.insert({table_name, table});
-    
-    // 处理 JOIN 条件
-    if (table_ref.is_join && !table_ref.join_conditions.empty()) {
-    }
+     binder_context.add_table(table);
+     tables.push_back(table);
+     table_map.insert({table_name, table});
+     
+     // 如果有别名，也要添加到table_map中
+     if (!table_ref.alias.empty()) {
+       table_map.insert({table_ref.alias, table});
+       binder_context.add_table_alias(table_ref.alias.c_str(), table);
+     }
+     
+     // 处理 JOIN 条件
+     if (table_ref.is_join && !table_ref.join_conditions.empty()) {
+     }
   }
 
   // collect query fields in `select` statement
