@@ -34,9 +34,7 @@ RC Index::init(const IndexMeta &index_meta, const vector<const FieldMeta *> &fie
 
   index_meta_  = index_meta;
 
-  // 清空之前的字段元数据（如果有）
   field_metas_.clear();
-  // 确保 field_metas_ 有足够容量
   field_metas_.reserve(field_metas.size());
   field_metas_ = field_metas;
   return RC::SUCCESS;

@@ -22,6 +22,7 @@ See the Mulan PSL v2 for more details. */
 
 RC CreateIndexExecutor::execute(SQLStageEvent *sql_event)
 {
+  // field_metas在这里初始化
   Stmt    *stmt    = sql_event->stmt();
   Session *session = sql_event->session_event()->session();
   ASSERT(stmt->type() == StmtType::CREATE_INDEX,
@@ -32,5 +33,7 @@ RC CreateIndexExecutor::execute(SQLStageEvent *sql_event)
 
   Trx   *trx   = session->current_trx();
   Table *table = create_index_stmt->table();
+  LOG_INFO("Create index executor calls Table::create_index to create index %s on table %s", create_index_stmt->index_name().c_str(), table->name());
+  
   return table->create_index(trx, create_index_stmt->field_metas(), create_index_stmt->index_name().c_str());
 }

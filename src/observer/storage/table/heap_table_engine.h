@@ -41,7 +41,7 @@ public:
   RC sync() override;
 
   Index *find_index(const char *index_name) const override;
-  Index *find_index_by_field(const char *field_name) const override;
+  Index *find_index_by_field(const vector<string> &field_names) const override;
   RC     open() override;
   RC     close() override;
   // init_record_handler

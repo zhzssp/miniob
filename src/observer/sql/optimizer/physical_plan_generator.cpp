@@ -171,6 +171,7 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
         continue;
       }
 
+      // 初始化前面的index
       const Field &field = field_expr->field();
       index              = table->find_index_by_field(field.field_name());
       if (nullptr != index) {

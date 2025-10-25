@@ -46,7 +46,7 @@ public:
   const char *field(int index) const;
   AttrType    field_type(int index) const;
   int         field_length(int index) const;
-  const char *fields() const;
+  vector<string> fields() const;
 
   // 复合键操作
   /**
@@ -83,7 +83,7 @@ public:
 protected:
   string name_;  // index's name
   // 只有一个字段 --> 可扩展到两个
-  vector<string>   fields_;  // field's name
+  vector<string>   fields_;  // fields' name
   vector<AttrType> field_types_;
-  vector<int32_t>      field_lengths_;
+  vector<int32_t>  field_lengths_;
 };

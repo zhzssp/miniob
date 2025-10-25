@@ -319,6 +319,15 @@ desc_table_stmt:
     }
     ;
 
+show_index_stmt:      /*show index 语句的语法解析树*/
+    SHOW INDEX FROM ID
+    {
+      $$ = new ParsedSqlNode(SCF_SHOW_INDEX);
+      $$->show_index.index_name = $4;
+      free($4);
+    }
+    ;
+
 create_index_stmt:    /*create index 语句的语法解析树 --> 支持多字段*/
     CREATE INDEX ID ON ID LBRACE attr_list RBRACE
     {

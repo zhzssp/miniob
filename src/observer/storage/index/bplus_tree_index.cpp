@@ -28,24 +28,24 @@ RC BplusTreeIndex::create(
     return RC::RECORD_OPENNED;
   }
 
+  // 同步进行BplusTreeIndex内部属性的初始化
   Index::init(index_meta, field_metas);
 
   BufferPoolManager &bpm = table->db()->buffer_pool_manager();
 
-  // 计算复合键的总长度
-  int total_key_length = 0;
-  for (const FieldMeta *field_meta : field_metas) {
-    total_key_length += field_meta->len();
-  }
-
+  // 严格控制大小，避免错误读取多余的内存导致程序崩溃
   vector<AttrType> attr_type;
   vector<int32_t> attr_length;
+  attr_type.reserve(field_metas.size());
+  attr_length.reserve(field_metas.size());
+
   for (const FieldMeta *field_meta : field_metas) {
     attr_type.push_back(field_meta->type());
     attr_length.push_back(field_meta->len());
+    LOG_INFO("Construct attr info: attr(field) length = %d", field_meta->len());
   }
 
-  // internal_max_size和leaf_max_size使用默认值?
+  // 初始化BplusTreeIndex内部的handler（关键位置） --> internal_max_size和leaf_max_size使用默认值 ???
   RC rc = index_handler_.create(table->db()->log_handler(), bpm, file_name, attr_type, attr_length);
   if (RC::SUCCESS != rc) {
     LOG_WARN("Failed to create index_handler, file_name:%s, index:%s, rc:%s",
@@ -70,6 +70,7 @@ RC BplusTreeIndex::open(
     return RC::RECORD_OPENNED;
   }
 
+  // 将元数据加载进属性中
   Index::init(index_meta, field_metas);
 
   BufferPoolManager &bpm = table->db()->buffer_pool_manager();
@@ -104,15 +105,16 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
   // return index_handler_.insert_entry(record + field_meta_.offset(), rid);
 
   // 构建复合键 --> 字节级存储
-  int32_t total_key_length = 0;
-  int32_t count = 1;
+  int total_key_length = 0;
+  int count = 1;
   for (const FieldMeta *field_meta : field_metas_) {
     if (nullptr == field_meta) {
       LOG_ERROR("Found null field meta in index %s", index_meta_.name());
       return RC::INVALID_ARGUMENT;
     }
-    LOG_DEBUG("Get attr %d's length = %d when computing total key length in BplusTreeIndex::insert_entry()", count, field_meta->len());
+    LOG_INFO("Get attr %d's length = %d when computing total key length in BplusTreeIndex::insert_entry()", count, field_meta->len());
     total_key_length += field_meta->len();
+    count++;
 
     // 防止累加溢出
     if (total_key_length > INT32_MAX) {
@@ -121,6 +123,7 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
     }
   }
 
+  // 这里传进去的不是record指向的字段 ！！！
   vector<char> composite_key;
   composite_key.reserve(total_key_length);
 
@@ -139,12 +142,15 @@ RC BplusTreeIndex::delete_entry(const char *record, const RID *rid)
   // return index_handler_.delete_entry(record + field_meta_.offset(), rid);
   // 构建复合键
   int32_t total_key_length = 0;
+  int count = 1;
   for (const FieldMeta *field_meta : field_metas_) {
     if (nullptr == field_meta) {
       LOG_WARN("Found null field meta in index %s", index_meta_.name());
       return RC::INTERNAL;
     }
+    LOG_INFO("Get attr %d's length = %d when computing total key length in BplusTreeIndex::delete_entry()", count, field_meta->len());
     total_key_length += field_meta->len();
+    count++;
 
     // 防止累加溢出
     if (total_key_length > INT32_MAX) {

@@ -44,6 +44,6 @@ public:
 
 private:
   Table                    *table_       = nullptr;
-  vector<const FieldMeta *> field_metas_ = vector<const FieldMeta *>();
+  vector<const FieldMeta *> field_metas_;
   string                    index_name_;
 };

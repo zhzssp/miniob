@@ -898,7 +898,7 @@ RC BufferPoolManager::drop_file(const char *file_name)
   return RC::SUCCESS;
 }
 
-RC BufferPoolManager::open_file(LogHandler &log_handler, const char *_file_name, DiskBufferPool *&_bp)
+RC BufferPoolManager::open_file(LogHandler &log_handler, const char *_file_name, DiskBufferPool *&_bp_)
 {
   string file_name(_file_name);
 
@@ -928,7 +928,7 @@ RC BufferPoolManager::open_file(LogHandler &log_handler, const char *_file_name,
   id_to_buffer_pools_.insert(pair<int32_t, DiskBufferPool *>(bp->id(), bp));
   LOG_DEBUG("insert buffer pool into fd buffer pools using id = %d. fd=%d, bp=%p, lbt=%s", bp->id(), bp->file_desc(), bp, lbt());
   // 将构建好的DiskBufferPool保存在传入的引用中
-  _bp = bp;
+  _bp_ = bp;
   return RC::SUCCESS;
 }
 

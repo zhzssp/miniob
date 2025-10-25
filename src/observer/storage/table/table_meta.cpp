@@ -174,11 +174,18 @@ const IndexMeta *TableMeta::index(const char *name) const
 }
 
 // 从indexes里面找到字段名一致的索引 --> 多个字段名拼接在一起作为唯一标识
-const IndexMeta *TableMeta::find_index_by_field(const char *fields) const
+const IndexMeta *TableMeta::find_index_by_field(const vector<string> &fields) const
 {
   for (const IndexMeta &index : indexes_) {
-    if (0 == strcmp(index.fields(), fields)) {
-      return &index;
+    vector<string> field_names = index.fields();
+    for(int i = 0; i < field_names.size(); i++) {
+      if(field_names[i] != fields[i]) {
+        continue;
+      }
+      if(i == field_names.size() - 1) {
+        // 返回指针
+        return &index;
+      }
     }
   }
   return nullptr;

@@ -44,8 +44,10 @@ RC HeapTableEngine::insert_record(Record &record)
     return rc;
   }
 
+  LOG_INFO("Table engine tries to insert record = %s", record.data());
   rc = insert_entry_of_indexes(record.data(), record.rid());
-  if (rc != RC::SUCCESS) {  // 可能出现了键值重复
+  // 可能出现了键值重复
+  if (rc != RC::SUCCESS) { 
     RC rc2 = delete_entry_of_indexes(record.data(), record.rid(), false /*error_on_not_exists*/);
     if (rc2 != RC::SUCCESS) {
       LOG_ERROR("Failed to rollback index data when insert index entries failed. table name=%s, rc=%d:%s",
@@ -129,20 +131,25 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
     return RC::INVALID_ARGUMENT;
   }
 
-  // 包含field相关信息
+  // 细化存储field相关信息
   IndexMeta new_index_metas;
 
   RC rc = new_index_metas.init(index_name, field_metas);
   if (rc != RC::SUCCESS) {
-    LOG_INFO("Failed to init IndexMeta in table:%s, index_name:%s", 
+    LOG_INFO("Failed to init IndexMeta in table: %s, index_name: %s", 
              table_meta_->name(), index_name);
     return rc;
+  }
+  else {
+    LOG_INFO("Successfully initialize IndexMeta in table: %s, index_name: %s", 
+            table_meta_->name(), index_name);
   }
 
   // 创建索引相关数据结构
   BplusTreeIndex *index      = new BplusTreeIndex();
   string          index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_name);
 
+  // field_metas一直将引用向下传递
   rc = index->create(table_, index_file.c_str(), new_index_metas, field_metas);
   if (rc != RC::SUCCESS) {
     delete index;
@@ -228,10 +235,10 @@ RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid)
 {
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
-    LOG_INFO("Insert record = %s into Index %s. Location is table engine.", record, index->index_meta_->name());
+    LOG_INFO("Insert record into Index %s. Location is table engine.", index->index_meta().name());
     rc = index->insert_entry(record, &rid);
     if (rc != RC::SUCCESS) {
-      LOG_ERROR("Cannot insert record = %s into Index %s. Location is table engine.", record, index->index_meta_->name());
+      LOG_ERROR("Cannot insert record into Index %s. Location is table engine.", index->index_meta().name());
       break;
     }
   }
@@ -281,11 +288,14 @@ Index *HeapTableEngine::find_index(const char *index_name) const
   }
   return nullptr;
 }
-Index *HeapTableEngine::find_index_by_field(const char *field_name) const
+Index *HeapTableEngine::find_index_by_field(const vector<string> &field_names) const
 {
-  const IndexMeta *index_meta = table_meta_->find_index_by_field(field_name);
+  const IndexMeta *index_meta = table_meta_->find_index_by_field(field_names);
   if (index_meta != nullptr) {
     return this->find_index(index_meta->name());
+  }
+  else {
+    LOG_WARN("Cannot find index by field");
   }
   return nullptr;
 }

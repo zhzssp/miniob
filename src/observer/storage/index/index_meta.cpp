@@ -24,28 +24,34 @@ const static Json::StaticString FIELD_FIELD_NAMES("field_names");
 const static Json::StaticString FIELD_TYPES("field_types");
 const static Json::StaticString FIELD_LENGTHS("field_lengths");
 
-RC IndexMeta::init(const char *name, const vector<const FieldMeta *> &fields)
+RC IndexMeta::init(const char *index_name, const vector<const FieldMeta *> &field_metas)
 {
-  if (common::is_blank(name)) {
+  if (common::is_blank(index_name)) {
     LOG_ERROR("Failed to init index, name is empty.");
     return RC::INVALID_ARGUMENT;
   }
-  if (fields.empty()) {
+  if (field_metas.empty()) {
     LOG_ERROR("Failed to init index, fields is empty.");
     return RC::INVALID_ARGUMENT;
   }
 
-  name_ = name;
   fields_.clear();
   field_types_.clear();
   field_lengths_.clear();
-  fields_.reserve(fields.size());
-  field_types_.reserve(fields.size());
-  field_lengths_.reserve(fields.size());
-  for (const FieldMeta *f : fields) {
-    fields_.push_back(f->name());
-    field_types_.push_back(f->type());
-    field_lengths_.push_back(f->len());
+
+  fields_.reserve(field_metas.size());
+  field_types_.reserve(field_metas.size());
+  field_lengths_.reserve(field_metas.size());
+
+  name_ = index_name;
+  for (const FieldMeta *field_meta : field_metas) {
+    if(field_meta == nullptr) {
+      LOG_ERROR("When initialize IndexMeta, get null field_meta");
+      return RC::INVALID_ARGUMENT;
+    }
+    fields_.push_back(string(field_meta->name()));
+    field_types_.push_back(field_meta->type());
+    field_lengths_.push_back(field_meta->len());
   }
   return RC::SUCCESS;
 }
@@ -161,18 +167,9 @@ int IndexMeta::field_offset(int field_index) const
   return offset;
 }
 
-const char *IndexMeta::fields() const
+vector<string> IndexMeta::fields() const
 {
-  // static???
-  static string field_list;
-  field_list.clear();
-  for (size_t i = 0; i < fields_.size(); i++) {
-    if (i > 0) {
-      field_list.append(",");
-    }
-    field_list.append(fields_[i]);
-  }
-  return field_list.c_str();
+  return fields_;
 }
 
 const char *IndexMeta::field(int index) const

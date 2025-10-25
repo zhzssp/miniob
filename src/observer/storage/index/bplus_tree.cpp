@@ -789,26 +789,29 @@ RC BplusTreeHandler::sync()
   return disk_buffer_pool_->flush_all_pages();
 }
 
-RC BplusTreeHandler::create(LogHandler &log_handler, BufferPoolManager &bpm, const char *file_name, vector<AttrType> attr_type,
-    vector<int32_t> attr_length, int internal_max_size /* = -1*/, int leaf_max_size /* = -1 */)
+RC BplusTreeHandler::create(LogHandler &log_handler, BufferPoolManager &bpm, const char *file_name, const vector<AttrType> &attr_type,
+    const vector<int32_t> &attr_length, int internal_max_size /* = -1*/, int leaf_max_size /* = -1 */)
 {
   RC rc = bpm.create_file(file_name);
   if (OB_FAIL(rc)) {
     LOG_WARN("Failed to create file. file name=%s, rc=%d:%s", file_name, rc, strrc(rc));
     return rc;
+  } else {
+    LOG_INFO("Successfully create index file:%s", file_name);
   }
-  LOG_INFO("Successfully create index file:%s", file_name);
 
   DiskBufferPool *bp = nullptr;
 
+  // 加载信息到buffer pool manager中进行管理
   rc = bpm.open_file(log_handler, file_name, bp);
   if (OB_FAIL(rc)) {
     LOG_WARN("Failed to open file. file name=%s, rc=%d:%s", file_name, rc, strrc(rc));
     return rc;
+  } else {
+    LOG_INFO("Successfully open index file %s in Buffer Pool Manager.", file_name);
   }
-  LOG_INFO("Successfully open index file %s.", file_name);
 
-  // 使用下面的重载版本
+  // 使用下面的重载版本 --> 此时第二个参数传的是buffer pool
   rc = this->create(log_handler, *bp, attr_type, attr_length, internal_max_size, leaf_max_size);
   if (OB_FAIL(rc)) {
     bpm.close_file(file_name);
@@ -819,7 +822,7 @@ RC BplusTreeHandler::create(LogHandler &log_handler, BufferPoolManager &bpm, con
   return rc;
 }
 
-RC BplusTreeHandler::create(LogHandler &log_handler, DiskBufferPool &buffer_pool, vector<AttrType> attr_type, vector<int32_t> attr_length,
+RC BplusTreeHandler::create(LogHandler &log_handler, DiskBufferPool &buffer_pool, const vector<AttrType> &attr_type, const vector<int32_t> &attr_length,
     int internal_max_size /* = -1 */, int leaf_max_size /* = -1 */)
 {
   // attr_length --> total_attr_length
@@ -828,7 +831,7 @@ RC BplusTreeHandler::create(LogHandler &log_handler, DiskBufferPool &buffer_pool
   {
     total_attr_length += attr_length[i];
   }
-  // 根据键值的长度计算空间
+  // 根据键值的长度计算空间（不包含RID）
   if (internal_max_size < 0) {
     internal_max_size = calc_internal_page_capacity(total_attr_length);
   }
@@ -836,11 +839,13 @@ RC BplusTreeHandler::create(LogHandler &log_handler, DiskBufferPool &buffer_pool
     leaf_max_size = calc_leaf_page_capacity(total_attr_length);
   }
 
+  // 保存指针
   log_handler_      = &log_handler;
   disk_buffer_pool_ = &buffer_pool;
 
   RC rc = RC::SUCCESS;
 
+  // 初始化事务机制
   BplusTreeMiniTransaction mtr(*this, &rc);
 
   Frame *header_frame = nullptr;
@@ -868,18 +873,20 @@ RC BplusTreeHandler::create(LogHandler &log_handler, DiskBufferPool &buffer_pool
   file_header->attr_type         = attr_type;
   file_header->root_page         = BP_INVALID_PAGE_NUM;
 
+  LOG_INFO("Create IndexFileHeader, now internal_max_size = %d, leaf_max_size = %d",
+          internal_max_size, leaf_max_size);
+
   char *pdata = header_frame->data();
   // 将内部的字段信息写入page data中
   file_header->serialize_to(pdata);
 
-  LOG_INFO("------------------ IndexFileHeader is defined, and data is serialized to corresponding page ------------------");
+  LOG_INFO("------------------ Header data is serialized to corresponding page ------------------");
 
   // 取消记录日志的原因请参考下面的sync调用的地方。
   // mtr.logger().init_header_page(header_frame, *file_header);
 
   header_frame->mark_dirty();
 
-  // 将页面中的的数据读取进属性中存起来
   file_header_ = *file_header;
   LOG_INFO("Bplus tree file header: %s", file_header_.to_string().c_str());
   header_dirty_ = false;
@@ -905,7 +912,7 @@ RC BplusTreeHandler::create(LogHandler &log_handler, DiskBufferPool &buffer_pool
     return rc;
   }
 
-  LOG_INFO("Successfully create index");
+  LOG_INFO("Successfully create index, index creation is over");
   return RC::SUCCESS;
 }
 
@@ -1526,6 +1533,7 @@ RC BplusTreeHandler::insert_entry(const char *user_key, const RID *rid)
     return RC::INVALID_ARGUMENT;
   }
 
+  // 合并成完整的key
   MemPoolItem::item_unique_ptr pkey = make_key(user_key, *rid);
   if (pkey == nullptr) {
     LOG_WARN("Failed to alloc memory for key.");
@@ -1550,6 +1558,7 @@ RC BplusTreeHandler::insert_entry(const char *user_key, const RID *rid)
 
   Frame *frame = nullptr;
 
+  // 找到对应key的位置进行数据插 --> frame的作用 ？？？
   rc = find_leaf(mtr, BplusTreeOperationType::INSERT, key, frame);
   if (OB_FAIL(rc)) {
     LOG_WARN("Failed to find leaf %s. rc=%d:%s", rid->to_string().c_str(), rc, strrc(rc));

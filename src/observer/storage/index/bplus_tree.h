@@ -51,6 +51,9 @@ struct IndexFileHeader
     attr_type   = vector<AttrType>();
     root_page   = BP_INVALID_PAGE_NUM;
   }
+
+  ~IndexFileHeader() {}
+
   PageNum root_page;          ///< 根节点在磁盘中的页号
   int32_t internal_max_size;  ///< 内部节点最大的键值对数
   int32_t leaf_max_size;      ///< 叶子节点最大的键值对数
@@ -712,9 +715,9 @@ public:
    * @param internal_max_size 内部节点最大大小
    * @param leaf_max_size 叶子节点最大大小
    */
-  RC create(LogHandler &log_handler, BufferPoolManager &bpm, const char *file_name, vector<AttrType> attr_type, vector<int> attr_length,
+  RC create(LogHandler &log_handler, BufferPoolManager &bpm, const char *file_name, const vector<AttrType> &attr_type, const vector<int> &attr_length,
       int internal_max_size = -1, int leaf_max_size = -1);
-  RC create(LogHandler &log_handler, DiskBufferPool &buffer_pool, vector<AttrType> attr_type, vector<int> attr_length,
+  RC create(LogHandler &log_handler, DiskBufferPool &buffer_pool, const vector<AttrType> &attr_type, const vector<int> &attr_length,
       int internal_max_size = -1, int leaf_max_size = -1);
 
   /**

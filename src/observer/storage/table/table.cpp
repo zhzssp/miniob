@@ -185,6 +185,7 @@ RC Table::drop(Db *db, int32_t table_id, const char *meta_path, const char *tabl
 }
 
 // 加载元数据文件 --> 初始化engine, 设置元数据信息
+// base_dir = /miniob/db/sys ???
 RC Table::open(Db *db, const char *meta_file, const char *base_dir)
 {
   fstream fs;
@@ -194,6 +195,7 @@ RC Table::open(Db *db, const char *meta_file, const char *base_dir)
     LOG_ERROR("Failed to open meta file for read. file name=%s, errmsg=%s", meta_file_path.c_str(), strerror(errno));
     return RC::IOERR_OPEN;
   }
+  // TableMeta并没有deserialize ???
   if (table_meta_.deserialize(fs) < 0) {
     LOG_ERROR("Failed to deserialize table meta. file name=%s", meta_file_path.c_str());
     fs.close();
@@ -311,26 +313,19 @@ RC Table::get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadWriteMode m
   return engine_->get_chunk_scanner(scanner, trx, mode);
 }
 
+// 所有Table中对于index的操作都是交由下层的engine完成
 RC Table::create_index(Trx *trx, const vector<const FieldMeta *> &field_metas, const char *index_name)
 {
   if (field_metas.empty()) {
     LOG_WARN("Failed to create index %s due to empty field metas", index_name);
     return RC::INVALID_ARGUMENT;
   }
-
-  for (const FieldMeta *field_meta : field_metas) {
-    if (nullptr == field_meta) {
-      LOG_WARN("Found null field meta when init index %s", index_name);
-      return RC::INVALID_ARGUMENT;
-    }
-  }
-
   return engine_->create_index(trx, field_metas, index_name);
 }
 
 RC Table::delete_record(const Record &record) { return engine_->delete_record(record); }
 
 Index *Table::find_index(const char *index_name) const { return engine_->find_index(index_name); }
-Index *Table::find_index_by_field(const char *field_name) const { return engine_->find_index_by_field(field_name); }
+Index *Table::find_index_by_field(const vector<string> &field_name) const { return engine_->find_index_by_field(field_name); }
 
 RC Table::sync() { return engine_->sync(); }

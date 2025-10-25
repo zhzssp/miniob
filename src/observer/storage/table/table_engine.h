@@ -52,7 +52,7 @@ public:
   virtual RC     visit_record(const RID &rid, function<bool(Record &)> visitor)                               = 0;
   virtual RC     sync()                                                                                       = 0;
   virtual Index *find_index(const char *index_name) const                                                     = 0;
-  virtual Index *find_index_by_field(const char *field_name) const                                            = 0;
+  virtual Index *find_index_by_field(const vector<string> &field_names) const                                        = 0;
   virtual RC     open()                                                                                       = 0;
   // 自定义
   virtual RC close() = 0;
