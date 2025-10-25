@@ -53,9 +53,9 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   unordered_map<string, string> table_alias_map;  // 别名 -> 表名映射
   unordered_map<string, string> field_alias_map;  // 字段别名映射
 
-  // 处理表别名 - 优先处理 ALIASES，避免重复
+  // 处理表别名 - 避免重复处理
   if (!select_sql.ALIASES.empty()) {
-    // 多表查询（逗号分隔），使用 ALIASES
+    // 多表查询（逗号分隔），只处理 ALIASES
     for (size_t i = 0; i < select_sql.ALIASES.size(); i++) {
       if (!select_sql.ALIASES[i].alias.empty()) {
           // 检查别名重复
@@ -67,7 +67,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
       }
     }
   } else {
-    // JOIN查询，使用 table_references
+    // JOIN查询，只处理 table_references
     for (const auto &table_ref : select_sql.table_references) {
       if (!table_ref.alias.empty()) {
           // 检查别名重复
@@ -106,12 +106,17 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     table_map.insert({table_name, table});
   }
   
-  // 处理 ALIASES（多表查询的表别名）
+  // 处理 ALIASES 中的表（多表查询）
   for (size_t i = 0; i < select_sql.ALIASES.size(); i++) {
     const char *table_name = select_sql.ALIASES[i].name.c_str();
     if (nullptr == table_name) {
       LOG_WARN("invalid argument. relation name is null. index=%d", i);
       return RC::INVALID_ARGUMENT;
+    }
+
+    // 检查表是否已经存在，避免重复添加
+    if (table_map.find(table_name) != table_map.end()) {
+      continue;
     }
 
     Table *table = db->find_table(table_name);
@@ -120,12 +125,9 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
       return RC::SCHEMA_TABLE_NOT_EXIST;
     }
 
-    // 如果表还没有被添加，则添加它
-    if (table_map.find(table_name) == table_map.end()) {
-      binder_context.add_table(table);
-      tables.push_back(table);
-      table_map.insert({table_name, table});
-    }
+    binder_context.add_table(table);
+    tables.push_back(table);
+    table_map.insert({table_name, table});
     
     // 如果有别名，添加到table_map中
     if (!select_sql.ALIASES[i].alias.empty()) {
@@ -154,19 +156,13 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
       return RC::SCHEMA_TABLE_NOT_EXIST;
     }
 
-     binder_context.add_table(table);
-     tables.push_back(table);
-     table_map.insert({table_name, table});
-     
-     // 如果有别名，也要添加到table_map中
-     if (!table_ref.alias.empty()) {
-       table_map.insert({table_ref.alias, table});
-       binder_context.add_table_alias(table_ref.alias.c_str(), table);
-     }
-     
-     // 处理 JOIN 条件
-     if (table_ref.is_join && !table_ref.join_conditions.empty()) {
-     }
+    binder_context.add_table(table);
+    tables.push_back(table);
+    table_map.insert({table_name, table});
+    
+    // 处理 JOIN 条件
+    if (table_ref.is_join && !table_ref.join_conditions.empty()) {
+    }
   }
 
   // collect query fields in `select` statement
@@ -207,6 +203,22 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   Table *default_table = nullptr;
   if (tables.size() == 1) {
     default_table = tables[0];
+  }
+
+  // 转换WHERE条件中的表别名
+  for (auto &condition : select_sql.conditions) {
+    if (condition.left_is_attr && !condition.left_attr.relation_name.empty()) {
+      auto it = table_alias_map.find(condition.left_attr.relation_name);
+      if (it != table_alias_map.end()) {
+        condition.left_attr.relation_name = it->second;
+      }
+    }
+    if (condition.right_is_attr && !condition.right_attr.relation_name.empty()) {
+      auto it = table_alias_map.find(condition.right_attr.relation_name);
+      if (it != table_alias_map.end()) {
+        condition.right_attr.relation_name = it->second;
+      }
+    }
   }
 
   // create filter statement in `where` statement
