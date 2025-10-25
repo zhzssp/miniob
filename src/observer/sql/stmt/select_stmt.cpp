@@ -53,15 +53,30 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   unordered_map<string, string> table_alias_map;  // 别名 -> 表名映射
   unordered_map<string, string> field_alias_map;  // 字段别名映射
 
-  // 处理表别名
-  for (const auto &table_ref : select_sql.table_references) {
-    if (!table_ref.alias.empty()) {
-        // 检查别名重复
-        if (table_alias_map.find(table_ref.alias) != table_alias_map.end()) {
-            LOG_WARN("Duplicate table alias: %s", table_ref.alias.c_str());
-            return RC::INVALID_ARGUMENT;
-        }
-        table_alias_map[table_ref.alias] = table_ref.table_name;
+  // 处理表别名 - 优先处理 ALIASES，避免重复
+  if (!select_sql.ALIASES.empty()) {
+    // 多表查询（逗号分隔），使用 ALIASES
+    for (size_t i = 0; i < select_sql.ALIASES.size(); i++) {
+      if (!select_sql.ALIASES[i].alias.empty()) {
+          // 检查别名重复
+          if (table_alias_map.find(select_sql.ALIASES[i].alias) != table_alias_map.end()) {
+              LOG_WARN("Duplicate table alias: %s", select_sql.ALIASES[i].alias.c_str());
+              return RC::INVALID_ARGUMENT;
+          }
+          table_alias_map[select_sql.ALIASES[i].alias] = select_sql.ALIASES[i].name;
+      }
+    }
+  } else {
+    // JOIN查询，使用 table_references
+    for (const auto &table_ref : select_sql.table_references) {
+      if (!table_ref.alias.empty()) {
+          // 检查别名重复
+          if (table_alias_map.find(table_ref.alias) != table_alias_map.end()) {
+              LOG_WARN("Duplicate table alias: %s", table_ref.alias.c_str());
+              return RC::INVALID_ARGUMENT;
+          }
+          table_alias_map[table_ref.alias] = table_ref.table_name;
+      }
     }
   }
 // 处理字段别名
