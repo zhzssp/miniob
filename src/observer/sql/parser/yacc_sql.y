@@ -200,6 +200,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <sql_node>            desc_table_stmt
 %type <sql_node>            create_index_stmt
 %type <sql_node>            drop_index_stmt
+%type <sql_node>            show_index_stmt
 %type <sql_node>            sync_stmt
 %type <sql_node>            begin_stmt
 %type <sql_node>            commit_stmt
@@ -247,6 +248,7 @@ command_wrapper:
   | desc_table_stmt
   | create_index_stmt
   | drop_index_stmt
+  | show_index_stmt
   | sync_stmt
   | begin_stmt
   | commit_stmt
@@ -323,7 +325,7 @@ show_index_stmt:      /*show index 语句的语法解析树*/
     SHOW INDEX FROM ID
     {
       $$ = new ParsedSqlNode(SCF_SHOW_INDEX);
-      $$->show_index.index_name = $4;
+      $$->show_index.table_name = $4;
       free($4);
     }
     ;

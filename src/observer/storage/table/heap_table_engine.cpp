@@ -44,7 +44,7 @@ RC HeapTableEngine::insert_record(Record &record)
     return rc;
   }
 
-  LOG_INFO("Table engine tries to insert record = %s", record.data());
+  LOG_INFO("Table engine tries to insert record.");
   rc = insert_entry_of_indexes(record.data(), record.rid());
   // 可能出现了键值重复
   if (rc != RC::SUCCESS) { 
@@ -134,6 +134,7 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
   // 细化存储field相关信息
   IndexMeta new_index_metas;
 
+  // 指向table_meta_中的vector<FieldMeta>
   RC rc = new_index_metas.init(index_name, field_metas);
   if (rc != RC::SUCCESS) {
     LOG_INFO("Failed to init IndexMeta in table: %s, index_name: %s", 
@@ -149,7 +150,7 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
   BplusTreeIndex *index      = new BplusTreeIndex();
   string          index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_name);
 
-  // field_metas一直将引用向下传递
+  // field_metas一直将引用向下传递 --> 使用的是new_index_metas, 仍然指向table_meta_中的vector<FieldMeta>
   rc = index->create(table_, index_file.c_str(), new_index_metas, field_metas);
   if (rc != RC::SUCCESS) {
     delete index;
@@ -190,7 +191,7 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
   // 添加到表的索引列表中
   indexes_.push_back(index);
 
-  /// 接下来将这个索引放到表的元数据中
+  // 接下来将这个索引放到表的元数据中 --> 重新创建vector<FieldMeta>
   TableMeta new_table_meta(*table_meta_);
   rc = new_table_meta.add_index(new_index_metas);
   if (rc != RC::SUCCESS) {
@@ -225,6 +226,7 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
     return RC::IOERR_WRITE;
   }
 
+  // 原先table_meta_的vector<FieldMeta>对象们被销毁 --> 前面保存的field_metas中的指针失效
   table_meta_->swap(new_table_meta);
 
   LOG_INFO("Successfully added a new index (%s) on the table (%s)", index_name, table_meta_->name());
@@ -236,6 +238,7 @@ RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid)
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
     LOG_INFO("Insert record into Index %s. Location is table engine.", index->index_meta().name());
+    // 理论上都是Index的子类BplusTreeIndex
     rc = index->insert_entry(record, &rid);
     if (rc != RC::SUCCESS) {
       LOG_ERROR("Cannot insert record into Index %s. Location is table engine.", index->index_meta().name());

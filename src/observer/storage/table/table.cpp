@@ -326,6 +326,11 @@ RC Table::create_index(Trx *trx, const vector<const FieldMeta *> &field_metas, c
 RC Table::delete_record(const Record &record) { return engine_->delete_record(record); }
 
 Index *Table::find_index(const char *index_name) const { return engine_->find_index(index_name); }
+// 补丁
+Index *Table::find_index_by_field(const char *field_name) const { 
+  const vector<string> field_name_vector = vector<string>{string(field_name)};
+  return engine_->find_index_by_field(field_name_vector); 
+}
 Index *Table::find_index_by_field(const vector<string> &field_name) const { return engine_->find_index_by_field(field_name); }
 
 RC Table::sync() { return engine_->sync(); }

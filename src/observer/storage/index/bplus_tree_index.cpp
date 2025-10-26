@@ -16,6 +16,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "storage/table/table.h"
 #include "storage/db/db.h"
+#include <exception>
 
 BplusTreeIndex::~BplusTreeIndex() noexcept { close(); }
 
@@ -34,6 +35,7 @@ RC BplusTreeIndex::create(
   BufferPoolManager &bpm = table->db()->buffer_pool_manager();
 
   // 严格控制大小，避免错误读取多余的内存导致程序崩溃
+  // 此处生命周期已经不受field_metas的控制
   vector<AttrType> attr_type;
   vector<int32_t> attr_length;
   attr_type.reserve(field_metas.size());
@@ -112,8 +114,16 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
       LOG_ERROR("Found null field meta in index %s", index_meta_.name());
       return RC::INVALID_ARGUMENT;
     }
-    LOG_INFO("Get attr %d's length = %d when computing total key length in BplusTreeIndex::insert_entry()", count, field_meta->len());
-    total_key_length += field_meta->len();
+
+    int delta_len = 0;
+    try {
+      LOG_INFO("Get attr %d's length = %d when computing total key length in BplusTreeIndex::insert_entry()", count, field_meta->len());
+      delta_len = field_meta->len();
+    } catch (exception &e) {
+      LOG_ERROR(e.what());
+      return RC::INVALID_ARGUMENT;
+    }
+    total_key_length += delta_len;
     count++;
 
     // 防止累加溢出
