@@ -151,11 +151,11 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
   BplusTreeIndex *index      = new BplusTreeIndex();
   string          index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_name);
 
-  // 指针迁移到new_table_meta上 --> 避免vector<FieldMeta>被释放
-  vector<const FieldMeta *> new_field_metas = new_table_meta.transfer_pointers();
+  // // 指针迁移到new_table_meta上 --> 避免vector<FieldMeta>被释放
+  // vector<const FieldMeta *> new_field_metas = new_table_meta.transfer_pointers();
 
   // field_metas一直将引用向下传递 --> 使用的是new_index_metas, 仍然指向table_meta_中的vector<FieldMeta>
-  rc = index->create(table_, index_file.c_str(), new_index_metas, new_field_metas);
+  rc = index->create(table_, index_file.c_str(), new_index_metas, field_metas);
   if (rc != RC::SUCCESS) {
     delete index;
     LOG_ERROR("Failed to create bplus tree index. file name=%s, rc=%d:%s", index_file.c_str(), rc, strrc(rc));
@@ -195,7 +195,7 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
   // 添加到表的索引列表中
   indexes_.push_back(index);
 
-  
+
   // 接下来将这个索引放到表的元数据中 --> 重新创建vector<FieldMeta>
   rc = new_table_meta.add_index(new_index_metas);
   if (rc != RC::SUCCESS) {

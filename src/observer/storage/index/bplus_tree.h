@@ -30,6 +30,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/index/latch_memo.h"
 #include "storage/index/bplus_tree_log.h"
 #include "storage/buffer/page.h"
+#include "common/sys/rc.h"
 
 class BplusTreeHandler;
 class BplusTreeMiniTransaction;
@@ -101,10 +102,12 @@ struct IndexFileHeader
   }
 
   // 序列化，结果存储在pdata
-  void serialize_to(char *pdata) const
+  RC serialize_to(char *pdata) const
   {
+    RC rc = RC::SUCCESS;
     if(!pdata) {
       LOG_ERROR("pdata in serialize_to is null");
+      return RC::SERIALIZATION_FAILURE;
     }
 
     char *p = pdata;
@@ -124,9 +127,13 @@ struct IndexFileHeader
     memcpy(p, &n_attr_length, sizeof(int32_t));
     p += sizeof(int32_t);
 
-    if (n_attr_length <= 0 || n_attr_length > 32) {  // sanity check
-      LOG_ERROR("Invalid n_attr_length=%d", n_attr_length);
-      return;
+    if (n_attr_length <= 0 || n_attr_length > 32)
+    {
+      LOG_ERROR("In serialization, find invalid n_attr_length = %d in index header, treat as empty header", n_attr_length);
+      // attr_length.clear();
+      // attr_type.clear();
+      // 让上层 open() 检测到空的 header 并使用默认格式
+      return RC::SERIALIZATION_FAILURE;
     }
 
     if (n_attr_length > 0) {
@@ -141,7 +148,7 @@ struct IndexFileHeader
 
     if (n_attr_type <= 0 || n_attr_type > 32) {  // sanity check
       LOG_ERROR("Invalid n_attr_type=%d", n_attr_type);
-      return;
+      return RC::SERIALIZATION_FAILURE;
     }
 
     if (n_attr_type > 0) {
@@ -155,20 +162,24 @@ struct IndexFileHeader
     size_t used = static_cast<size_t>(p - pdata);
     if (used > static_cast<size_t>(BP_PAGE_SIZE)) {
       LOG_ERROR("serialize_to: header size %zu exceeds BP_PAGE_SIZE %d", used,      BP_PAGE_SIZE);
+      return RC::SERIALIZATION_FAILURE;
     } else if (used < static_cast<size_t>(BP_PAGE_SIZE)) {
         memset(p, 0, static_cast<size_t>(BP_PAGE_SIZE) - used);
     } 
     else {
       LOG_INFO("serialize_to: header size %zu equals BP_PAGE_SIZE %d", used, BP_PAGE_SIZE);
     }
+
+    return rc;
   }
 
   // 反序列化，将存储在pdata的结果读入到当前对象
-  void deserialize_from(char *pdata)
+  RC deserialize_from(char *pdata)
   {
+    RC rc = RC::SUCCESS;
     if(!pdata) {
       LOG_ERROR("Invalid pdata for deserialize_from IndexFileHeader");
-      return;
+      return RC::DESERIALIZATION_FAILURE;
     }
     char *p = pdata;
 
@@ -188,18 +199,18 @@ struct IndexFileHeader
 
     if (n_attr_length <= 0 || n_attr_length > 32)
     {
-      LOG_ERROR("In serialization, find invalid n_attr_length = %d in index header, treat as empty header", n_attr_length);
-      attr_length.clear();
-      attr_type.clear();
+      LOG_ERROR("In deserialization, find invalid n_attr_length = %d in index header, treat as empty header", n_attr_length);
+      // attr_length.clear();
+      // attr_type.clear();
       // 让上层 open() 检测到空的 header 并使用默认格式
-      return;
+      return RC::DESERIALIZATION_FAILURE;
     }
 
     try{
       attr_length.resize(n_attr_length);
     } catch (const std::bad_alloc &e) {
       LOG_ERROR("Failed to resize attr_length vector, n_attr_length=%d", n_attr_length);
-      return;
+      return RC::DESERIALIZATION_FAILURE;
     }
     if (n_attr_length > 0) {
       memcpy(attr_length.data(), p, n_attr_length * sizeof(int32_t));
@@ -214,15 +225,15 @@ struct IndexFileHeader
     if (n_attr_type <= 0 || n_attr_type > 32)
     {
       LOG_ERROR("In deserialization, find invalid n_attr_type= % d in index header, treat as empty header",         n_attr_type);
-      attr_type.clear();
-      return;
+      // attr_type.clear();
+      return RC::DESERIALIZATION_FAILURE;
     }
 
     try {
       attr_type.resize(n_attr_type);
     } catch (const std::bad_alloc &e) {
       LOG_ERROR("Failed to resize attr_type vector, n_attr_type=%d", n_attr_type);
-      return;
+      return RC::DESERIALIZATION_FAILURE;
     }
     if (n_attr_type > 0) {
       memcpy(attr_type.data(), p, n_attr_type * sizeof(AttrType));
@@ -231,6 +242,8 @@ struct IndexFileHeader
 
     // 读取 root_page
     memcpy(&root_page, p, sizeof(PageNum));
+
+    return rc;
   }
 };
 

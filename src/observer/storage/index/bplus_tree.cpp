@@ -878,7 +878,11 @@ RC BplusTreeHandler::create(LogHandler &log_handler, DiskBufferPool &buffer_pool
 
   char *pdata = header_frame->data();
   // 将内部的字段信息写入page data中
-  file_header->serialize_to(pdata);
+  rc = file_header->serialize_to(pdata);
+  if(rc != RC::SUCCESS) {
+    LOG_ERROR("IndexFileHeader serialization fails");
+    return rc;
+  }
 
   LOG_INFO("------------------ Header data is serialized to corresponding page ------------------");
 
@@ -957,7 +961,12 @@ RC BplusTreeHandler::open(LogHandler &log_handler, DiskBufferPool &buffer_pool)
   }
 
   char *pdata = frame->data();
-  file_header_.deserialize_from(pdata);
+  rc = file_header_.deserialize_from(pdata);
+  if(rc != RC::SUCCESS) {
+    LOG_ERROR("IndexFileHeader deserialization fails");
+    return rc;
+  }
+  // 设置默认值 --> 被return截断
   if (file_header_.attr_type.empty() || file_header_.attr_length.empty()) {
     LOG_WARN("Empty file_header_ --> cannot get data from frame, use default format");
     file_header_.attr_type   = {AttrType::INTS};
@@ -1460,9 +1469,13 @@ RC BplusTreeHandler::recover_init_header_page(
 {
   // IndexFileHeader *file_header = reinterpret_cast<IndexFileHeader *>(frame->data());
   // memcpy(file_header, &header, sizeof(IndexFileHeader));
+  RC rc = RC::SUCCESS;
   char *pdata = frame->data();
-  header.serialize_to(pdata); // header 序列化到页面中
-  
+  rc = header.serialize_to(pdata); // header 序列化到页面中
+  if(rc != RC::SUCCESS) {
+    return rc;
+  }
+
   file_header_  = header;
   header_dirty_ = false;
   frame->mark_dirty();
@@ -1470,7 +1483,7 @@ RC BplusTreeHandler::recover_init_header_page(
   key_comparator_.init(file_header_);
   key_printer_.init(file_header_);
 
-  return RC::SUCCESS;
+  return rc;
 }
 
 void BplusTreeHandler::update_root_page_num_locked(BplusTreeMiniTransaction &mtr, PageNum root_page_num)
