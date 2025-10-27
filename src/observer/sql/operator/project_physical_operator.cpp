@@ -31,6 +31,7 @@ RC ProjectPhysicalOperator::open(Trx *trx)
   }
 
   PhysicalOperator *child = children_[0].get();
+  // 递归open子算子 --> 只用一个子算子？
   RC                rc    = child->open(trx);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to open child operator: %s", strrc(rc));
@@ -45,6 +46,7 @@ RC ProjectPhysicalOperator::next()
   if (children_.empty()) {
     return RC::RECORD_EOF;
   }
+  // 递归next子算子
   return children_[0]->next();
 }
 

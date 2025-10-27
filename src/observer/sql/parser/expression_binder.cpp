@@ -49,6 +49,7 @@ RC ExpressionBinder::bind_expression(unique_ptr<Expression> &expr, vector<unique
     return RC::SUCCESS;
   }
 
+  // OrderedUnboundExpr是否需要单独开一个case ?
   switch (expr->type()) {
     case ExprType::STAR: {
       return bind_star_expression(expr, bound_expressions);
