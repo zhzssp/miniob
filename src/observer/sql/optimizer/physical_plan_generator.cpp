@@ -135,9 +135,11 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
   Table *table = table_get_oper.table();
 
   Index     *index      = nullptr;
+  // ValueExpr用于表达一个固定的值
   ValueExpr *value_expr = nullptr;
   bool       has_not_equal = false;  // 检查是否有NOT_EQUAL查询
   
+  // 默认得到的都是ComparisonExpr类型的Expression ？？？
   for (auto &expr : predicates) {
     if (expr->type() == ExprType::COMPARISON) {
       auto comparison_expr = static_cast<ComparisonExpr *>(expr.get());
@@ -171,6 +173,7 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
         continue;
       }
 
+      // index用处何在 ？？？ --> 验证是否可以找到 ？？？
       const Field &field = field_expr->field();
       index              = table->find_index_by_field(field.field_name());
       if (nullptr != index) {

@@ -627,7 +627,7 @@ RC RecordFileHandler::insert_record(const char *data, int record_size, RID *rid)
     lock_.unlock();
   }
 
-  // 找到空闲位置
+  // 找到空闲位置 --> unimplemented ？？？
   return record_page_handler->insert_record(data, rid);
 }
 

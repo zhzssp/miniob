@@ -31,7 +31,6 @@
             "type": "shell",
             "command": "cd ../src/observer/sql/parser && bash gen_parser.sh"
         },
-        // 新增
         {
             "label": "cmake",
             "command": "cmake",
@@ -42,7 +41,8 @@
         },
         {
             "label": "make",
-            "command": "make"
+            "command": "make",
+            "problemMatcher": []
         },
         {
             "label": "CMake Build",
@@ -51,7 +51,6 @@
                 "make"
             ]
         },
-        // 可以通过“运行任务”栏目，在终端执行对应操作
         {
             "label": "Get pid of observer",
             "type": "shell",

@@ -110,7 +110,7 @@ void Value::reset()
   own_data_  = false;
 }
 
-void Value::set_data(char *data, int length)
+void Value::set_data(const char *data, const int length)
 {
   switch (attr_type_) {
     case AttrType::CHARS: {

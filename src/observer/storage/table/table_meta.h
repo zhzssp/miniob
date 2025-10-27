@@ -47,6 +47,7 @@ public:
   const FieldMeta    *trx_field() const;
   const FieldMeta    *field(int index) const;
   const FieldMeta    *field(const char *name) const;
+  auto                fields(const vector<string> &names) const -> vector<const FieldMeta *>;
   const FieldMeta    *find_field_by_offset(int offset) const;
   auto                field_metas() const -> const vector<FieldMeta>                *{ return &fields_; }
   auto                trx_fields() const -> span<const FieldMeta>;
@@ -57,7 +58,7 @@ public:
   int sys_field_num() const;
 
   const IndexMeta *index(const char *name) const;
-  const IndexMeta *find_index_by_field(const char *field) const;
+  const IndexMeta *find_index_by_field(const vector<string> &field_names) const;
   const IndexMeta *index(int i) const;
   int              index_num() const;
 

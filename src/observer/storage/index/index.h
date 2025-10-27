@@ -40,17 +40,16 @@ public:
   Index()          = default;
   virtual ~Index() = default;
 
-  virtual RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
+  virtual RC create(
+      Table *table, const char *file_name, const IndexMeta &index_meta, const vector<const FieldMeta *> &field_metas)
   {
     return RC::UNSUPPORTED;
   }
 
-  virtual RC clear()
-  {
-    return RC::UNSUPPORTED;
-  }
+  virtual RC clear() { return RC::UNSUPPORTED; }
 
-  virtual RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
+  virtual RC open(
+      Table *table, const char *file_name, const IndexMeta &index_meta, const vector<const FieldMeta *> &field_metas)
   {
     return RC::UNSUPPORTED;
   }
@@ -95,11 +94,11 @@ public:
   virtual RC sync() = 0;
 
 protected:
-  RC init(const IndexMeta &index_meta, const FieldMeta &field_meta);
+  RC init(const IndexMeta &index_meta, const vector<const FieldMeta *> &field_metas);
 
 protected:
-  IndexMeta index_meta_;  ///< 索引的元数据
-  FieldMeta field_meta_;  ///< 当前实现仅考虑一个字段的索引
+  IndexMeta                 index_meta_;   ///< 索引的元数据
+  vector<const FieldMeta *> field_metas_;  ///< 多字段索引的字段元数据
 };
 
 /**

@@ -280,7 +280,7 @@ RC Db::open_all_tables()
     LOG_INFO("Open table: %s, file: %s", table->name(), filename.c_str());
   }
 
-  LOG_INFO("All table have been opened. num=%d", opened_tables_.size());
+  LOG_INFO("All table have been opened, opened num=%d", opened_tables_.size());
   return rc;
 }
 
@@ -453,6 +453,7 @@ RC Db::flush_meta()
 RC Db::init_dblwr_buffer()
 {
   auto dblwr_buffer = static_cast<DiskDoubleWriteBuffer *>(buffer_pool_manager_->get_dblwr_buffer());
+  // 恢复double write buffer
   RC   rc           = dblwr_buffer->recover();
   if (OB_FAIL(rc)) {
     LOG_ERROR("fail to recover in dblwr buffer");
