@@ -1902,6 +1902,7 @@ RC BplusTreeScanner::open(const char *left_user_key, int left_len, bool left_inc
     if (result > 0 ||  // left < right
                        // left == right but is (left,right)/[left,right) or (left,right]
         (result == 0 && (left_inclusive == false || right_inclusive == false))) {
+      LOG_ERROR("Unexpected comparison result in BplusTreeScanner::open");
       return RC::INVALID_ARGUMENT;
     }
   }

@@ -25,6 +25,7 @@ IndexScanPhysicalOperator::IndexScanPhysicalOperator(Table *table, Index *index,
       left_inclusive_(left_inclusive),
       right_inclusive_(right_inclusive)
 {
+  LOG_INFO("IndexScanPhysicalOperator is initialized, left and right values are passed in here");
   if (left_value) {
     left_value_ = *left_value;
   }
@@ -39,6 +40,7 @@ RC IndexScanPhysicalOperator::open(Trx *trx)
     return RC::INTERNAL;
   }
 
+  // 无法通过给出的信息正确初始化，得到的是nullptr
   IndexScanner *index_scanner = index_->create_scanner(left_value_.data(),
       left_value_.length(),
       left_inclusive_,
@@ -46,9 +48,10 @@ RC IndexScanPhysicalOperator::open(Trx *trx)
       right_value_.length(),
       right_inclusive_);
   if (nullptr == index_scanner) {
-    LOG_WARN("failed to create index scanner");
+    LOG_ERROR("failed to create index scanner");
     return RC::INTERNAL;
   }
+  // 内部保存的scanner在这里初始化
   index_scanner_ = index_scanner;
 
   tuple_.set_schema(table_, table_->table_meta().field_metas());
@@ -99,6 +102,10 @@ RC IndexScanPhysicalOperator::next()
 
 RC IndexScanPhysicalOperator::close()
 {
+  if(index_scanner_ == nullptr) {
+    LOG_ERROR("index_scanner_ is nullptr, IndexScanPhysicalOperator::close() fails to execute");
+    return RC::INVALID_ARGUMENT;
+  }
   index_scanner_->destroy();
   index_scanner_ = nullptr;
   return RC::SUCCESS;

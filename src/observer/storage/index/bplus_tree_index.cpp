@@ -21,7 +21,7 @@ See the Mulan PSL v2 for more details. */
 BplusTreeIndex::~BplusTreeIndex() noexcept { close(); }
 
 RC BplusTreeIndex::create(
-    Table *table, const char *file_name, const IndexMeta &index_meta, const vector<const FieldMeta *> &field_metas)
+    Table *table, const char *file_name, const IndexMeta &index_meta, const vector<FieldMeta> &field_metas)
 {
   if (inited_) {
     LOG_WARN("Failed to create index due to the index has been created before. file_name:%s, index:%s",
@@ -41,10 +41,10 @@ RC BplusTreeIndex::create(
   attr_type.reserve(field_metas.size());
   attr_length.reserve(field_metas.size());
 
-  for (const FieldMeta *field_meta : field_metas) {
-    attr_type.push_back(field_meta->type());
-    attr_length.push_back(field_meta->len());
-    LOG_INFO("Construct attr info: attr(field) length = %d", field_meta->len());
+  for (const FieldMeta &field_meta : field_metas) {
+    attr_type.push_back(field_meta.type());
+    attr_length.push_back(field_meta.len());
+    LOG_INFO("Construct attr info: attr(field) length = %d", field_meta.len());
   }
 
   // 初始化BplusTreeIndex内部的handler（关键位置） --> internal_max_size和leaf_max_size使用默认值 ???
@@ -64,7 +64,7 @@ RC BplusTreeIndex::create(
 
 // file_name = miniob/db/sys/test-test_index.index
 RC BplusTreeIndex::open(
-    Table *table, const char *file_name, const IndexMeta &index_meta, const vector<const FieldMeta *> &field_metas)
+    Table *table, const char *file_name, const IndexMeta &index_meta, const vector<FieldMeta> &field_metas)
 {
   if (inited_) {
     LOG_WARN("Failed to open index due to the index has been initedd before. file_name:%s, index:%s",
@@ -109,16 +109,16 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
   // 构建复合键 --> 字节级存储
   int total_key_length = 0;
   int count = 1;
-  for (const FieldMeta *field_meta : field_metas_) {
-    if (nullptr == field_meta) {
+  for (const FieldMeta &field_meta : field_metas_) {
+    if (field_meta.len() <= 0) {
       LOG_ERROR("Found null field meta in index %s", index_meta_.name());
       return RC::INVALID_ARGUMENT;
     }
 
     int delta_len = 0;
     try {
-      LOG_INFO("Get attr %d's length = %d when computing total key length in BplusTreeIndex::insert_entry()", count, field_meta->len());
-      delta_len = field_meta->len();
+      LOG_INFO("Get attr %d's length = %d when computing total key length in BplusTreeIndex::insert_entry()", count, field_meta.len());
+      delta_len = field_meta.len();
     } catch (exception &e) {
       LOG_ERROR(e.what());
       return RC::INVALID_ARGUMENT;
@@ -137,10 +137,10 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
   vector<char> composite_key;
   composite_key.reserve(total_key_length);
 
-  for (const FieldMeta *field_meta : field_metas_) {
+  for (const FieldMeta &field_meta : field_metas_) {
     // offset：获取record中对应field的数据位置
-    const char *field_data = record + field_meta->offset();
-    composite_key.insert(composite_key.end(), field_data, field_data + field_meta->len());
+    const char *field_data = record + field_meta.offset();
+    composite_key.insert(composite_key.end(), field_data, field_data + field_meta.len());
   }
 
   // data()获得指向底层数组的指针
@@ -153,13 +153,13 @@ RC BplusTreeIndex::delete_entry(const char *record, const RID *rid)
   // 构建复合键
   int32_t total_key_length = 0;
   int count = 1;
-  for (const FieldMeta *field_meta : field_metas_) {
-    if (nullptr == field_meta) {
+  for (const FieldMeta &field_meta : field_metas_) {
+    if (field_meta.len() <= 0) {
       LOG_WARN("Found null field meta in index %s", index_meta_.name());
       return RC::INTERNAL;
     }
-    LOG_INFO("Get attr %d's length = %d when computing total key length in BplusTreeIndex::delete_entry()", count, field_meta->len());
-    total_key_length += field_meta->len();
+    LOG_INFO("Get attr %d's length = %d when computing total key length in BplusTreeIndex::delete_entry()", count, field_meta.len());
+    total_key_length += field_meta.len();
     count++;
 
     // 防止累加溢出
@@ -172,10 +172,10 @@ RC BplusTreeIndex::delete_entry(const char *record, const RID *rid)
   vector<char> composite_key;
   composite_key.reserve(total_key_length);
 
-  for (const FieldMeta *field_meta : field_metas_) {
+  for (const FieldMeta &field_meta : field_metas_) {
     // offset：获取record中对应field的数据位置
-    const char *field_data = record + field_meta->offset();
-    composite_key.insert(composite_key.end(), field_data, field_data + field_meta->len());
+    const char *field_data = record + field_meta.offset();
+    composite_key.insert(composite_key.end(), field_data, field_data + field_meta.len());
   }
 
   return index_handler_.delete_entry(composite_key.data(), rid);
@@ -197,13 +197,14 @@ IndexScanner *BplusTreeIndex::create_scanner(
 RC BplusTreeIndex::sync() { return index_handler_.sync(); }
 
 ////////////////////////////////////////////////////////////////////////////////
-BplusTreeIndexScanner::BplusTreeIndexScanner(BplusTreeHandler &tree_handler) : tree_scanner_(tree_handler) {}
+BplusTreeIndexScanner::BplusTreeIndexScanner(BplusTreeHandler &tree_handler) : tree_scanner_(tree_handler) {} // 使用handler初始化成员BplusTreeScanner
 
 BplusTreeIndexScanner::~BplusTreeIndexScanner() noexcept { tree_scanner_.close(); }
 
 RC BplusTreeIndexScanner::open(
     const char *left_key, int left_len, bool left_inclusive, const char *right_key, int right_len, bool right_inclusive)
 {
+  // 调用底层接口
   return tree_scanner_.open(left_key, left_len, left_inclusive, right_key, right_len, right_inclusive);
 }
 

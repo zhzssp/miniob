@@ -50,10 +50,11 @@ RC ProjectPhysicalOperator::next()
 
 RC ProjectPhysicalOperator::close()
 {
+  RC rc = RC::SUCCESS;
   if (!children_.empty()) {
-    children_[0]->close();
+    rc = children_[0]->close();
   }
-  return RC::SUCCESS;
+  return rc;
 }
 Tuple *ProjectPhysicalOperator::current_tuple()
 {

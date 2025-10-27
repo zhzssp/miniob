@@ -14,7 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "storage/index/index.h"
 
-RC Index::init(const IndexMeta &index_meta, const vector<const FieldMeta *> &field_metas)
+RC Index::init(const IndexMeta &index_meta, const vector<FieldMeta> &field_metas)
 {
   if (field_metas.empty()) {
     LOG_WARN("Failed to init index %s due to empty field metas", index_meta.name());
@@ -23,12 +23,12 @@ RC Index::init(const IndexMeta &index_meta, const vector<const FieldMeta *> &fie
 
   // field_metas的生命周期可能产生问题
   int count = 1;
-  for (const FieldMeta *field_meta : field_metas) {
-    if (nullptr == field_meta) {
+  for (const FieldMeta &field_meta : field_metas) {
+    if (field_meta.len() <= 0) {
       LOG_WARN("Found null field meta when init index %s", index_meta.name());
       return RC::INVALID_ARGUMENT;
     }
-    LOG_INFO("GET field %d when init Index, length = %d", count, field_meta->len());
+    LOG_INFO("GET field %d when init Index, length = %d", count, field_meta.len());
     count++;
   }
 

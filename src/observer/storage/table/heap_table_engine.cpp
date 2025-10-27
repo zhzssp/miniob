@@ -134,6 +134,7 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
   // 细化存储field相关信息
   TableMeta new_table_meta(*table_meta_);
   IndexMeta new_index_metas;
+  vector<FieldMeta> non_pointer_field_metas = *new_table_meta.field_metas();
 
   // 只获取其中的具体属性存储 --> 生命周期与原field_metas不同
   RC rc = new_index_metas.init(index_name, field_metas);
@@ -155,7 +156,7 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
   // vector<const FieldMeta *> new_field_metas = new_table_meta.transfer_pointers();
 
   // field_metas一直将引用向下传递 --> 使用的是new_index_metas, 仍然指向table_meta_中的vector<FieldMeta>
-  rc = index->create(table_, index_file.c_str(), new_index_metas, field_metas);
+  rc = index->create(table_, index_file.c_str(), new_index_metas, non_pointer_field_metas);
   if (rc != RC::SUCCESS) {
     delete index;
     LOG_ERROR("Failed to create bplus tree index. file name=%s, rc=%d:%s", index_file.c_str(), rc, strrc(rc));
@@ -341,7 +342,7 @@ RC HeapTableEngine::open()
     const IndexMeta *index_meta = table_meta_->index(i);
 
     // 构建字段元数据向量
-    vector<const FieldMeta *> field_metas;
+    vector<FieldMeta> field_metas;
     for (int j = 0; j < index_meta->field_count(); j++) {
       const FieldMeta *field_meta = table_meta_->field(index_meta->field(j));
       if (field_meta == nullptr) {
@@ -351,7 +352,7 @@ RC HeapTableEngine::open()
         //  do all cleanup action in destructive Table function
         return RC::INTERNAL;
       }
-      field_metas.push_back(field_meta);
+      field_metas.push_back(*field_meta);
     }
 
     BplusTreeIndex *index      = new BplusTreeIndex();
