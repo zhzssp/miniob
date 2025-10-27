@@ -49,10 +49,11 @@ public:
   const FieldMeta    *field(const char *name) const;
   auto                fields(const vector<string> &names) const -> vector<const FieldMeta *>;
   const FieldMeta    *find_field_by_offset(int offset) const;
-  auto                field_metas() const -> const vector<FieldMeta>                *{ return &fields_; }
+  auto                field_metas() const -> const vector<FieldMeta> *{ return &fields_; }
   auto                trx_fields() const -> span<const FieldMeta>;
   const StorageFormat storage_format() const { return storage_format_; }
   const StorageEngine storage_engine() const { return storage_engine_; }
+  vector<const FieldMeta *> transfer_pointers() const; 
 
   int field_num() const;  // sys field included
   int sys_field_num() const;

@@ -121,26 +121,41 @@ const FieldMeta *TableMeta::trx_field() const { return &fields_[0]; }
 
 span<const FieldMeta> TableMeta::trx_fields() const { return span<const FieldMeta>(fields_.data(), sys_field_num()); }
 
-const FieldMeta TableMeta::field(int index) const { return fields_[index]; }
-const FieldMeta TableMeta::field(const char *name) const
+const FieldMeta *TableMeta::field(int index) const { return &fields_[index]; }
+const FieldMeta *TableMeta::field(const char *name) const
 {
   if (nullptr == name) {
     return nullptr;
   }
   for (const FieldMeta &field : fields_) {
     if (0 == strcmp(field.name(), name)) {
-      return field;
+      return &field;
     }
   }
   return nullptr;
 }
 
-auto TableMeta::fields(const vector<string> &names) const -> vector<const FieldMeta>
+auto TableMeta::fields(const vector<string> &names) const -> vector<const FieldMeta *>
 {
-  vector<const FieldMeta> result;
+  vector<const FieldMeta *> result;
   result.reserve(names.size());
   for (const string &name : names) {
-    const FieldMeta fm = field(name.c_str());
+    const FieldMeta *fm = field(name.c_str());
+    if (fm == nullptr) {
+      LOG_WARN("Error occurs when getting FieldMetas by names");
+      return {};
+    }
+    result.push_back(fm);
+  }
+  return result;
+}
+
+vector<const FieldMeta *> TableMeta::transfer_pointers() const 
+{
+  vector<const FieldMeta *> result;
+  result.reserve(this->fields_.size());
+  for (const FieldMeta &meta : this->fields_) {
+    const FieldMeta *fm = &meta;
     if (fm == nullptr) {
       LOG_WARN("Error occurs when getting FieldMetas by names");
       return {};

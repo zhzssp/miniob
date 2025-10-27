@@ -38,7 +38,7 @@ RC CreateIndexStmt::create(Db *db, const CreateIndexSqlNode &create_index, Stmt 
   }
 
   // Resolve multiple attribute names to field metas
-  const vector<const FieldMeta> field_metas = table->table_meta().fields(create_index.attribute_names);
+  const vector<const FieldMeta *> field_metas = table->table_meta().fields(create_index.attribute_names);
   if (field_metas.empty()) {
     LOG_WARN("no such field in table or empty fields. db=%s, table=%s",
              db->name(), table_name);
