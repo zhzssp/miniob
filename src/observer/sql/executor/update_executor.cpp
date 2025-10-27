@@ -43,6 +43,7 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
 
     RC rc = RC::SUCCESS;
     const TableMeta &table_meta = table->table_meta();
+    // 获取对应属性的元数据
     const FieldMeta *field_meta = table_meta.field(attribute_name);
     if (field_meta == nullptr) {
       LOG_WARN("no such field. table=%s, field=%s", table->name(), attribute_name);
