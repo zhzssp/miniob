@@ -13,7 +13,7 @@ class OrderByPhysicalOperator : public PhysicalOperator
 {
 public:
   OrderByPhysicalOperator(vector<OrderedUnboundFieldExpr *> &&expressions):order_by_expressions_(expressions), index(-1){
-    tuple_buffer.clear();
+    tuples_buffer.clear();
   }
   virtual ~OrderByPhysicalOperator() = default;
 

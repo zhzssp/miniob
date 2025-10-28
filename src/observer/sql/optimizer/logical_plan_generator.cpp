@@ -26,6 +26,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/project_logical_operator.h"
 #include "sql/operator/table_get_logical_operator.h"
 #include "sql/operator/group_by_logical_operator.h"
+#include "sql/operator/order_by_logical_operator.h"
 
 #include "sql/expr/expression.h"
 
@@ -474,13 +475,13 @@ RC LogicalPlanGenerator::create_order_by_plan(SelectStmt *select_stmt, unique_pt
   RC rc = RC::SUCCESS;
 
   // 检查是否存在 ORDER BY 子句
-  const vector<unique_ptr<OrderedUnboundFieldExpr>> &order_by_expressions = select_stmt->order_by();
+  vector<unique_ptr<OrderedUnboundFieldExpr>> &order_by_expressions = select_stmt->order_by();
   if (order_by_expressions.empty()) {
     return rc;  // 无 ORDER BY，直接返回
   }
 
   // 构造 ORDER BY LogicalOperator
-  auto order_by_physical_op = std::make_unique<OrderByLogicalOperator>(std::move(order_by_exprs));
+  unique_ptr<OrderByLogicalOperator> order_by_physical_op = std::make_unique<OrderByLogicalOperator>(std::move(order_by_expressions));
   if(order_by_physical_op == nullptr) {
     LOG_ERROR("Construct order by physical operator fails, get nullptr !!!");
     return RC::EMPTY;

@@ -138,6 +138,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   AttrInfoSqlNode *                          attr_info;
   Expression *                               expression;
   vector<unique_ptr<Expression>> *           expression_list;
+  vector<unique_ptr<OrderedUnboundFieldExpr>> *           order_expression_list;
   vector<Value> *                            value_list;
   vector<ConditionSqlNode> *                 condition_list;
   vector<RelAttrSqlNode> *                   rel_attr_list;
@@ -188,8 +189,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <expression>          aggregate_expression
 %type <expression_list>     expression_list
 %type <expression_list>     group_by
-%type <expression_list>     order_by        // 整个order by子句
-%type <expression_list>     order_by_list   // 多个排序项
+%type <order_expression_list>     order_by        // 整个order by子句
+%type <order_expression_list>     order_by_list   // 多个排序项
 %type <cstring>             fields_terminated_by
 %type <cstring>             enclosed_by
 %type <sql_node>            calc_stmt
@@ -879,7 +880,7 @@ order_by_list:
     // 只包含一个项 --> rel_attr指的是table.id ???
     rel_attr
     {
-      $$ = new vector<unique_ptr<Expression>>;  
+      $$ = new vector<unique_ptr<OrderedUnboundFieldExpr>>;  
       auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
       expr->set_name($1->attribute_name);
       expr->set_order(1); // 默认 ASC
@@ -890,7 +891,7 @@ order_by_list:
     // 显式定义了ASC或者DESC
     | rel_attr ASC
     {
-      $$ = new vector<unique_ptr<Expression>>;
+      $$ = new vector<unique_ptr<OrderedUnboundFieldExpr>>;
       auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
       expr->set_name($1->attribute_name);
       expr->set_order(1); // ASC = 1
@@ -899,7 +900,7 @@ order_by_list:
     }
     | rel_attr DESC
     {
-      $$ = new vector<unique_ptr<Expression>>;
+      $$ = new vector<unique_ptr<OrderedUnboundFieldExpr>>;
       auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
       expr->set_name($1->attribute_name);
       expr->set_order(-1); // DESC = -1

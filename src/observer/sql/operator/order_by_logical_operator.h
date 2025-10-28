@@ -5,7 +5,8 @@
 class OrderByLogicalOperator : public LogicalOperator
 {
 public:
-  OrderByLogicalOperator(vector<unique_ptr<OrderedUnboundExpr>> &&order_by_exprs);
+  // 使用右值引用，从而能够接收std::move传来的参数
+  OrderByLogicalOperator(vector<unique_ptr<OrderedUnboundFieldExpr>> &&order_by_exprs);
 
   virtual ~OrderByLogicalOperator() = default;
 
@@ -15,5 +16,5 @@ public:
   auto &order_by_expressions() { return order_by_expressions_; }
 
 private:
-  vector<unique_ptr<Expression>> order_by_expressions_;
+  vector<unique_ptr<OrderedUnboundFieldExpr>> order_by_expressions_;
 };

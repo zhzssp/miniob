@@ -10,7 +10,7 @@
 class OrderByVecPhysicalOperator : public PhysicalOperator
 {
 public:
-  OrderByVecPhysicalOperator(vector<unique_ptr<Expression>> &&order_by_exprs) {};
+  OrderByVecPhysicalOperator(vector<OrderedUnboundFieldExpr *> &&order_by_exprs): order_by_expressions_(order_by_exprs) {};
 
   virtual ~OrderByVecPhysicalOperator() = default;
 
@@ -21,4 +21,5 @@ public:
   RC close() override { return RC::UNIMPLEMENTED; }
 
 private:
+  vector<OrderedUnboundFieldExpr *> order_by_expressions_;
 };

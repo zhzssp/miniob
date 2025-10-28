@@ -120,8 +120,8 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
   vector<unique_ptr<OrderedUnboundFieldExpr>> order_by_expressions;
   for (unique_ptr<OrderedUnboundFieldExpr> &expression : select_sql.order_by) {
-    // 暂定简单地将expression添加进expressions中
-    RC rc = expression_binder.bind_expression(expression, order_by_expressions);
+    // 使用reinterpret可能会产生奇怪的问题 --> 特别是对于vector !!!
+    RC rc = expression_binder.bind_expression(reinterpret_cast<unique_ptr<Expression> &>(expression), reinterpret_cast<vector<unique_ptr<Expression>> &>(order_by_expressions));
     if (OB_FAIL(rc)) {
       LOG_INFO("bind expression failed. rc=%s", strrc(rc));
       return rc;

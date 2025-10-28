@@ -48,6 +48,10 @@ See the Mulan PSL v2 for more details. */
 #include "sql/optimizer/physical_plan_generator.h"
 #include "sql/operator/hash_join_physical_operator.h"
 
+#include "sql/operator/order_by_logical_operator.h"
+#include "sql/operator/order_by_physical_operator.h"
+#include "sql/operator/order_by_vec_physical_operator.h"
+
 using namespace std;
 
 RC PhysicalPlanGenerator::create(LogicalOperator &logical_operator, unique_ptr<PhysicalOperator> &oper, Session* session)
@@ -540,8 +544,15 @@ RC PhysicalPlanGenerator::create_plan(OrderByLogicalOperator &logical_oper, uniq
   RC rc = RC::SUCCESS;
 
   // OrderedUnboundExpr
-  vector<unique_ptr<OrderedUnboundFieldExpr>>     &order_by_expressions = logical_oper.order_by_expressions();
+  vector<unique_ptr<OrderedUnboundFieldExpr>> &order_by_expressions = logical_oper.order_by_expressions();
   unique_ptr<OrderByPhysicalOperator> order_by_oper;
+
+  // 注意: 不能在析构函数之中释放std::move转移过去的观察者指针，否则会造成二次释放 ！
+  vector<OrderedUnboundFieldExpr *> raw_ptrs;
+  raw_ptrs.reserve(order_by_expressions.size());
+  for (auto &ptr : order_by_expressions) {
+    raw_ptrs.push_back(ptr.get());
+  }
 
   // 使用expressions初始化physical operator
   // 兼容聚合函数排序 --> 暂不实现
@@ -550,7 +561,7 @@ RC PhysicalPlanGenerator::create_plan(OrderByLogicalOperator &logical_oper, uniq
     return RC::INVALID_ARGUMENT;
   } else {
     order_by_oper = make_unique<OrderByPhysicalOperator>(
-        std::move(order_by_expressions));
+        std::move(raw_ptrs));
   }
 
   ASSERT(logical_oper.children().size() == 1, "order by operator should have 1 child");
@@ -564,7 +575,7 @@ RC PhysicalPlanGenerator::create_plan(OrderByLogicalOperator &logical_oper, uniq
     return rc;
   }
 
-  group_by_oper->add_child(std::move(child_physical_oper));
+  order_by_oper->add_child(std::move(child_physical_oper));
 
   oper = std::move(order_by_oper);
   return rc;
@@ -615,6 +626,13 @@ RC PhysicalPlanGenerator::create_vec_plan(GroupByLogicalOperator &logical_oper, 
 RC PhysicalPlanGenerator::create_vec_plan(OrderByLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session *session)
 {
   RC rc = RC::SUCCESS;
+  vector<unique_ptr<OrderedUnboundFieldExpr>> &order_by_expressions = logical_oper.order_by_expressions();
+
+  vector<OrderedUnboundFieldExpr *> raw_ptrs;
+  raw_ptrs.reserve(order_by_expressions.size());
+  for (auto &ptr : order_by_expressions) {
+    raw_ptrs.push_back(ptr.get());
+  }
 
   // 从Logical Operator获取表达式
   unique_ptr<PhysicalOperator> physical_oper = nullptr;
@@ -625,7 +643,7 @@ RC PhysicalPlanGenerator::create_vec_plan(OrderByLogicalOperator &logical_oper, 
   } else {
     // unique_ptr(OrderedUnboundExpr) --> Expression *
     physical_oper = make_unique<OrderByVecPhysicalOperator>(
-        std::move(logical_oper.order_by_expressions()));
+        std::move(raw_ptrs));
   }
 
   ASSERT(logical_oper.children().size() == 1, "order by operator should have 1 child");

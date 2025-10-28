@@ -135,8 +135,12 @@ RC ExpressionBinder::bind_star_expression(
 }
 
 RC ExpressionBinder::bind_ordered_unbound_field_expression(
-    unique_ptr<OrderedUnboundFieldExpr> &expr, vector<unique_ptr<OrderedUnboundFieldExpr>> &bound_expressions) {
-  bound_expressions.emplace_back(std::move(field_expr));
+    unique_ptr<Expression> &expr, vector<unique_ptr<Expression>> &bound_expressions) {
+  // release释放所有权，同时返回裸指针
+  std::unique_ptr<OrderedUnboundFieldExpr> order_expr;
+  // reset替换原来的指针，获得管理权
+  order_expr.reset(static_cast<OrderedUnboundFieldExpr*>(expr.release()));
+  bound_expressions.emplace_back(std::move(order_expr));
   return RC::SUCCESS;
 }
 

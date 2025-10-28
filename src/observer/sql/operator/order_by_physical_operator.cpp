@@ -1,8 +1,8 @@
 #include "sql/operator/order_by_physical_operator.h"
 
-""" order by 算子的下层应当只有一个直接相邻的算子？ """
-""" open中先获取所有的tuples进行排序, 然后再在next中一步一步取出输出 """
-RC OrderByLogicalOperator::open(Trx *trx) {
+/* order by 算子的下层应当只有一个直接相邻的算子？ 
+ open中先获取所有的tuples进行排序, 然后再在next中一步一步取出输出 */
+RC OrderByPhysicalOperator::open(Trx *trx) {
   RC rc = RC::SUCCESS;
   // order by函数也应当只有一个子算子
   if (children_.size() != 1) {
@@ -10,7 +10,8 @@ RC OrderByLogicalOperator::open(Trx *trx) {
     return RC::INTERNAL;
   }
 
-  unique_ptr<PhysicalOperator> oper = children_.front();
+  // unique_ptr的拷贝构造被禁用，使用get获取原始指针（unique_ptr自动管理生命周期）
+  PhysicalOperator *oper = children_.front().get();
 
   while (RC::SUCCESS == (rc = oper->next())) {
     Tuple *tuple = oper->current_tuple();
@@ -19,7 +20,14 @@ RC OrderByLogicalOperator::open(Trx *trx) {
       LOG_WARN("Failed to get tuple from operator");
       return rc;
     }
-    tuples_buffer.emplace_back(tuple);
+
+    ValueListTuple *value_list_tuple = new ValueListTuple(); 
+    rc = ValueListTuple::make(*tuple, *value_list_tuple);
+    if(rc != RC::SUCCESS) {
+      return rc;
+    }
+
+    tuples_buffer.emplace_back(value_list_tuple);
   }
 
   rc = sort_buffer();
@@ -90,6 +98,8 @@ RC OrderByPhysicalOperator::sort_buffer() {
           return false;  // 如果所有字段值相同，保持原有顺序
         }
       }
+      // 最终的默认return --> 过编译检查
+      return true;
     }
   );
   return RC::SUCCESS;
