@@ -90,6 +90,7 @@ RC LogicalPlanGenerator::create_plan(CalcStmt *calc_stmt, unique_ptr<LogicalOper
 
 RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
+  LOG_INFO("Enter basic select logical operator");
   unique_ptr<LogicalOperator> *last_oper = nullptr;
 
   unique_ptr<LogicalOperator> table_oper(nullptr);
@@ -227,8 +228,24 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     last_oper = &group_by_oper;
   }
 
+  unique_ptr<LogicalOperator> order_by_oper;
+  rc = create_order_by_plan(select_stmt, order_by_oper);
+  if (OB_FAIL(rc)) {
+    LOG_WARN("failed to create order by logical plan. rc=%s", strrc(rc));
+    return rc;
+  }
+
+  if (order_by_oper) {
+    if (*last_oper) {
+      order_by_oper->add_child(std::move(*last_oper));
+    }
+
+    last_oper = &order_by_oper;
+  }
+
   unique_ptr<LogicalOperator> project_oper = make_unique<ProjectLogicalOperator>(std::move(select_stmt->query_expressions()));
   if (*last_oper) {
+    // 最后的根节点 ？
     project_oper->add_child(std::move(*last_oper));
   }
 
@@ -371,12 +388,16 @@ RC LogicalPlanGenerator::create_plan(ExplainStmt *explain_stmt, unique_ptr<Logic
 
 RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
+  LOG_INFO("Enter group by logical operator");
+  // 分组的元素列表
   vector<unique_ptr<Expression>> &group_by_expressions = select_stmt->group_by();
   vector<Expression *> aggregate_expressions;
+  // 查询的字段列表
   vector<unique_ptr<Expression>> &query_expressions = select_stmt->query_expressions();
   function<RC(unique_ptr<Expression>&)> collector = [&](unique_ptr<Expression> &expr) -> RC {
     RC rc = RC::SUCCESS;
     if (expr->type() == ExprType::AGGREGATION) {
+      // 表达式在下层算子中返回的chunk的位置
       expr->set_pos(aggregate_expressions.size() + group_by_expressions.size());
       aggregate_expressions.push_back(expr.get());
     }
@@ -384,6 +405,7 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
     return rc;
   };
 
+  // lambda函数
   function<RC(unique_ptr<Expression>&)> bind_group_by_expr = [&](unique_ptr<Expression> &expr) -> RC {
     RC rc = RC::SUCCESS;
     for (size_t i = 0; i < group_by_expressions.size(); i++) {
@@ -445,6 +467,29 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
                                                            std::move(aggregate_expressions));
   logical_operator = std::move(group_by_oper);
   return RC::SUCCESS;
+}
+
+RC LogicalPlanGenerator::create_order_by_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator) 
+{
+  RC rc = RC::SUCCESS;
+
+  // 检查是否存在 ORDER BY 子句
+  const vector<unique_ptr<OrderedUnboundFieldExpr>> &order_by_expressions = select_stmt->order_by();
+  if (order_by_expressions.empty()) {
+    return rc;  // 无 ORDER BY，直接返回
+  }
+
+  // 构造 ORDER BY LogicalOperator
+  auto order_by_physical_op = std::make_unique<OrderByLogicalOperator>(std::move(order_by_exprs));
+  if(order_by_physical_op == nullptr) {
+    LOG_ERROR("Construct order by physical operator fails, get nullptr !!!");
+    return RC::EMPTY;
+  }
+
+  // 将左值转化为右值，进行资源转移 --> 不需要delete
+  logical_operator = std::move(order_by_physical_op);
+
+  return rc;
 }
 
 unique_ptr<Expression> LogicalPlanGenerator::create_expression_from_filter_obj(const FilterObj &filter_obj)

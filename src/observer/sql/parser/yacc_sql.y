@@ -77,6 +77,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         INDEX
         CALC
         SELECT
+        ORDER  
+        ASC   
         DESC
         SHOW
         SYNC
@@ -186,6 +188,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <expression>          aggregate_expression
 %type <expression_list>     expression_list
 %type <expression_list>     group_by
+%type <expression_list>     order_by        // 整个order by子句
+%type <expression_list>     order_by_list   // 多个排序项
 %type <cstring>             fields_terminated_by
 %type <cstring>             enclosed_by
 %type <sql_node>            calc_stmt
@@ -501,7 +505,7 @@ update_stmt:      /*  update 语句的语法解析树*/
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list where group_by
+    SELECT expression_list FROM rel_list where group_by order_by
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -522,6 +526,12 @@ select_stmt:        /*  select 语句的语法解析树*/
       if ($6 != nullptr) {
         $$->selection.group_by.swap(*$6);
         delete $6;
+      }
+
+      // 把解析得到的列表放入SQL Node的order_by属性中存起来
+      if ($7 != nullptr) {
+        $$->selection.order_by.swap(*$7);
+        delete $7;
       }
       
       // 处理 JOIN 条件
@@ -851,6 +861,81 @@ group_by:
       $$ = $3;
     }
     ;
+
+order_by:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | ORDER BY order_by_list
+    {
+      // 存在该子句，则返回的语义值直接取order_by_list
+      $$ = $3;
+    }
+    ;
+
+// 解析order_by_list的语义值 --> 使用Expression存储排序字段
+order_by_list:
+    // 只包含一个项 --> rel_attr指的是table.id ???
+    rel_attr
+    {
+      $$ = new vector<unique_ptr<Expression>>;  
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(1); // 默认 ASC
+      $$->emplace_back(std::move(expr));
+      // 释放 rel_attr 在解析时分配的内存
+      delete $1;
+    }
+    // 显式定义了ASC或者DESC
+    | rel_attr ASC
+    {
+      $$ = new vector<unique_ptr<Expression>>;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(1); // ASC = 1
+      $$->emplace_back(std::move(expr));
+      delete $1;
+    }
+    | rel_attr DESC
+    {
+      $$ = new vector<unique_ptr<Expression>>;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(-1); // DESC = -1
+      $$->emplace_back(std::move(expr));
+      delete $1;
+    }
+    | rel_attr ASC COMMA order_by_list
+    {
+      $$ = $4;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(1);
+      // 通过回溯，保证字段在vector中的顺序与排序用的顺序一致
+      $$->insert($$->begin(), std::move(expr));
+      delete $1;
+    }
+    | rel_attr DESC COMMA order_by_list
+    {
+      $$ = $4;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(-1); 
+      $$->insert($$->begin(), std::move(expr));
+      delete $1;
+    }
+    | rel_attr COMMA order_by_list
+    {
+      $$ = $3;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(1);
+      $$->insert($$->begin(), std::move(expr));
+      delete $1;
+    }
+    ;
+
 load_data_stmt:
     LOAD DATA INFILE SSS INTO TABLE ID fields_terminated_by enclosed_by
     {

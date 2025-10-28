@@ -354,6 +354,22 @@ public:
     return RC::NOTFOUND;
   }
 
+  RC nonstrict_get_value(const char *table_name, const char *field_name, Value &value)
+  {
+    ASSERT(cells_.size() == specs_.size(), "cells_.size()=%d, specs_.size()=%d", cells_.size(), specs_.size());
+
+    const int size = static_cast<int>(specs_.size());
+    for (int i = 0; i < size; i++) {
+      const char *tn = specs_[i].table_name();
+      const char *fn = specs_[i].field_name();
+      if (strcmp(tn, table_name) == 0 && strcmp(fn, field_name) == 0) {
+        value = cells_[i];
+        return RC::SUCCESS;
+      }
+    }
+    return RC::NOTFOUND;
+  }
+
   static RC make(const Tuple &tuple, ValueListTuple &value_list)
   {
     const int cell_num = tuple.cell_num();
@@ -378,6 +394,7 @@ public:
 
 private:
   vector<Value>         cells_;
+  // 表名、字段名、别名
   vector<TupleCellSpec> specs_;
 };
 

@@ -55,14 +55,17 @@ RC ProjectPhysicalOperator::close()
   }
   return RC::SUCCESS;
 }
+
 Tuple *ProjectPhysicalOperator::current_tuple()
 {
+  // 从下层算子获取其得到的tuple
   tuple_.set_tuple(children_[0]->current_tuple());
   return &tuple_;
 }
 
 RC ProjectPhysicalOperator::tuple_schema(TupleSchema &schema) const
 {
+  // expressions_存的是select选中的字段
   for (const unique_ptr<Expression> &expression : expressions_) {
     schema.append_cell(expression->name());
   }

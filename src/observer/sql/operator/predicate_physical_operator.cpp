@@ -61,6 +61,7 @@ RC PredicatePhysicalOperator::next()
 
 RC PredicatePhysicalOperator::close()
 {
+  // 始终会报SUCCESS ???
   children_[0]->close();
   return RC::SUCCESS;
 }
