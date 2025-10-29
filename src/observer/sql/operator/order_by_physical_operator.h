@@ -12,10 +12,14 @@
 class OrderByPhysicalOperator : public PhysicalOperator
 {
 public:
-  OrderByPhysicalOperator(vector<OrderedUnboundFieldExpr *> &&expressions):order_by_expressions_(expressions), index(-1){
+  // 命名的右值对象为左值 --> 也需要使用std::move()
+  OrderByPhysicalOperator(vector<unique_ptr<OrderedUnboundFieldExpr>> &&expressions): index(-1){
     tuples_buffer.clear();
+    order_by_expressions_ = std::move(expressions);
   }
-  virtual ~OrderByPhysicalOperator() = default;
+  ~OrderByPhysicalOperator() {
+    LOG_INFO("------------------------- Call of ~OrderByLogicalOperator -------------------------");
+  }
 
 protected:
   PhysicalOperatorType type() const override { return PhysicalOperatorType::ORDER_BY; }
@@ -31,7 +35,7 @@ protected:
 
 protected:
   // OrderedUnboundFieldExpr
-  vector<OrderedUnboundFieldExpr *> order_by_expressions_;
+  vector<unique_ptr<OrderedUnboundFieldExpr>> order_by_expressions_;
   int32_t index;
   vector<ValueListTuple *>      tuples_buffer;
 };

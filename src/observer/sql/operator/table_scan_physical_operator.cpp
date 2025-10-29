@@ -20,6 +20,7 @@ using namespace std;
 
 RC TableScanPhysicalOperator::open(Trx *trx)
 {
+  // record_scanner在此初始化
   RC rc = table_->get_record_scanner(record_scanner_, trx, mode_);
   if (rc == RC::SUCCESS) {
     tuple_.set_schema(table_, table_->table_meta().field_metas());
@@ -33,9 +34,15 @@ RC TableScanPhysicalOperator::next()
   RC rc = RC::SUCCESS;
 
   bool filter_result = false;
+  if(record_scanner_ == nullptr) {
+    LOG_ERROR("In table_scan_physical_operator, record_scanner_ is nullptr");
+    return RC::INTERNAL;
+  }
+  // 这里next出问题 ？
   while (OB_SUCC(rc = record_scanner_->next(current_record_))) {
     LOG_TRACE("got a record. rid=%s", current_record_.rid().to_string().c_str());
     
+    // 将从表中读取到的记录, 以元组格式进行保存
     tuple_.set_record(&current_record_);
     rc = filter(tuple_, filter_result);
     if (rc != RC::SUCCESS) {

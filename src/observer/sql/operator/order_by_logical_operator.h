@@ -8,7 +8,10 @@ public:
   // 使用右值引用，从而能够接收std::move传来的参数
   OrderByLogicalOperator(vector<unique_ptr<OrderedUnboundFieldExpr>> &&order_by_exprs);
 
-  virtual ~OrderByLogicalOperator() = default;
+  // vector的析构函数同时将其中的所有指针成员一同delete掉 ！！！
+  ~OrderByLogicalOperator() {
+    LOG_INFO("------------------------- Call of ~OrderByLogicalOperator -------------------------");
+  }
 
   LogicalOperatorType type() const override { return LogicalOperatorType::ORDER_BY; }
   OpType              get_op_type() const override { return OpType::LOGICALORDERBY; }

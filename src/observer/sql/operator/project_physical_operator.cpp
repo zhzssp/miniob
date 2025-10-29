@@ -59,7 +59,13 @@ RC ProjectPhysicalOperator::close()
 Tuple *ProjectPhysicalOperator::current_tuple()
 {
   // 从下层算子获取其得到的tuple
-  tuple_.set_tuple(children_[0]->current_tuple());
+  LOG_INFO("project physical operator's current_tuple");
+  Tuple *new_tuple = children_[0]->current_tuple();
+  if(new_tuple == nullptr) {
+    LOG_WARN("Get null tuple from child[0]");
+    return nullptr;
+  }
+  tuple_.set_tuple(new_tuple);
   return &tuple_;
 }
 

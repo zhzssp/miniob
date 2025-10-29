@@ -275,9 +275,17 @@ RC PlainCommunicator::write_tuple_result(SqlResult *sql_result)
   RC rc = RC::SUCCESS;
   Tuple *tuple = nullptr;
   while (RC::SUCCESS == (rc = sql_result->next_tuple(tuple))) {
-    assert(tuple != nullptr);
+    // assert(tuple != nullptr);
+    // 补丁 --> nullptr无法正确检测 ？
+    if(tuple == nullptr || tuple->cell_num() <= 0) {
+      LOG_WARN("Get null tuple, viewed as read completion");
+      rc = RC::RECORD_EOF;
+      break;
+    }
+    LOG_INFO("write tuple result * 1");
 
     int cell_num = tuple->cell_num();
+    LOG_INFO("cell_num = %d", cell_num);
     for (int i = 0; i < cell_num; i++) {
       if (i != 0) {
         const char *delim = " | ";
@@ -291,6 +299,7 @@ RC PlainCommunicator::write_tuple_result(SqlResult *sql_result)
       }
 
       Value value;
+      LOG_INFO("Try to get num %d value of the tuple", i);
       rc = tuple->cell_at(i, value);
       if (rc != RC::SUCCESS) {
         LOG_WARN("failed to get tuple cell value. rc=%s", strrc(rc));
@@ -299,6 +308,7 @@ RC PlainCommunicator::write_tuple_result(SqlResult *sql_result)
       }
 
       string cell_str = value.to_string();
+      LOG_INFO("Successfully get value %s", cell_str.c_str());
 
       rc = writer_->writen(cell_str.data(), cell_str.size());
       if (OB_FAIL(rc)) {

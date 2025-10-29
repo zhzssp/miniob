@@ -141,6 +141,7 @@ RC PhysicalPlanGenerator::create_vec(LogicalOperator &logical_operator, unique_p
 
 RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
+  LOG_TRACE("Create physical plan for table get logical operator");
   vector<unique_ptr<Expression>> &predicates = table_get_oper.predicates();
   // 看看是否有可以用于索引查找的表达式
   Table *table = table_get_oper.table();
@@ -221,10 +222,11 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
       LOG_TRACE("use index scan for EQUAL query");
     }
   } else {
+    // 在这里初始化了table_scanner
     auto table_scan_oper = new TableScanPhysicalOperator(table, table_get_oper.read_write_mode());
     table_scan_oper->set_predicates(std::move(predicates));
     oper = unique_ptr<PhysicalOperator>(table_scan_oper);
-    LOG_TRACE("use table scan");
+    LOG_TRACE("Use table scan");
   }
 
   return RC::SUCCESS;
@@ -232,6 +234,7 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
 
 RC PhysicalPlanGenerator::create_plan(PredicateLogicalOperator &pred_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
+  LOG_TRACE("Create physical plan for predicate(filter) logical operator");
   vector<unique_ptr<LogicalOperator>> &children_opers = pred_oper.children();
   ASSERT(children_opers.size() == 1, "predicate logical operator's sub oper number should be 1");
 
@@ -256,6 +259,7 @@ RC PhysicalPlanGenerator::create_plan(PredicateLogicalOperator &pred_oper, uniqu
 // 算子数的根节点
 RC PhysicalPlanGenerator::create_plan(ProjectLogicalOperator &project_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
+  LOG_TRACE("Begin to create physical plan for project logical operator");
   vector<unique_ptr<LogicalOperator>> &child_opers = project_oper.children();
 
   unique_ptr<PhysicalOperator> child_phy_oper;
@@ -272,7 +276,9 @@ RC PhysicalPlanGenerator::create_plan(ProjectLogicalOperator &project_oper, uniq
     }
   }
 
-  auto project_operator = make_unique<ProjectPhysicalOperator>(std::move(project_oper.expressions()));
+  vector<unique_ptr<Expression>> &tmp_expressions = project_oper.expressions();
+  auto project_operator = make_unique<ProjectPhysicalOperator>(std::move(tmp_expressions));
+
   if (child_phy_oper) {
     project_operator->add_child(std::move(child_phy_oper));
   }
@@ -280,7 +286,7 @@ RC PhysicalPlanGenerator::create_plan(ProjectLogicalOperator &project_oper, uniq
   // 得到的为ProjectPhysicalOperator
   oper = std::move(project_operator);
 
-  LOG_TRACE("create a project physical operator");
+  LOG_TRACE("Successfully create a project physical operator");
   return rc;
 }
 
@@ -367,6 +373,7 @@ RC PhysicalPlanGenerator::create_plan(ExplainLogicalOperator &explain_oper, uniq
 
 RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
+  LOG_TRACE("Begin to create a physical plan for join logical operator");
   RC rc = RC::SUCCESS;
 
   vector<unique_ptr<LogicalOperator>> &child_opers = join_oper.children();
@@ -512,6 +519,7 @@ RC PhysicalPlanGenerator::create_plan(CalcLogicalOperator &logical_oper, unique_
 
 RC PhysicalPlanGenerator::create_plan(GroupByLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
+  LOG_TRACE("Begin to create a physical plan for group by logical operator");
   RC rc = RC::SUCCESS;
 
   vector<unique_ptr<Expression>> &group_by_expressions = logical_oper.group_by_expressions();
@@ -541,6 +549,7 @@ RC PhysicalPlanGenerator::create_plan(GroupByLogicalOperator &logical_oper, uniq
 
 RC PhysicalPlanGenerator::create_plan(OrderByLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session *session)
 {
+  LOG_TRACE("Begin to create a physical plan for order by logical operator");
   RC rc = RC::SUCCESS;
 
   // OrderedUnboundExpr
@@ -548,27 +557,32 @@ RC PhysicalPlanGenerator::create_plan(OrderByLogicalOperator &logical_oper, uniq
   unique_ptr<OrderByPhysicalOperator> order_by_oper;
 
   // 注意: 不能在析构函数之中释放std::move转移过去的观察者指针，否则会造成二次释放 ！
-  vector<OrderedUnboundFieldExpr *> raw_ptrs;
-  raw_ptrs.reserve(order_by_expressions.size());
-  for (auto &ptr : order_by_expressions) {
-    raw_ptrs.push_back(ptr.get());
-  }
+  // 由于传入了裸指针，所以当OrderByLogicalOperator被析构，智能指针被释放时，裸指针会全部变为悬空指针 ！！！
+  // vector<OrderedUnboundFieldExpr *> raw_ptrs;
+  // raw_ptrs.reserve(order_by_expressions.size());
+  // for (auto &ptr : order_by_expressions) {
+  //   if(ptr == nullptr) {
+  //     LOG_ERROR("Get null order_by_expression when initializing order by physical operator");
+  //     return RC::INVALID_ARGUMENT;
+  //   }
+  //   raw_ptrs.push_back(ptr.get());
+  // }
 
   // 使用expressions初始化physical operator
   // 兼容聚合函数排序 --> 暂不实现
   if (order_by_expressions.empty()) {
     LOG_WARN("When initializing order by physical operator in create_plan, cannot find expressions !");
-    return RC::INVALID_ARGUMENT;
+    return RC::SUCCESS;
   } else {
     order_by_oper = make_unique<OrderByPhysicalOperator>(
-        std::move(raw_ptrs));
+        std::move(order_by_expressions));
   }
 
   ASSERT(logical_oper.children().size() == 1, "order by operator should have 1 child");
 
   LogicalOperator             &child_oper = *logical_oper.children().front();
   unique_ptr<PhysicalOperator> child_physical_oper;
-  // 进入group by
+  // 应当进入group by
   rc = create(child_oper, child_physical_oper, session);
   if (OB_FAIL(rc)) {
     LOG_WARN("failed to create child physical operator of order by operator. rc=%s", strrc(rc));
@@ -636,10 +650,10 @@ RC PhysicalPlanGenerator::create_vec_plan(OrderByLogicalOperator &logical_oper, 
 
   // 从Logical Operator获取表达式
   unique_ptr<PhysicalOperator> physical_oper = nullptr;
-  // 使用expressions初始化physical operator --> 不兼容聚合函数排序
+  // 使用expressions初始化physical operator --> 为空的时候视为没有order by子句
   if (logical_oper.order_by_expressions().empty()) {
     LOG_WARN("When initializing order by physical operator in create_vec_plan, cannot find expressions !");
-    return RC::INVALID_ARGUMENT;
+    return RC::SUCCESS;
   } else {
     // unique_ptr(OrderedUnboundExpr) --> Expression *
     physical_oper = make_unique<OrderByVecPhysicalOperator>(
@@ -672,6 +686,7 @@ RC PhysicalPlanGenerator::create_vec_plan(ProjectLogicalOperator &project_oper, 
   RC rc = RC::SUCCESS;
   if (!child_opers.empty()) {
     LogicalOperator *child_oper = child_opers.front().get();
+    // 递归初始化子算子的physical operator
     rc                          = create_vec(*child_oper, child_phy_oper, session);
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to create project logical operator's child physical operator. rc=%s", strrc(rc));
@@ -684,6 +699,10 @@ RC PhysicalPlanGenerator::create_vec_plan(ProjectLogicalOperator &project_oper, 
   if (child_phy_oper != nullptr) {
     vector<Expression *> expressions;
     for (auto &expr : project_operator->expressions()) {
+      if(expr == nullptr) {
+        LOG_ERROR("Get null expression when initializing project physical operator");
+        return RC::INVALID_ARGUMENT;
+      }
       expressions.push_back(expr.get());
     }
     auto expr_operator = make_unique<ExprVecPhysicalOperator>(std::move(expressions));

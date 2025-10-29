@@ -35,6 +35,7 @@ RC OptimizeStage::handle_request(SQLStageEvent *sql_event)
   unique_ptr<LogicalOperator> logical_operator;
 
   // 初始化logical_operator --> 包含tuple
+  LOG_TRACE("------------ Try to get project logical operator in handle_request ---------------");
   RC rc = create_logical_plan(sql_event, logical_operator);
   if (rc != RC::SUCCESS) {
     if (rc != RC::UNIMPLEMENTED) {
@@ -44,6 +45,7 @@ RC OptimizeStage::handle_request(SQLStageEvent *sql_event)
   }
 
   ASSERT(logical_operator, "logical operator is null");
+  LOG_TRACE("------------ Successfully get project LOGICAL operator in handle_request ---------------");
 
   // TODO: unify the RBO and CBO
   rc = rewrite(logical_operator);
@@ -69,6 +71,7 @@ RC OptimizeStage::handle_request(SQLStageEvent *sql_event)
     LOG_INFO("cascade physical plan:\n%s", phys_plan_str.c_str());
   } else {
     // 初始化physical_operator
+    LOG_TRACE("------------ Try to get project PHYSICAL operator in handle_request ---------------");
     rc = generate_physical_plan(logical_operator, physical_operator, sql_event->session_event()->session());
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to generate physical plan. rc=%s", strrc(rc));
@@ -77,6 +80,8 @@ RC OptimizeStage::handle_request(SQLStageEvent *sql_event)
   }
 
   sql_event->set_operator(std::move(physical_operator));
+
+  LOG_TRACE("------------ Successfully get project PHYSICAL operator and put it into sql_event in handle_request ---------------");
 
   return rc;
 }

@@ -178,6 +178,7 @@ public:
 
   RC get_value(const Tuple &tuple, Value &value) const override { return RC::INTERNAL; }
 
+  void        set_table(string table_name) { table_name_ = table_name; }
   const char *table_name() const { return table_name_.c_str(); }
   const char *field_name() const { return field_name_.c_str(); }
 

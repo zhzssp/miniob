@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 
 RC HeapRecordScanner::open_scan()
 {
+  LOG_TRACE("Open heap record scanner");
   ASSERT(disk_buffer_pool_ != nullptr, "disk buffer pool is null");
   ASSERT(log_handler_ != nullptr, "log handler is null");
 
@@ -40,6 +41,7 @@ RC HeapRecordScanner::open_scan()
  */
 RC HeapRecordScanner::fetch_next_record()
 {
+  LOG_TRACE("Enter heap_record_scanner's fetch_next_record()");
   RC rc = RC::SUCCESS;
   if (record_page_iterator_.is_valid()) {
     // 当前页面还是有效的，尝试看一下是否有有效记录
@@ -53,6 +55,7 @@ RC HeapRecordScanner::fetch_next_record()
   }
 
   // 上个页面遍历完了，或者还没有开始遍历某个页面，那么就从一个新的页面开始遍历查找
+  LOG_TRACE("Search from a new page");
   while (bp_iterator_.has_next()) {
     PageNum page_num = bp_iterator_.next();
     record_page_handler_->cleanup();
@@ -73,6 +76,7 @@ RC HeapRecordScanner::fetch_next_record()
   }
 
   // 所有的页面都遍历完了，没有数据了
+  LOG_TRACE("All pages searched on, no record left");
   next_record_.rid().slot_num = -1;
   record_page_handler_->cleanup();
   return RC::RECORD_EOF;
@@ -83,6 +87,7 @@ RC HeapRecordScanner::fetch_next_record()
  */
 RC HeapRecordScanner::fetch_next_record_in_page()
 {
+  LOG_TRACE("Enter heap_record_scanner's fetch_next_record_in_page()");
   RC rc = RC::SUCCESS;
   while (record_page_iterator_.has_next()) {
     rc = record_page_iterator_.next(next_record_);
@@ -137,6 +142,7 @@ RC HeapRecordScanner::close_scan()
 
 RC HeapRecordScanner::next(Record &record)
 {
+  LOG_TRACE("Enter heap_record_scanner's next()");
   RC rc = fetch_next_record();
   if (OB_FAIL(rc)) {
     return rc;
