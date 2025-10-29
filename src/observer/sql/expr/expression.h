@@ -47,6 +47,7 @@ enum class ExprType
   CONJUNCTION,  ///< 多个表达式使用同一种关系(AND或OR)来联结
   ARITHMETIC,   ///< 算术运算
   AGGREGATION,  ///< 聚合运算
+  SUB_QUERY,    ///< 子查询表达式
 };
 
 /**
@@ -167,7 +168,6 @@ public:
   AttrType value_type() const override { return AttrType::UNDEFINED; }
 
   RC get_value(const Tuple &tuple, Value &value) const override { return RC::UNIMPLEMENTED; }  // 不需要实现
-
   const char *table_name() const { return table_name_.c_str(); }
 
 private:
@@ -189,7 +189,6 @@ public:
   AttrType value_type() const override { return AttrType::UNDEFINED; }
 
   RC get_value(const Tuple &tuple, Value &value) const override { return RC::INTERNAL; }
-
   const char *table_name() const { return table_name_.c_str(); }
   const char *field_name() const { return field_name_.c_str(); }
   
@@ -287,6 +286,7 @@ public:
   ExprType type() const override { return ExprType::CAST; }
 
   RC get_value(const Tuple &tuple, Value &value) const override;
+
   RC get_column(Chunk &chunk, Column &column) override;
 
   RC try_get_value(Value &value) const override;
@@ -544,3 +544,8 @@ private:
   Type                   aggregate_type_;
   unique_ptr<Expression> child_;
 };
+
+// 前向声明
+class SelectStmt;
+class ParsedSqlNode;
+class SubqueryExpr;

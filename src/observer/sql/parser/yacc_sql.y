@@ -11,6 +11,7 @@
 #include "sql/parser/yacc_sql.hpp"
 #include "sql/parser/lex_sql.h"
 #include "sql/expr/expression.h"
+#include "sql/expr/subquery_expr.h"
 
 using namespace std;
 
@@ -92,6 +93,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         INT_T
         STRING_T
         FLOAT_T
+        // DATE_T
         VECTOR_T
         HELP
         EXIT
@@ -124,8 +126,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         LE
         GE
         NE
-        INNER
-        JOIN
+        IN
+        NOT
 
 /** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
 %union {
@@ -220,6 +222,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <cstring>             table_name
 %type <condition>            join_condition
 %type <join_condition_list>  join_condition_list
+%type <sql_node>             subquery_stmt
 
 %left '+' '-'
 %left '*' '/'
@@ -502,6 +505,48 @@ update_stmt:      /*  update 语句的语法解析树*/
       }
     }
     ;
+subquery_stmt: 
+    SELECT expression_list FROM rel_list where group_by
+    {
+      $$ = new ParsedSqlNode(SCF_SELECT);
+      if ($2 != nullptr) {
+        $$->selection.expressions.swap(*$2);
+        delete $2;
+      }
+
+      if ($4 != nullptr) {
+        $$->selection.relations.swap(*$4);
+        delete $4;
+      }
+
+      if ($5 != nullptr) {
+        $$->selection.conditions.swap(*$5);
+        delete $5;
+      }
+
+      if ($6 != nullptr) {
+        $$->selection.group_by.swap(*$6);
+        delete $6;
+      }
+      
+      // 处理 JOIN 条件
+      if (!g_table_references.empty()) {
+        $$->selection.table_references = g_table_references;
+        // 同时填充 ALIASES 字段
+        for (const auto &ref : g_table_references) {
+          RelationSqlNode alias_node;
+          alias_node.name = ref.table_name;
+          alias_node.alias = ref.alias;
+          $$->selection.ALIASES.push_back(alias_node);
+        }
+      }
+      
+      // 清空 JOIN 条件相关的全局变量
+      g_join_conditions.clear();
+      g_table_references.clear();
+    }
+    ;
+
 select_stmt:        /*  select 语句的语法解析树*/
     SELECT expression_list FROM rel_list where group_by
     {
@@ -556,34 +601,50 @@ expression_list:
       $$->emplace_back($1);
     }
     | expression ID{
-      $$ = new std::vector<std::unique_ptr<Expression>>;
-      $1->set_alias($2);
-      $$->emplace_back($1);
+      if ($1 != nullptr && $2 != nullptr) {
+        $$ = new std::vector<std::unique_ptr<Expression>>;
+        $1->set_alias(std::string($2));
+        $$->emplace_back($1);
+      } else {
+        $$ = nullptr;
+      }
     }
     | expression AS ID{
-      $$ = new std::vector<std::unique_ptr<Expression>>;
-      $1->set_alias($3);
-      $$->emplace_back($1);
+      if ($1 != nullptr && $3 != nullptr) {
+        $$ = new std::vector<std::unique_ptr<Expression>>;
+        $1->set_alias(std::string($3));
+        $$->emplace_back($1);
+      } else {
+        $$ = nullptr;
+      }
     }
     | expression ID COMMA expression_list
     {
-      if ($4 != nullptr) {
-        $$ = $4;
+      if ($1 != nullptr && $2 != nullptr) {
+        if ($4 != nullptr) {
+          $$ = $4;
+        } else {
+          $$ = new std::vector<std::unique_ptr<Expression>>;
+        }
+        $1->set_alias(std::string($2));
+        $$->emplace($$->begin(), $1);
       } else {
-        $$ = new std::vector<std::unique_ptr<Expression>>;
+        $$ = $4;
       }
-      $1->set_alias($2);
-      $$->emplace($$->begin(), $1);
     }
     | expression AS ID COMMA expression_list
     {
-      if ($5 != nullptr) {
-        $$ = $5;
+      if ($1 != nullptr && $3 != nullptr) {
+        if ($5 != nullptr) {
+          $$ = $5;
+        } else {
+          $$ = new std::vector<std::unique_ptr<Expression>>;
+        }
+        $1->set_alias(std::string($3));
+        $$->emplace($$->begin(), $1);
       } else {
-        $$ = new std::vector<std::unique_ptr<Expression>>;
+        $$ = $5;
       }
-      $1->set_alias($3);
-      $$->emplace($$->begin(), $1);
     }
     | expression COMMA expression_list
     {
@@ -631,6 +692,11 @@ expression:
     }
     | aggregate_expression {
       $$ = $1;
+    }
+    | LBRACE select_stmt RBRACE {
+      // 子查询表达式
+      $$ = new SubqueryExpr($2);
+      $$->set_name(token_name(sql_string, &@$));
     }
     ;
 
@@ -850,12 +916,12 @@ condition_list:
     }
     | condition {
       $$ = new vector<ConditionSqlNode>;
-      $$->emplace_back(*$1);
+      $$->push_back(std::move(*$1));
       delete $1;
     }
     | condition AND condition_list {
       $$ = $3;
-      $$->emplace_back(*$1);
+      $$->push_back(std::move(*$1));
       delete $1;
     }
     ;
@@ -905,6 +971,48 @@ condition:
       $$->right_expr = $3;
       $$->comp = $2;
     }
+    | rel_attr IN LBRACE subquery_stmt RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 1;
+      $$->left_attr = *$1;
+      $$->right_is_attr = 0;
+      $$->right_expr =new SubqueryExpr($4);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = IN_OP;
+      delete $1;
+    }
+    | rel_attr NOT IN LBRACE subquery_stmt RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 1;
+      $$->left_attr = *$1;
+      $$->right_is_attr = 0;
+      $$->right_expr =new SubqueryExpr($5);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = NOT_IN_OP;
+      delete $1;
+    }
+    | expression IN LBRACE subquery_stmt RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 0;
+      $$->left_expr = $1;
+      $$->right_is_attr = 0;
+      $$->right_expr =new SubqueryExpr($4);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = IN_OP;
+    }
+    | expression NOT IN LBRACE subquery_stmt RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 0;
+      $$->left_expr = $1;
+      $$->right_is_attr = 0;
+      $$->right_expr =new SubqueryExpr($5);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = NOT_IN_OP;
+    }
     ;
 
 comp_op:
@@ -914,6 +1022,8 @@ comp_op:
     | LE { $$ = LESS_EQUAL; }
     | GE { $$ = GREAT_EQUAL; }
     | NE { $$ = NOT_EQUAL; }
+    | IN { $$ = IN_OP; }
+    | NOT IN { $$ = NOT_IN_OP; }
     ;
 
 // your code here

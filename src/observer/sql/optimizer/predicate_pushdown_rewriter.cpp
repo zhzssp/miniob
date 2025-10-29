@@ -17,6 +17,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/expr/expression.h"
 #include "sql/operator/logical_operator.h"
 #include "sql/operator/table_get_logical_operator.h"
+#include "sql/expr/subquery_expr.h"
 
 RC PredicatePushdownRewriter::rewrite(unique_ptr<LogicalOperator> &oper, bool &change_made)
 {
@@ -82,6 +83,77 @@ bool PredicatePushdownRewriter::is_empty_predicate(unique_ptr<Expression> &expr)
   return bool_ret;
 }
 
+bool PredicatePushdownRewriter::expression_has_subquery(unique_ptr<Expression> &expr)
+{
+  if (expr == nullptr) {
+    return false;
+  }
+
+  // 子查询表达式往往在类型层面未决，值类型为 UNDEFINED，这里也视为包含子查询/不可下推
+  if (expr->value_type() == AttrType::UNDEFINED) {
+    return true;
+  }
+
+  ExprType expr_type = expr->type();
+
+  // 检查当前表达式是否是子查询
+  if (expr_type == ExprType::SUB_QUERY) {
+    return true;
+  }
+
+  // 递归检查子表达式
+  switch (expr_type) {
+    case ExprType::COMPARISON: {
+      auto cmp_expr = static_cast<ComparisonExpr *>(expr.get());
+      if (cmp_expr->left() != nullptr && expression_has_subquery(cmp_expr->left())) {
+        return true;
+      }
+      if (cmp_expr->right() != nullptr && expression_has_subquery(cmp_expr->right())) {
+        return true;
+      }
+    } break;
+
+    case ExprType::CONJUNCTION: {
+      auto conj_expr = static_cast<ConjunctionExpr *>(expr.get());
+      for (auto &child : conj_expr->children()) {
+        if (expression_has_subquery(child)) {
+          return true;
+        }
+      }
+    } break;
+
+    case ExprType::ARITHMETIC: {
+      auto arith_expr = static_cast<ArithmeticExpr *>(expr.get());
+      if (arith_expr->left() != nullptr && expression_has_subquery(arith_expr->left())) {
+        return true;
+      }
+      if (arith_expr->right() != nullptr && expression_has_subquery(arith_expr->right())) {
+        return true;
+      }
+    } break;
+
+    case ExprType::AGGREGATION: {
+      auto agg_expr = static_cast<AggregateExpr *>(expr.get());
+      if (agg_expr->child() != nullptr && expression_has_subquery(agg_expr->child())) {
+        return true;
+      }
+    } break;
+
+    case ExprType::CAST: {
+      auto cast_expr = static_cast<CastExpr *>(expr.get());
+      if (cast_expr->child() != nullptr && expression_has_subquery(cast_expr->child())) {
+        return true;
+      }
+    } break;
+
+    default:
+      // 其他类型的表达式不包含子表达式
+      break;
+  }
+
+  return false;
+}
+
 /**
  * 查看表达式是否可以直接下放到table get算子的filter
  * @param expr 是当前的表达式。如果可以下放给table get 算子，执行完成后expr就失效了
@@ -112,6 +184,7 @@ RC PredicatePushdownRewriter::get_exprs_can_pushdown(
       }
 
       if (!*iter) {
+        // 使用 erase 的返回值更新迭代器
         iter = child_exprs.erase(iter);
       } else {
         ++iter;
@@ -119,6 +192,25 @@ RC PredicatePushdownRewriter::get_exprs_can_pushdown(
     }
   } else if (expr->type() == ExprType::COMPARISON) {
     // 如果是比较操作，并且比较的左边或右边是表某个列值，那么就下推下去
+    auto comparison_expr = static_cast<ComparisonExpr *>(expr.get());
+
+    unique_ptr<Expression> &left_expr  = comparison_expr->left();
+    unique_ptr<Expression> &right_expr = comparison_expr->right();
+    
+    // 检查是否包含子查询，如果包含则不下推
+    if (expression_has_subquery(expr)) {
+      LOG_WARN("Cannot pushdown expression with subquery, keeping it in predicate operator");
+      return rc;
+    }
+    
+    // 比较操作的左右两边只要有一个是取列字段值的并且另一边也是取字段值或常量，就pushdown
+    if (left_expr->type() != ExprType::FIELD && right_expr->type() != ExprType::FIELD) {
+      return rc;
+    }
+    if ((left_expr->type() != ExprType::FIELD && left_expr->type() != ExprType::VALUE) ||
+        (right_expr->type() != ExprType::FIELD && right_expr->type() != ExprType::VALUE)) {
+      return rc;
+    }
 
     pushdown_exprs.emplace_back(std::move(expr));
   }

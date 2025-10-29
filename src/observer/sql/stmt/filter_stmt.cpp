@@ -18,6 +18,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/sys/rc.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
+#include "sql/expr/subquery_expr.h"
 
 FilterStmt::~FilterStmt()
 {
@@ -98,6 +99,9 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
   }
 
   filter_unit = new FilterUnit;
+  
+  LOG_WARN("Creating FilterUnit: left_is_attr=%d, left_expr=%p, right_is_attr=%d, right_expr=%p, comp=%d", 
+           condition.left_is_attr, condition.left_expr, condition.right_is_attr, condition.right_expr, condition.comp);
 
   if (condition.left_is_attr) {
     Table           *table = nullptr;
@@ -132,10 +136,14 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
     filter_obj.init_attr(Field(table, field));
     filter_unit->set_right(filter_obj);
   } else if (condition.right_expr != nullptr) {
+    LOG_WARN("Creating FilterObj from condition.right_expr, type=%d", (int)condition.right_expr->type());
     FilterObj filter_obj;
-    filter_obj.init_expression(condition.right_expr->copy().release());
+    auto copied_expr = condition.right_expr->copy();
+    filter_obj.init_expression(copied_expr.release());
+    LOG_WARN("Created FilterObj from expression, is_expr=%d, is_attr=%d", filter_obj.is_expr, filter_obj.is_attr);
     filter_unit->set_right(filter_obj);
   } else {
+    LOG_WARN("Creating FilterObj from condition.right_value");
     FilterObj filter_obj;
     filter_obj.init_value(condition.right_value);
     filter_unit->set_right(filter_obj);

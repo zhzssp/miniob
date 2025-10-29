@@ -62,6 +62,8 @@ enum CompOp
   LESS_THAN,    ///< "<"
   GREAT_EQUAL,  ///< ">="
   GREAT_THAN,   ///< ">"
+  IN_OP,        ///< "IN"
+  NOT_IN_OP,    ///< "NOT IN"
   NO_OP
 };
 
@@ -90,21 +92,9 @@ struct ConditionSqlNode
   // 默认构造函数
   ConditionSqlNode() : left_expr(nullptr), right_expr(nullptr) {}
   
-  // 拷贝构造函数
-  ConditionSqlNode(const ConditionSqlNode& other)
-    : left_is_attr(other.left_is_attr),
-      left_value(other.left_value),
-      left_attr(other.left_attr),
-      left_expr(nullptr),  // 暂时设为nullptr，避免不完整类型问题
-      comp(other.comp),
-      right_is_attr(other.right_is_attr),
-      right_attr(other.right_attr),
-      right_value(other.right_value),
-      right_expr(nullptr)  // 暂时设为nullptr，避免不完整类型问题
-  {
-    // 注意：这里不拷贝Expression指针，因为Expression是不完整类型
-    // 在实际使用中，应该避免拷贝包含Expression指针的ConditionSqlNode
-  }
+  // 拷贝构造函数 - 禁用以避免浅拷贝 Expression 指针
+  // 使用移动构造代替
+  ConditionSqlNode(const ConditionSqlNode& other) = delete;
   
   // 移动构造函数
   ConditionSqlNode(ConditionSqlNode&& other) noexcept
