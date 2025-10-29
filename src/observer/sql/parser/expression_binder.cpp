@@ -98,6 +98,10 @@ RC ExpressionBinder::bind_expression(unique_ptr<Expression> &expr, vector<unique
       ASSERT(false, "shouldn't be here");
     } break;
 
+    case ExprType::SUB_QUERY: {
+      return bind_subquery_expression(expr, bound_expressions);
+    } break;
+
     default: {
       LOG_WARN("unknown expression type: %d", static_cast<int>(expr->type()));
       return RC::INTERNAL;
@@ -461,5 +465,18 @@ RC ExpressionBinder::bind_aggregate_expression(
   }
 
   bound_expressions.emplace_back(std::move(aggregate_expr));
+  return RC::SUCCESS;
+}
+
+RC ExpressionBinder::bind_subquery_expression(
+    unique_ptr<Expression> &expr, vector<unique_ptr<Expression>> &bound_expressions)
+{
+  if (nullptr == expr) {
+    return RC::SUCCESS;
+  }
+
+  // 子查询表达式直接添加到结果中，不需要进一步绑定
+  // 子查询的绑定将在 SelectStmt::create 中递归处理
+  bound_expressions.emplace_back(std::move(expr));
   return RC::SUCCESS;
 }

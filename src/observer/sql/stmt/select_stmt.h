@@ -38,6 +38,11 @@ public:
 
 public:
   static RC create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt);
+  static RC create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
+    std::shared_ptr<std::unordered_map<string, string>> name2alias,
+    std::shared_ptr<std::unordered_map<string, string>> alias2name,
+    std::shared_ptr<std::vector<string>> loaded_relation_names,
+    std::shared_ptr<std::unordered_map<string, string>> field_alias2name);
   static RC convert_alias_to_name(Expression *expr, 
   std::shared_ptr<std::unordered_map<string, string>> alias2name,
   std::shared_ptr<std::unordered_map<string, string>> field_alias2name);

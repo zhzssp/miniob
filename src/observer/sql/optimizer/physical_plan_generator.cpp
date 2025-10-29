@@ -14,7 +14,9 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/log/log.h"
 #include "sql/expr/expression.h"
+#include "sql/expr/subquery_expr.h"
 #include "session/session.h"
+#include <unordered_map>
 #include "sql/operator/aggregate_vec_physical_operator.h"
 #include "sql/operator/calc_logical_operator.h"
 #include "sql/operator/calc_physical_operator.h"
@@ -139,9 +141,40 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
   bool       has_not_equal = false;  // 检查是否有NOT_EQUAL查询
   
   for (auto &expr : predicates) {
+    
     if (expr->type() == ExprType::COMPARISON) {
       auto comparison_expr = static_cast<ComparisonExpr *>(expr.get());
       // 检查是否有NOT_EQUAL查询
+      // 创建子查询
+      if (comparison_expr->left()->type() == ExprType::SUB_QUERY) {
+        LOG_WARN("Creating subquery physical operator for left child");
+        auto sub_query_expr = static_cast<SubqueryExpr *>(comparison_expr->left().get());
+        
+        if (sub_query_expr->physical_operator() != nullptr) {
+          LOG_WARN("[UNEXPECTED] subquery physical operator is not null!");
+        }
+        unique_ptr<PhysicalOperator> subquery_phy_oper = nullptr;
+        RC rc = create(*sub_query_expr->logical_operator(), subquery_phy_oper,session);
+        if (rc != RC::SUCCESS) {
+          LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
+          return rc;
+        }
+        sub_query_expr->set_physical_operator(std::move(subquery_phy_oper));
+      } 
+      if (comparison_expr->right()->type() == ExprType::SUB_QUERY) {
+        LOG_WARN("Creating subquery physical operator for right child");
+        auto sub_query_expr = static_cast<SubqueryExpr *>(comparison_expr->right().get());
+        if (sub_query_expr->physical_operator() != nullptr) {
+          LOG_WARN("[UNEXPECTED] subquery physical operator is not null!");
+        }
+        unique_ptr<PhysicalOperator> subquery_phy_oper = nullptr;
+        RC rc = create(*sub_query_expr->logical_operator(), subquery_phy_oper,session);
+        if (rc != RC::SUCCESS) {
+          LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
+          return rc;
+        }
+        sub_query_expr->set_physical_operator(std::move(subquery_phy_oper));
+      }
       if (comparison_expr->comp() == NOT_EQUAL) {
         has_not_equal = true;
         break;  // 如果有NOT_EQUAL，不使用索引扫描
@@ -238,8 +271,63 @@ RC PhysicalPlanGenerator::create_plan(PredicateLogicalOperator &pred_oper, uniqu
   vector<unique_ptr<Expression>> &expressions = pred_oper.expressions();
   ASSERT(expressions.size() == 1, "predicate logical operator's children should be 1");
 
-  unique_ptr<Expression> expression = std::move(expressions.front());
-  oper = unique_ptr<PhysicalOperator>(new PredicatePhysicalOperator(std::move(expression)));
+  unique_ptr<Expression> &expression = expressions.front(); // Use reference instead of move
+  
+  // 取出子查询的逻辑算子，创建物理算子
+  std::vector<ComparisonExpr *> comparison_exprs;
+  if (expression->type() == ExprType::CONJUNCTION) {
+    auto conjunction_expr = static_cast<ConjunctionExpr *>(expression.get());
+    vector<unique_ptr<Expression>> &children = conjunction_expr->children();
+    for (auto &child_expr : children) {
+      if (child_expr->type() == ExprType::COMPARISON) {
+        comparison_exprs.push_back(static_cast<ComparisonExpr *>(child_expr.get()));
+      }
+    }
+  } else if (expression->type() == ExprType::COMPARISON) {
+    comparison_exprs.push_back(static_cast<ComparisonExpr *>(expression.get()));
+  }
+
+  for (auto &comparison_expr : comparison_exprs) {
+    if (comparison_expr->left()->type() == ExprType::SUB_QUERY) {
+      auto sub_query_expr = static_cast<SubqueryExpr *>(comparison_expr->left().get());
+      // 为子查询表达式设置事务上下文，保证后续 open/scan 的上下文有效
+      if (session != nullptr) {
+        sub_query_expr->set_trx(session->current_trx());
+      }
+      if (sub_query_expr->physical_operator() != nullptr) {
+        LOG_WARN("[UNEXPECTED] subquery physical operator is not null!");
+      }
+      unique_ptr<PhysicalOperator> subquery_phy_oper = nullptr;
+      RC rc = create(*sub_query_expr->logical_operator(), subquery_phy_oper, session);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
+        return rc;
+      }
+      sub_query_expr->set_physical_operator(std::move(subquery_phy_oper));
+    }
+    if (comparison_expr->right()->type() == ExprType::SUB_QUERY) {
+      auto sub_query_expr = static_cast<SubqueryExpr *>(comparison_expr->right().get());
+      // 为子查询表达式设置事务上下文，保证后续 open/scan 的上下文有效
+      if (session != nullptr) {
+        sub_query_expr->set_trx(session->current_trx());
+      }
+      if (sub_query_expr->physical_operator() != nullptr) {
+        LOG_WARN("[UNEXPECTED] subquery physical operator is not null!");
+      }
+      unique_ptr<PhysicalOperator> subquery_phy_oper = nullptr;
+      RC rc = create(*sub_query_expr->logical_operator(), subquery_phy_oper, session);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
+        return rc;
+      }
+      sub_query_expr->set_physical_operator(std::move(subquery_phy_oper));
+    }
+  }
+  
+  // Move the original expression into the predicate operator so that any
+  // SubqueryExpr retains its already-built physical operators.
+  unique_ptr<Expression> moved_expr = std::move(expression);
+  oper = unique_ptr<PhysicalOperator>(new PredicatePhysicalOperator(std::move(moved_expr)));
   oper->add_child(std::move(child_phy_oper));
   return rc;
 }

@@ -19,6 +19,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/db/db.h"
 #include "storage/table/table.h"
 #include "sql/parser/expression_binder.h"
+#include "sql/expr/subquery_expr.h"
 
 using namespace std;
 using namespace common;
@@ -38,10 +39,31 @@ SelectStmt::~SelectStmt()
 
 RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 {
+  // 调用新的重载版本，使用默认参数
+  return create(db, select_sql, stmt, nullptr, nullptr, nullptr, nullptr);
+}
+
+RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
+  std::shared_ptr<std::unordered_map<string, string>> name2alias,
+  std::shared_ptr<std::unordered_map<string, string>> alias2name,
+  std::shared_ptr<std::vector<string>> loaded_relation_names,
+  std::shared_ptr<std::unordered_map<string, string>> field_alias2name
+  )
+{
   if (nullptr == db) {
     LOG_WARN("invalid argument. db is null");
     return RC::INVALID_ARGUMENT;
   }
+
+  if (select_sql.expressions.empty()) {
+    LOG_WARN("invalid argument. select attributes(exprs, technically) is empty");
+    return RC::INVALID_ARGUMENT;
+  }
+
+  if (name2alias == nullptr) name2alias = std::make_shared<std::unordered_map<string, string>>();
+  if (alias2name == nullptr) alias2name = std::make_shared<std::unordered_map<string, string>>();
+  if (loaded_relation_names == nullptr) loaded_relation_names = std::make_shared<std::vector<string>>();
+  if (field_alias2name == nullptr) field_alias2name = std::make_shared<std::unordered_map<string, string>>();
 
   BinderContext binder_context;
 
@@ -50,8 +72,8 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   unordered_map<string, Table *> table_map;
   
   // 
-  unordered_map<string, string> table_alias_map;  // 别名 -> 表名映射
-  unordered_map<string, string> field_alias_map;  // 字段别名映射
+  unordered_map<string, string> table_alias_map = name2alias ? *name2alias : unordered_map<string, string>{};  // 别名 -> 表名映射
+  unordered_map<string, string> field_alias_map = field_alias2name ? *field_alias2name : unordered_map<string, string>{};  // 字段别名映射
 
   // 处理表别名 - 避免重复处理
   if (!select_sql.ALIASES.empty()) {
@@ -221,7 +243,65 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     }
   }
 
+  for (auto &condition : select_sql.conditions) {
+    LOG_WARN("Processing condition: right_expr=%p, left_expr=%p", condition.right_expr, condition.left_expr);
+    // exists/not exists 可能会使得 left_expr 为空
+    if (condition.left_expr != nullptr && condition.left_expr->type() == ExprType::SUB_QUERY) {
+      SubqueryExpr *subquery_expr = static_cast<SubqueryExpr *>(condition.left_expr);
+      Stmt         *stmt          = nullptr;
+      RC            rc            = SelectStmt::create(
+        db, 
+        subquery_expr->sub_query_sn()->selection, 
+        stmt, 
+        name2alias, 
+        alias2name, 
+        loaded_relation_names,
+        field_alias2name
+      );
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("cannot construct subquery stmt");
+        return rc;
+      }
+      // 检查子查询的合法性：子查询的查询的属性只能有一个
+      RC rc_ = check_sub_select_legal(db, subquery_expr->sub_query_sn());
+      if (rc_ != RC::SUCCESS) {
+        return rc_;
+      }
+      subquery_expr->set_stmt(unique_ptr<SelectStmt>(static_cast<SelectStmt *>(stmt)));
+    }
+    if (condition.right_expr != nullptr && condition.right_expr->type() == ExprType::SUB_QUERY) {
+      SubqueryExpr *subquery_expr = static_cast<SubqueryExpr *>(condition.right_expr);
+      LOG_WARN("Processing subquery in condition, creating SelectStmt for subquery");
+      Stmt         *stmt          = nullptr;
+      RC            rc            = SelectStmt::create(
+        db,
+        subquery_expr->sub_query_sn()->selection, 
+        stmt, 
+        name2alias, 
+        alias2name, 
+        loaded_relation_names,
+        field_alias2name
+      );
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("cannot construct subquery stmt");
+        return rc;
+      }
+      LOG_WARN("Subquery SelectStmt created successfully, setting to SubqueryExpr");
+      // 检查子查询的合法性：子查询的查询的属性只能有一个
+      RC rc_ = check_sub_select_legal(db, subquery_expr->sub_query_sn());
+      if (rc_ != RC::SUCCESS) {
+        return rc_;
+      }
+      subquery_expr->set_stmt(unique_ptr<SelectStmt>(static_cast<SelectStmt *>(stmt)));
+      LOG_WARN("Subquery stmt set successfully");
+    }
+  }
+
+
   // create filter statement in `where` statement
+  LOG_WARN("Before FilterStmt::create: conditions.size()=%zu, first condition right_expr=%p", 
+           select_sql.conditions.size(), 
+           select_sql.conditions.empty() ? nullptr : select_sql.conditions[0].right_expr);
   FilterStmt *filter_stmt = nullptr;
   RC          rc          = FilterStmt::create(db,
       default_table,
@@ -267,7 +347,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
             }
           }
           
-          all_join_conditions.push_back(condition);
+          all_join_conditions.push_back(std::move(condition));
         }
       }
     }
@@ -302,5 +382,64 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   select_stmt->join_filter_stmt_ = join_filter_stmt;
   select_stmt->group_by_.swap(group_by_expressions);
   stmt                      = select_stmt;
+  return RC::SUCCESS;
+}
+
+RC SelectStmt::convert_alias_to_name(Expression *expr, 
+std::shared_ptr<std::unordered_map<string, string>> alias2name,
+std::shared_ptr<std::unordered_map<string, string>> field_alias2name) {
+   if (expr->type() == ExprType::VALUE || 
+   expr->type() == ExprType::SUB_QUERY || 
+   expr->type() == ExprType::STAR){
+    // select * from table_alias_1 t1 where id in (select t2.id from table_alias_2 t2 where t2.col2 >= t1.col1);
+    // subquery 单独处理
+    return RC::SUCCESS;
+  }
+  if (expr->type() == ExprType::ARITHMETIC) {
+    ArithmeticExpr *arith_expr = static_cast<ArithmeticExpr *>(expr);
+    if (arith_expr->left() != nullptr) {
+      RC rc = SelectStmt::convert_alias_to_name(arith_expr->left().get(), alias2name, field_alias2name);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to check parent relation");
+        return rc;
+      }
+    }
+    if (arith_expr->right() != nullptr) {
+      RC rc = SelectStmt::convert_alias_to_name(arith_expr->right().get(), alias2name, field_alias2name);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to check parent relation");
+        return rc;
+      }
+    }
+    return RC::SUCCESS;
+  }
+  if (expr->type() == ExprType::UNBOUND_AGGREGATION) {
+    UnboundAggregateExpr *aggre_expr = static_cast<UnboundAggregateExpr *>(expr);
+    if (aggre_expr->child() == nullptr) {
+      LOG_WARN("invalid aggre expr");
+      return RC::INVALID_ARGUMENT;
+    }
+    RC rc = SelectStmt::convert_alias_to_name(aggre_expr->child().get(), alias2name, field_alias2name);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to check parent relation");
+      return rc;
+    }
+    return rc;
+  }
+  
+  if (expr->type() != ExprType::UNBOUND_FIELD) {
+    LOG_WARN("convert_alias_to_name: invalid expr type: %d. It should be UnoundField.", expr->type());
+  }
+  auto ub_field_expr = static_cast<UnboundFieldExpr *>(expr);
+
+  // 替换 field 的表的别名为真实的表名
+  if (alias2name->find(ub_field_expr->table_name()) != alias2name->end()) {
+    // 如果在 alias2name 中找到了，说明是别名，需要替换为真实的表名
+    std::string true_table_name = (*alias2name)[ub_field_expr->table_name()];
+    LOG_DEBUG("convert alias to name: %s -> %s",ub_field_expr->table_name(), true_table_name.c_str());
+    ub_field_expr->set_table_alias(ub_field_expr->table_name());
+    ub_field_expr->set_table_name(true_table_name);
+  }
+
   return RC::SUCCESS;
 }

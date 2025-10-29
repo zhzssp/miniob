@@ -15,6 +15,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/expr/expression.h"
 #include "sql/expr/tuple.h"
 #include "sql/expr/arithmetic_operator.hpp"
+#include "sql/expr/subquery_expr.h"
+#include "sql/operator/physical_operator.h"
 
 using namespace std;
 
@@ -297,6 +299,89 @@ RC ComparisonExpr::try_get_value(Value &cell) const
 
 RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
 {
+  // Handle IN and NOT IN operations specially
+  if (comp_ == IN_OP || comp_ == NOT_IN_OP) {
+    LOG_WARN("IN operation: comp_=%d, right type=%d, left type=%d, right_ptr=%p, left_ptr=%p", 
+             (int)comp_, (int)right_->type(), (int)left_->type(), right_.get(), left_.get());
+    
+    Value left_value;
+    RC rc = left_->get_value(tuple, left_value);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
+      return rc;
+    }
+    
+      // For IN operation, execute the subquery and check if left_value is in the result set
+      bool found = false;
+      
+      // Check if right is actually a SubqueryExpr
+      if (right_->type() != ExprType::SUB_QUERY) {
+        LOG_WARN("IN operation expected SUB_QUERY on right, got type=%d. Treating as not found.", (int)right_->type());
+        value.set_boolean(false);
+        return RC::SUCCESS;
+      }
+      
+      // Get the subquery expression
+      SubqueryExpr* subquery_expr = static_cast<SubqueryExpr*>(right_.get());
+      
+      // 执行子查询并收集所有结果，再做成员检查
+      bool any_equal = false;
+      // 打开子查询物理算子
+      Tuple *outer_tuple_ptr = const_cast<Tuple*>(&tuple);
+      rc = subquery_expr->open_physical_operator(outer_tuple_ptr);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("IN: failed to open subquery operator. rc=%s", strrc(rc));
+        value.set_boolean(false);
+        return RC::SUCCESS; // 当作不匹配
+      }
+
+      while ((rc = subquery_expr->physical_operator()->next()) == RC::SUCCESS) {
+        auto sub_t = subquery_expr->physical_operator()->current_tuple();
+        if (sub_t->cell_num() == 0) {
+          continue;
+        }
+        Value right_cell;
+        sub_t->cell_at(0, right_cell);
+
+        // 尝试类型对齐后比较
+        Value aligned_left = left_value;
+        Value aligned_right = right_cell;
+        Value casted;
+        if (right_cell.attr_type() != left_value.attr_type()) {
+          if (Value::cast_to(right_cell, left_value.attr_type(), casted) == RC::SUCCESS) {
+            aligned_right = casted;
+          } else if (Value::cast_to(left_value, right_cell.attr_type(), casted) == RC::SUCCESS) {
+            aligned_left = casted;
+          }
+        }
+        // 仅当类型可比较时才比较
+        if ((aligned_left.attr_type() == AttrType::INTS || aligned_left.attr_type() == AttrType::FLOATS || aligned_left.attr_type() == AttrType::CHARS) &&
+            (aligned_right.attr_type() == AttrType::INTS || aligned_right.attr_type() == AttrType::FLOATS || aligned_right.attr_type() == AttrType::CHARS)) {
+          if (aligned_left.compare(aligned_right) == 0) {
+            any_equal = true;
+            // 对 IN 可以提前结束；对 NOT IN 需要遍历完全确认“没有一个相等”，但已发现相等可提前确定为 false
+            if (comp_ == IN_OP) {
+              break;
+            }
+          }
+        }
+      }
+      // 关闭子查询
+      RC close_rc = subquery_expr->close_physical_operator();
+      if (close_rc != RC::SUCCESS) {
+        LOG_WARN("IN: failed to close subquery operator. rc=%s", strrc(close_rc));
+      }
+      if (rc != RC::SUCCESS && rc != RC::RECORD_EOF) {
+        LOG_WARN("IN: subquery execution error. rc=%s", strrc(rc));
+      }
+
+      found = (comp_ == IN_OP) ? any_equal : !any_equal;
+      LOG_WARN("IN: final found=%d (any_equal=%d)", found, any_equal);
+      
+      value.set_boolean(found);
+      return RC::SUCCESS;
+  }
+  
   Value left_value;
   Value right_value;
 
