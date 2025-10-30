@@ -20,6 +20,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/table/table.h"
 #include "sql/parser/expression_binder.h"
 #include "sql/expr/subquery_expr.h"
+#include "sql/expr/expression.h"
 
 using namespace std;
 using namespace common;
@@ -55,6 +56,8 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
     return RC::INVALID_ARGUMENT;
   }
 
+  // 别名构建与注册稍后在可见表构建完成后进行
+
   if (select_sql.expressions.empty()) {
     LOG_WARN("invalid argument. select attributes(exprs, technically) is empty");
     return RC::INVALID_ARGUMENT;
@@ -66,41 +69,18 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
   if (field_alias2name == nullptr) field_alias2name = std::make_shared<std::unordered_map<string, string>>();
 
   BinderContext binder_context;
+  unordered_set<string> visible_tables;
 
   // collect tables in `from` statement
   vector<Table *>                tables;
   unordered_map<string, Table *> table_map;
   
   // 
-  unordered_map<string, string> table_alias_map = name2alias ? *name2alias : unordered_map<string, string>{};  // 别名 -> 表名映射
+  // 构建本层别名映射（不继承外层，允许子查询遮蔽外层同名别名）
+  unordered_map<string, string> table_alias_map;  // 别名 -> 表名映射（仅当前层）
   unordered_map<string, string> field_alias_map = field_alias2name ? *field_alias2name : unordered_map<string, string>{};  // 字段别名映射
 
-  // 处理表别名 - 避免重复处理
-  if (!select_sql.ALIASES.empty()) {
-    // 多表查询（逗号分隔），只处理 ALIASES
-    for (size_t i = 0; i < select_sql.ALIASES.size(); i++) {
-      if (!select_sql.ALIASES[i].alias.empty()) {
-          // 检查别名重复
-          if (table_alias_map.find(select_sql.ALIASES[i].alias) != table_alias_map.end()) {
-              LOG_WARN("Duplicate table alias: %s", select_sql.ALIASES[i].alias.c_str());
-              return RC::INVALID_ARGUMENT;
-          }
-          table_alias_map[select_sql.ALIASES[i].alias] = select_sql.ALIASES[i].name;
-      }
-    }
-  } else {
-    // JOIN查询，只处理 table_references
-    for (const auto &table_ref : select_sql.table_references) {
-      if (!table_ref.alias.empty()) {
-          // 检查别名重复
-          if (table_alias_map.find(table_ref.alias) != table_alias_map.end()) {
-              LOG_WARN("Duplicate table alias: %s", table_ref.alias.c_str());
-              return RC::INVALID_ARGUMENT;
-          }
-          table_alias_map[table_ref.alias] = table_ref.table_name;
-      }
-    }
-  }
+  // 别名映射不做预处理，统一在可见表确定后构建，避免重复与误判
 // 处理字段别名
   for (size_t i = 0; i < select_sql.expressions.size(); i++) {
       Expression *expr = select_sql.expressions[i].get();
@@ -126,37 +106,10 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
     binder_context.add_table(table);
     tables.push_back(table);
     table_map.insert({table_name, table});
+    visible_tables.insert(table_name);
   }
   
-  // 处理 ALIASES 中的表（多表查询）
-  for (size_t i = 0; i < select_sql.ALIASES.size(); i++) {
-    const char *table_name = select_sql.ALIASES[i].name.c_str();
-    if (nullptr == table_name) {
-      LOG_WARN("invalid argument. relation name is null. index=%d", i);
-      return RC::INVALID_ARGUMENT;
-    }
-
-    // 检查表是否已经存在，避免重复添加
-    if (table_map.find(table_name) != table_map.end()) {
-      continue;
-    }
-
-    Table *table = db->find_table(table_name);
-    if (nullptr == table) {
-      LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
-      return RC::SCHEMA_TABLE_NOT_EXIST;
-    }
-
-    binder_context.add_table(table);
-    tables.push_back(table);
-    table_map.insert({table_name, table});
-    
-    // 如果有别名，添加到table_map中
-    if (!select_sql.ALIASES[i].alias.empty()) {
-      table_map.insert({select_sql.ALIASES[i].alias, table});
-      binder_context.add_table_alias(select_sql.ALIASES[i].alias.c_str(), table);
-    }
-  }
+  // 先不基于 ALIASES 直接注册别名，稍后统一基于可见表过滤
   
   // 处理新的 table_references（支持 JOIN）
   for (const auto &table_ref : select_sql.table_references) {
@@ -181,34 +134,95 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
     binder_context.add_table(table);
     tables.push_back(table);
     table_map.insert({table_name, table});
-    
-    // 处理 JOIN 条件
-    if (table_ref.is_join && !table_ref.join_conditions.empty()) {
-    }
+    visible_tables.insert(table_name);
+    // 处理 JOIN 条件（此处略）
+  }
+
+  // 基于本层可见表构建别名映射（别名遮蔽外层）
+  for (const auto &a : select_sql.ALIASES) {
+    if (a.alias.empty()) continue;
+    if (!visible_tables.count(a.name)) continue;
+    table_alias_map[a.alias] = a.name;
+  }
+  for (const auto &tr : select_sql.table_references) {
+    if (tr.alias.empty()) continue;
+    if (!visible_tables.count(tr.table_name)) continue;
+    table_alias_map[tr.alias] = tr.table_name;
+  }
+
+  // 仅由当前层 FROM 抽取的严格可见表集合（不受任何外层影响）
+  unordered_set<string> level_visible_tables;
+  for (const auto &name : select_sql.relations) {
+    level_visible_tables.insert(name);
+  }
+  for (const auto &tr : select_sql.table_references) {
+    level_visible_tables.insert(tr.table_name);
+  }
+
+  // 注册别名到本层上下文
+  for (const auto &kv : table_alias_map) {
+    auto it = table_map.find(kv.second);
+    if (it == table_map.end()) continue;
+    Table *tbl = it->second;
+    table_map.emplace(kv.first, tbl);
+    binder_context.add_table_alias(kv.first.c_str(), tbl);
   }
 
   // collect query fields in `select` statement
   vector<unique_ptr<Expression>> bound_expressions;
   ExpressionBinder expression_binder(binder_context);
   
-  // 在绑定表达式之前，先解析表别名引用
+  // 在绑定表达式之前，先解析表别名引用 & 单表默认绑定
+  {
+    // 调试：打印本层可见表与别名映射
+    std::string tbls;
+    for (auto *t : tables) { if (!tbls.empty()) tbls += ","; tbls += t->name(); }
+    std::string vtbls;
+    for (const auto &n : visible_tables) { if (!vtbls.empty()) vtbls += ","; vtbls += n; }
+    std::string lvtbls;
+    for (const auto &n : level_visible_tables) { if (!lvtbls.empty()) lvtbls += ","; lvtbls += n; }
+    std::string aliases;
+    for (const auto &kv : table_alias_map) { if (!aliases.empty()) aliases += ","; aliases += kv.first + string("->") + kv.second; }
+    LOG_WARN("[expr prebind] tables={%s} visible={%s} level_visible={%s} aliases={%s}", tbls.c_str(), vtbls.c_str(), lvtbls.c_str(), aliases.c_str());
+  }
   for (unique_ptr<Expression> &expression : select_sql.expressions) {
      // 如果是 UnboundFieldExpr，需要解析表别名
-     if (expression->type() == ExprType::UNBOUND_FIELD) {
+      if (expression->type() == ExprType::UNBOUND_FIELD) {
        UnboundFieldExpr *field_expr = static_cast<UnboundFieldExpr*>(expression.get());
-       if (field_expr->table_name() != nullptr && strlen(field_expr->table_name()) > 0) {
+        LOG_WARN("[expr prebind] UNBOUND_FIELD before: table=\"%s\" field=\"%s\"", 
+                 field_expr->table_name() ? field_expr->table_name() : "", 
+                 field_expr->field_name() ? field_expr->field_name() : "");
+        if (field_expr->table_name() != nullptr && strlen(field_expr->table_name()) > 0) {
          // 检查是否是表别名
          auto it = table_alias_map.find(field_expr->table_name());
          if (it != table_alias_map.end()) {
            // 将表别名转换为实际表名
            field_expr->set_table_name(it->second.c_str());
+            LOG_WARN("[expr prebind] alias mapped: %s -> %s", it->first.c_str(), it->second.c_str());
          }
+        } else if (level_visible_tables.size() == 1) {
+          // 优先使用本层可见表（避免外层表混入）
+          const std::string only_name = *level_visible_tables.begin();
+          field_expr->set_table_name(only_name.c_str());
+          LOG_WARN("[expr prebind] default single visible bind: %s", only_name.c_str());
+        } else if (tables.size() == 1) {
+         // 未指定表且仅有一张表时，默认绑定该表
+         field_expr->set_table_name(tables[0]->name());
+         LOG_WARN("[expr prebind] default single table bind: %s", tables[0]->name());
+       } else if (table_alias_map.size() == 1) {
+         // 极端情况：仅通过别名可见（解析产物差异），且只有一个别名
+         const auto &only = *table_alias_map.begin();
+         field_expr->set_table_name(only.second.c_str());
+         LOG_WARN("[expr prebind] default single alias bind: %s -> %s", only.first.c_str(), only.second.c_str());
        }
+       LOG_WARN("[expr prebind] UNBOUND_FIELD after: table=\"%s\" field=\"%s\"", 
+                field_expr->table_name() ? field_expr->table_name() : "", 
+                field_expr->field_name() ? field_expr->field_name() : "");
      }
     
     RC rc = expression_binder.bind_expression(expression, bound_expressions);
     if (OB_FAIL(rc)) {
-      LOG_INFO("bind expression failed. rc=%s", strrc(rc));
+      LOG_INFO("bind expression failed. rc=%s expr_type=%d", strrc(rc), (int)expression->type());
       return rc;
     }
   }
@@ -241,10 +255,35 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
         condition.right_attr.relation_name = it->second;
       }
     }
+    // 默认绑定未指定表的列（仅一个表时）
+    if (level_visible_tables.size() == 1) {
+      const std::string only_name = *level_visible_tables.begin();
+      if (condition.left_is_attr && condition.left_attr.relation_name.empty()) {
+        condition.left_attr.relation_name = only_name;
+      }
+      if (condition.right_is_attr && condition.right_attr.relation_name.empty()) {
+        condition.right_attr.relation_name = only_name;
+      }
+    } else if (tables.size() == 1) {
+      if (condition.left_is_attr && condition.left_attr.relation_name.empty()) {
+        condition.left_attr.relation_name = tables[0]->name();
+      }
+      if (condition.right_is_attr && condition.right_attr.relation_name.empty()) {
+        condition.right_attr.relation_name = tables[0]->name();
+      }
+    } else if (table_alias_map.size() == 1) {
+      const auto &only = *table_alias_map.begin();
+      if (condition.left_is_attr && condition.left_attr.relation_name.empty()) {
+        condition.left_attr.relation_name = only.second;
+      }
+      if (condition.right_is_attr && condition.right_attr.relation_name.empty()) {
+        condition.right_attr.relation_name = only.second;
+      }
+    }
+    // 如有外层相关列需求，需在表达式阶段处理，这里不创建相关列表达式
   }
 
   for (auto &condition : select_sql.conditions) {
-    LOG_WARN("Processing condition: right_expr=%p, left_expr=%p", condition.right_expr, condition.left_expr);
     // exists/not exists 可能会使得 left_expr 为空
     if (condition.left_expr != nullptr && condition.left_expr->type() == ExprType::SUB_QUERY) {
       SubqueryExpr *subquery_expr = static_cast<SubqueryExpr *>(condition.left_expr);
@@ -271,7 +310,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
     }
     if (condition.right_expr != nullptr && condition.right_expr->type() == ExprType::SUB_QUERY) {
       SubqueryExpr *subquery_expr = static_cast<SubqueryExpr *>(condition.right_expr);
-      LOG_WARN("Processing subquery in condition, creating SelectStmt for subquery");
+      // subquery on right expression
       Stmt         *stmt          = nullptr;
       RC            rc            = SelectStmt::create(
         db,
@@ -283,25 +322,19 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
         field_alias2name
       );
       if (rc != RC::SUCCESS) {
-        LOG_WARN("cannot construct subquery stmt");
         return rc;
       }
-      LOG_WARN("Subquery SelectStmt created successfully, setting to SubqueryExpr");
       // 检查子查询的合法性：子查询的查询的属性只能有一个
       RC rc_ = check_sub_select_legal(db, subquery_expr->sub_query_sn());
       if (rc_ != RC::SUCCESS) {
         return rc_;
       }
       subquery_expr->set_stmt(unique_ptr<SelectStmt>(static_cast<SelectStmt *>(stmt)));
-      LOG_WARN("Subquery stmt set successfully");
     }
   }
 
 
   // create filter statement in `where` statement
-  LOG_WARN("Before FilterStmt::create: conditions.size()=%zu, first condition right_expr=%p", 
-           select_sql.conditions.size(), 
-           select_sql.conditions.empty() ? nullptr : select_sql.conditions[0].right_expr);
   FilterStmt *filter_stmt = nullptr;
   RC          rc          = FilterStmt::create(db,
       default_table,
