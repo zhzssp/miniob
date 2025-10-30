@@ -122,8 +122,8 @@ RC OrderByPhysicalOperator::sort_buffer() {
         }
         // compare_result = 0
         else {
-          LOG_INFO("Compare_result is not 1 or -1, view as equal, return false defaultly");
-          return false;  // 如果所有字段值相同，保持原有顺序
+          LOG_INFO("Compare_result is 0, continue to compare the next field !");
+          continue;
         }
       }
       // 最终的默认return --> 过编译检查
