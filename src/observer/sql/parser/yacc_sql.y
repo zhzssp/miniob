@@ -684,6 +684,11 @@ expression:
       $$->set_name(token_name(sql_string, &@$));
       delete $1;
     }
+    | ID DOT '*' {
+      // 支持表限定的星号：t2.*
+      $$ = new StarExpr($1);
+      $$->set_name(token_name(sql_string, &@$));
+    }
     | rel_attr {
       RelAttrSqlNode *node = $1;
       $$ = new UnboundFieldExpr(node->relation_name, node->attribute_name);
