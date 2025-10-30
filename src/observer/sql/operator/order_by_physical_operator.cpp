@@ -29,11 +29,20 @@ RC OrderByPhysicalOperator::open(Trx *trx) {
     if(rc != RC::SUCCESS) {
       return rc;
     }
-
-    tuples_buffer.emplace_back(value_list_tuple);
+    if(value_list_tuple != nullptr) {
+      tuples_buffer.emplace_back(value_list_tuple);
+    }
+    LOG_INFO("pushed tuple ptr=%p, tuples_buffer.size=%zu", value_list_tuple, tuples_buffer.size());
   }
 
   LOG_INFO("Building tuples_buffer done !");
+
+  for (size_t i = 0; i < tuples_buffer.size(); ++i) {
+    if (tuples_buffer[i] == nullptr) {
+      LOG_ERROR("tuples_buffer has nullptr at idx=%zu", i);
+      abort();  // 便于生成 core / backtrace
+    }
+  }
 
   rc = sort_buffer();
 
