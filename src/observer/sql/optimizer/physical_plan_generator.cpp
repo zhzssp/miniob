@@ -273,7 +273,7 @@ RC PhysicalPlanGenerator::create_plan(PredicateLogicalOperator &pred_oper, uniqu
 
   unique_ptr<Expression> &expression = expressions.front(); // Use reference instead of move
   
-  // 取出子查询的逻辑算子，创建物理算子
+   // 取出子查询的逻辑算子，创建物理算子
   std::vector<ComparisonExpr *> comparison_exprs;
   if (expression->type() == ExprType::CONJUNCTION) {
     auto conjunction_expr = static_cast<ConjunctionExpr *>(expression.get());
