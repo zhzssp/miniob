@@ -64,6 +64,7 @@ public:
   {
     const char *data  = rec.data();
     int32_t     value = *(int32_t *)data;
+    // 筛选数据范围 ？
     return value >= begin_ && value <= end_;
   }
 

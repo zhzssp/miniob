@@ -55,7 +55,7 @@ RC HeapRecordScanner::fetch_next_record()
   }
 
   // 上个页面遍历完了，或者还没有开始遍历某个页面，那么就从一个新的页面开始遍历查找
-  LOG_TRACE("Search from a new page");
+  LOG_TRACE("Search record from a new page");
   while (bp_iterator_.has_next()) {
     PageNum page_num = bp_iterator_.next();
     record_page_handler_->cleanup();
@@ -76,7 +76,7 @@ RC HeapRecordScanner::fetch_next_record()
   }
 
   // 所有的页面都遍历完了，没有数据了
-  LOG_TRACE("All pages searched on, no record left");
+  LOG_TRACE("All pages searched, no record left");
   next_record_.rid().slot_num = -1;
   record_page_handler_->cleanup();
   return RC::RECORD_EOF;
@@ -97,7 +97,7 @@ RC HeapRecordScanner::fetch_next_record_in_page()
       return rc;
     }
 
-    // 如果有过滤条件，就用过滤条件过滤一下
+    // 如果有过滤条件，就用过滤条件过滤一下 --> 结果为true则record会被过滤掉
     if (condition_filter_ != nullptr && !condition_filter_->filter(next_record_)) {
       continue;
     }
@@ -143,6 +143,7 @@ RC HeapRecordScanner::close_scan()
 RC HeapRecordScanner::next(Record &record)
 {
   LOG_TRACE("Enter heap_record_scanner's next()");
+  // 读取到scanner的next_record_来
   RC rc = fetch_next_record();
   if (OB_FAIL(rc)) {
     return rc;

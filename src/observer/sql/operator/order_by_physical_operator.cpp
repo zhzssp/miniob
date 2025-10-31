@@ -37,13 +37,6 @@ RC OrderByPhysicalOperator::open(Trx *trx) {
 
   LOG_INFO("Building tuples_buffer done !");
 
-  for (size_t i = 0; i < tuples_buffer.size(); ++i) {
-    if (tuples_buffer[i] == nullptr) {
-      LOG_ERROR("tuples_buffer has nullptr at idx=%zu", i);
-      abort();  // 便于生成 core / backtrace
-    }
-  }
-
   rc = sort_buffer();
 
   LOG_INFO("tuples_buffer is sorted");

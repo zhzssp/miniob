@@ -124,6 +124,8 @@ ORDER                                   RETURN_TOKEN(ORDER);
 ASC                                     RETURN_TOKEN(ASC);
 DESC                                    RETURN_TOKEN(DESC); // 如何确保优先匹配降序，而不是desc table
 STORAGE                                 RETURN_TOKEN(STORAGE);
+NULL                                    RETURN_TOKEN(NULL_T); // 避免与C++中的NULL冲突
+NOT                                     RETURN_TOKEN(NOT);    // 确保在ID规则之前，否则会被当做标识符
 FORMAT                                  RETURN_TOKEN(FORMAT);
 PRIMARY                                 RETURN_TOKEN(PRIMARY);
 KEY                                     RETURN_TOKEN(KEY);

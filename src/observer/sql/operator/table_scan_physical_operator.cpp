@@ -50,11 +50,12 @@ RC TableScanPhysicalOperator::next()
       return rc;
     }
 
+    // 结果已被保存到tuple_中，通过current_tuple()即可获取
     if (filter_result) {
-      sql_debug("get a tuple: %s", tuple_.to_string().c_str());
+      sql_debug("Get a tuple: %s", tuple_.to_string().c_str());
       break;
     } else {
-      sql_debug("a tuple is filtered: %s", tuple_.to_string().c_str());
+      sql_debug("A tuple is filtered: %s", tuple_.to_string().c_str());
     }
   }
   return rc;
@@ -87,11 +88,14 @@ void TableScanPhysicalOperator::set_predicates(vector<unique_ptr<Expression>> &&
   predicates_ = std::move(exprs);
 }
 
+/* 返回结果为false时，表示当前tuple被过滤掉 */
 RC TableScanPhysicalOperator::filter(RowTuple &tuple, bool &result)
 {
   RC    rc = RC::SUCCESS;
   Value value;
+  // 每个过滤条件仅针对单个字段 --> 获取对应Value进行判断 ？
   for (unique_ptr<Expression> &expr : predicates_) {
+    // 还不是OrderedUnBoundFieldExpr，类型是ComparisonExpr ？
     rc = expr->get_value(tuple, value);
     if (rc != RC::SUCCESS) {
       return rc;

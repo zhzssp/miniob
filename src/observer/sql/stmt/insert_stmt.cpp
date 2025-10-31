@@ -38,7 +38,7 @@ RC InsertStmt::create(Db *db, const InsertSqlNode &inserts, Stmt *&stmt)
   }
 
   // check the fields number
-  const Value     *values     = inserts.values.data();
+  const Value     *values     = inserts.values.data();  // vector真正存储位置的指针
   const int        value_num  = static_cast<int>(inserts.values.size());
   const TableMeta &table_meta = table->table_meta();
   const int        field_num  = table_meta.field_num() - table_meta.sys_field_num();
@@ -46,6 +46,16 @@ RC InsertStmt::create(Db *db, const InsertSqlNode &inserts, Stmt *&stmt)
     LOG_WARN("schema mismatch. value num=%d, field num in schema=%d", value_num, field_num);
     return RC::SCHEMA_FIELD_MISSING;
   }
+
+  LOG_DEBUG("----------------------------------------");
+  for (int i = 0; i < inserts.values.size(); i++) {
+    if (inserts.values[i].is_null()) {
+      LOG_DEBUG("Num %d value in values is null when initializing insert physical operator", i);
+    } else {
+      LOG_DEBUG("Num %d value in values is not null, get %s", i, inserts.values[i].to_string().c_str());
+    }
+  }
+  LOG_DEBUG("----------------------------------------");
 
   // everything alright
   stmt = new InsertStmt(table, values, value_num);

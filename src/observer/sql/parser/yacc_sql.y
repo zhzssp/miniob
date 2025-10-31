@@ -126,6 +126,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         NE
         INNER
         JOIN
+        NULL_T
+        NOT
 
 /** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
 %union {
@@ -146,7 +148,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   vector<string> *                           key_list;
   vector<JoinConditionSqlNode> *             join_condition_list;
   char *                                     cstring;
-  int                                        number;
+  int                                        number;  // 进一步用于null的表示
   float                                      floats;
 }
 
@@ -173,6 +175,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <condition>           condition
 %type <value>               value
 %type <number>              number
+%type <number>              null_spec
 %type <cstring>             relation
 %type <comp>                comp_op
 %type <rel_attr>            rel_attr
@@ -378,23 +381,27 @@ attr_def_list:
       delete $3;
     }
     ;
-    
+
+// 表字段的定义
 attr_def:
-    ID type LBRACE number RBRACE 
+    ID type LBRACE number RBRACE null_spec
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
       $$->length = $4;
+      $$->nullable = ($6 == 1);
     }
-    | ID type
+    | ID type null_spec
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
       $$->length = 4;
+      $$->nullable = ($3 == 1);
     }
     ;
+
 number:
     NUMBER {$$ = $1;}
     ;
@@ -432,7 +439,24 @@ attr_list:
     }
     ;
 
-insert_stmt:        /*insert   语句的语法解析树*/
+null_spec:
+    /* empty */ 
+    {
+      /* 省略时默认允许 NULL */
+      $$ = 1; /* 1 表示 nullable */
+    }
+    | NULL_T 
+    {
+      $$ = 1; /* 明确写 NULL */
+    }
+    | NOT NULL_T
+    {
+      $$ = 0; /* NOT NULL => 不可空 */
+    }
+    ;
+
+
+insert_stmt:        /* insert 语句的语法解析树 --> 暂时只支持一次性插入一个元组 --> 一个Value代表一个字段的值 */
     INSERT INTO ID VALUES LBRACE value_list RBRACE 
     {
       $$ = new ParsedSqlNode(SCF_INSERT);
@@ -455,21 +479,31 @@ value_list:
       delete $3;
     }
     ;
+
+// 表示插入的元组
 value:
     NUMBER {
       $$ = new Value((int)$1);
       @$ = @1;
     }
-    |FLOAT {
+    | FLOAT {
       $$ = new Value((float)$1);
       @$ = @1;
     }
-    |SSS {
+    | SSS {
       char *tmp = common::substr($1,1,strlen($1)-2);
       $$ = new Value(tmp);
       free(tmp);
     }
+    | NULL_T {
+      $$ = new Value(); 
+      /* 其他属性为空 & null = true --> 表示 null  */
+      $$->set_null(true);
+      @$ = @1;
+    }
     ;
+
+
 storage_format:
     /* empty */
     {

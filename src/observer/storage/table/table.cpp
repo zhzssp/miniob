@@ -92,7 +92,7 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
     return RC::IOERR_OPEN;
   }
 
-  // 记录元数据到文件中
+  // 记录元数据到文件中，重启时加载元数据 --> 此时table_meta_的资源所有权不会被转移
   table_meta_.serialize(fs);
   fs.close();
 
@@ -198,7 +198,7 @@ RC Table::open(Db *db, const char *meta_file, const char *base_dir)
   }
   fs.close();
 
-  db_       = db;
+  db_ = db;
 
   // // 加载数据文件
   // RC rc = init_record_handler(base_dir);
@@ -269,22 +269,35 @@ const TableMeta &Table::table_meta() const { return table_meta_; }
 RC Table::make_record(int value_num, const Value *values, Record &record)
 {
   RC rc = RC::SUCCESS;
-  // 检查字段类型是否一致
+  // 检查字段类型是否一致 --> 长度一致
   if (value_num + table_meta_.sys_field_num() != table_meta_.field_num()) {
     LOG_WARN("Input values don't match the table's schema, table name:%s", table_meta_.name());
     return RC::SCHEMA_FIELD_MISSING;
   }
 
+  LOG_INFO("Init record's bitmap, length = %d", table_meta_.field_num());
+  record.init_bitmap(table_meta_.field_num());
+
+  // 不是从第一个字段开始的吗？
   const int normal_field_start_index = table_meta_.sys_field_num();
   // 复制所有字段的值
   int   record_size = table_meta_.record_size();
   char *record_data = (char *)malloc(record_size);
   memset(record_data, 0, record_size);
 
+  /* 根据各个字段的元数据，将一个元组中的Values一项一项记录到record的data指针中 */
   for (int i = 0; i < value_num && OB_SUCC(rc); i++) {
     const FieldMeta *field = table_meta_.field(i + normal_field_start_index);
-    const Value &    value = values[i];
+    const Value     &value = values[i];
+    // 直接让record中，值为null的字段置为0 --> 在record中实现bitmap进行记录即可
+    if(value.is_null()) {
+      LOG_INFO("Num %d value is null, set record's field %s to be null", i, attr_type_to_string(field->type()));
+      record.set_is_null(i);
+      continue;
+    }
+
     if (field->type() != value.attr_type()) {
+      // 类型不符合的时候强行cast过去，比如float --> int
       Value real_value;
       rc = Value::cast_to(value, field->type(), real_value);
       if (OB_FAIL(rc)) {
@@ -292,6 +305,7 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
             table_meta_.name(), field->name(), value.to_string().c_str());
         break;
       }
+      // 将value中的数据指针转移
       rc = set_value_to_record(record_data, real_value, field);
     } else {
       rc = set_value_to_record(record_data, value, field);
@@ -303,6 +317,7 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
     return rc;
   }
 
+  // 将数据指针交由record内部进行管理
   record.set_data_owner(record_data, record_size);
   return RC::SUCCESS;
 }
@@ -312,10 +327,12 @@ RC Table::set_value_to_record(char *record_data, const Value &value, const Field
   size_t       copy_len = field->len();
   const size_t data_len = value.length();
   if (field->type() == AttrType::CHARS) {
+    // 节省空间 --> 不严格按照字段长度设置，读取时不会出现问题吗？
     if (copy_len > data_len) {
       copy_len = data_len + 1;
     }
   }
+  // 复制过去的时候，仍然是按照字段对应的offset进行对齐的 --> 没有用到的地方是0，读取时会自动截断
   memcpy(record_data + field->offset(), value.data(), copy_len);
   return RC::SUCCESS;
 }

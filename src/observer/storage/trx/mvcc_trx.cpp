@@ -126,6 +126,7 @@ RC MvccTrx::insert_record(Table *table, Record &record)
     return rc;
   }
 
+  // 日志记录
   rc = log_handler_.insert_record(trx_id_, table, record.rid());
   ASSERT(rc == RC::SUCCESS, "failed to append insert record log. trx id=%d, table id=%d, rid=%s, record len=%d, rc=%s",
          trx_id_, table->table_id(), record.rid().to_string().c_str(), record.len(), strrc(rc));

@@ -39,6 +39,7 @@ HeapTableEngine::~HeapTableEngine()
 RC HeapTableEngine::insert_record(Record &record)
 {
   RC rc = RC::SUCCESS;
+  // 并没有实质上使用record --> record_file_handler中的接口暂时都还是Unimplemented
   rc    = record_handler_->insert_record(record.data(), table_meta_->record_size(), &record.rid());
   if (rc != RC::SUCCESS) {
     LOG_ERROR("Insert record failed. table name=%s, rc=%s", table_meta_->name(), strrc(rc));
@@ -225,6 +226,7 @@ RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid)
 {
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
+    // BplusTreeIndex::insert_entry --> index_handler_.insert_entry --> 与null无关了
     rc = index->insert_entry(record, &rid);
     if (rc != RC::SUCCESS) {
       break;

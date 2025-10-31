@@ -294,8 +294,15 @@ RC PhysicalPlanGenerator::create_plan(InsertLogicalOperator &insert_oper, unique
 {
   Table                  *table           = insert_oper.table();
   vector<Value>          &values          = insert_oper.values();
+  LOG_DEBUG("----------------------------------------");
+  for(int i = 0; i < values.size(); i++) {
+    if(values[i].is_null()) {
+      LOG_DEBUG("Num %d value in values is null when initializing insert physical operator", i);
+    }
+  }
+  LOG_DEBUG("----------------------------------------");
   InsertPhysicalOperator *insert_phy_oper = new InsertPhysicalOperator(table, std::move(values));
-  oper.reset(insert_phy_oper);
+  oper.reset(insert_phy_oper);  // 转移资源所有权
   return RC::SUCCESS;
 }
 
@@ -557,19 +564,10 @@ RC PhysicalPlanGenerator::create_plan(OrderByLogicalOperator &logical_oper, uniq
   unique_ptr<OrderByPhysicalOperator> order_by_oper;
 
   // 注意: 不能在析构函数之中释放std::move转移过去的观察者指针，否则会造成二次释放 ！
-  // 由于传入了裸指针，所以当OrderByLogicalOperator被析构，智能指针被释放时，裸指针会全部变为悬空指针 ！！！
-  // vector<OrderedUnboundFieldExpr *> raw_ptrs;
-  // raw_ptrs.reserve(order_by_expressions.size());
-  // for (auto &ptr : order_by_expressions) {
-  //   if(ptr == nullptr) {
-  //     LOG_ERROR("Get null order_by_expression when initializing order by physical operator");
-  //     return RC::INVALID_ARGUMENT;
-  //   }
-  //   raw_ptrs.push_back(ptr.get());
-  // }
+  // 之前由于传入了裸指针，所以当OrderByLogicalOperator被析构，智能指针被释放时，裸指针会全部变为悬空指针 ！！！
 
   // 使用expressions初始化physical operator
-  // 兼容聚合函数排序 --> 暂不实现
+  // 兼容聚合函数的排序 --> 暂不实现
   if (order_by_expressions.empty()) {
     LOG_WARN("When initializing order by physical operator in create_plan, cannot find expressions !");
     return RC::SUCCESS;
