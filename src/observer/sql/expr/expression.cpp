@@ -15,6 +15,10 @@ See the Mulan PSL v2 for more details. */
 #include "sql/expr/expression.h"
 #include "sql/expr/tuple.h"
 #include "sql/expr/arithmetic_operator.hpp"
+#include "sql/parser/parse_defs.h"
+#include "sql/operator/physical_operator.h"
+#include "sql/operator/logical_operator.h"
+#include "sql/stmt/select_stmt.h"
 
 using namespace std;
 
@@ -132,6 +136,10 @@ RC CastExpr::try_get_value(Value &result) const
 
 ////////////////////////////////////////////////////////////////////////////////
 
+ComparisonExpr::ComparisonExpr(CompOp comp, Expression *left, Expression *right)
+    : comp_(comp), left_(left), right_(right)
+{}
+
 ComparisonExpr::ComparisonExpr(CompOp comp, unique_ptr<Expression> left, unique_ptr<Expression> right)
     : comp_(comp), left_(std::move(left)), right_(std::move(right))
 {
@@ -205,7 +213,8 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
   }
   rc = right_->get_value(tuple, right_value);
   if (rc != RC::SUCCESS) {
-    LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
+    LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc))
+    ;
     return rc;
   }
 
