@@ -188,37 +188,42 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
   for (unique_ptr<Expression> &expression : select_sql.expressions) {
      // 如果是 UnboundFieldExpr，需要解析表别名
       if (expression->type() == ExprType::UNBOUND_FIELD) {
-       UnboundFieldExpr *field_expr = static_cast<UnboundFieldExpr*>(expression.get());
+        UnboundFieldExpr *field_expr = static_cast<UnboundFieldExpr*>(expression.get());
         LOG_WARN("[expr prebind] UNBOUND_FIELD before: table=\"%s\" field=\"%s\"", 
-                 field_expr->table_name() ? field_expr->table_name() : "", 
-                 field_expr->field_name() ? field_expr->field_name() : "");
+          field_expr->table_name() ? field_expr->table_name() : "", 
+          field_expr->field_name() ? field_expr->field_name() : "");
         if (field_expr->table_name() != nullptr && strlen(field_expr->table_name()) > 0) {
-         // 检查是否是表别名
-         auto it = table_alias_map.find(field_expr->table_name());
-         if (it != table_alias_map.end()) {
-           // 将表别名转换为实际表名
-           field_expr->set_table_name(it->second.c_str());
+          // 本层表别名映射
+          auto it = table_alias_map.find(field_expr->table_name());
+          if (it != table_alias_map.end()) {
+            field_expr->set_table_name(it->second.c_str());
             LOG_WARN("[expr prebind] alias mapped: %s -> %s", it->first.c_str(), it->second.c_str());
-         }
+          } else {
+            // 没有在本层找到，直接用原表名，下一步bind会处理到相关子查询
+          }
         } else if (level_visible_tables.size() == 1) {
-          // 优先使用本层可见表（避免外层表混入）
+          // 只在本层唯一表时允许默认绑定
           const std::string only_name = *level_visible_tables.begin();
           field_expr->set_table_name(only_name.c_str());
           LOG_WARN("[expr prebind] default single visible bind: %s", only_name.c_str());
         } else if (tables.size() == 1) {
-         // 未指定表且仅有一张表时，默认绑定该表
-         field_expr->set_table_name(tables[0]->name());
-         LOG_WARN("[expr prebind] default single table bind: %s", tables[0]->name());
-       } else if (table_alias_map.size() == 1) {
-         // 极端情况：仅通过别名可见（解析产物差异），且只有一个别名
-         const auto &only = *table_alias_map.begin();
-         field_expr->set_table_name(only.second.c_str());
-         LOG_WARN("[expr prebind] default single alias bind: %s -> %s", only.first.c_str(), only.second.c_str());
-       }
-       LOG_WARN("[expr prebind] UNBOUND_FIELD after: table=\"%s\" field=\"%s\"", 
-                field_expr->table_name() ? field_expr->table_name() : "", 
-                field_expr->field_name() ? field_expr->field_name() : "");
-     }
+          field_expr->set_table_name(tables[0]->name());
+          LOG_WARN("[expr prebind] default single table bind: %s", tables[0]->name());
+        } else if (table_alias_map.size() == 1) {
+          const auto &only = *table_alias_map.begin();
+          field_expr->set_table_name(only.second.c_str());
+          LOG_WARN("[expr prebind] default single alias bind: %s -> %s", only.first.c_str(), only.second.c_str());
+        } else {
+          // 多于1表/别名，禁止绑定裸字段
+          std::string tbls; for (auto *t : tables) { if (!tbls.empty()) tbls += ","; tbls += t->name(); }
+          std::string aliases; for (const auto &kv : table_alias_map) { if (!aliases.empty()) aliases += ","; aliases += kv.first + string("->") + kv.second; }
+          LOG_WARN("[expr prebind] ambiguous UNBOUND_FIELD (no default bind): field='%s', multi-table/alias query! tables={%s} aliases={%s}", field_expr->field_name(), tbls.c_str(), aliases.c_str());
+          return RC::SCHEMA_FIELD_NOT_EXIST;
+        }
+        LOG_WARN("[expr prebind] UNBOUND_FIELD after: table=\"%s\" field=\"%s\"", 
+          field_expr->table_name() ? field_expr->table_name() : "", 
+          field_expr->field_name() ? field_expr->field_name() : "");
+      }
     
     RC rc = expression_binder.bind_expression(expression, bound_expressions);
     if (OB_FAIL(rc)) {
@@ -256,6 +261,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
       }
     }
     // 默认绑定未指定表的列（仅一个表时）
+    // 只允许本层唯一表时允许default bind，否则都需要带表名
     if (level_visible_tables.size() == 1) {
       const std::string only_name = *level_visible_tables.begin();
       if (condition.left_is_attr && condition.left_attr.relation_name.empty()) {
@@ -278,6 +284,14 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
       }
       if (condition.right_is_attr && condition.right_attr.relation_name.empty()) {
         condition.right_attr.relation_name = only.second;
+      }
+    } else {
+      if ((condition.left_is_attr && condition.left_attr.relation_name.empty()) ||
+          (condition.right_is_attr && condition.right_attr.relation_name.empty())) {
+        std::string tbls; for (auto *t : tables) { if (!tbls.empty()) tbls += ","; tbls += t->name(); }
+        std::string aliases; for (const auto &kv : table_alias_map) { if (!aliases.empty()) aliases += ","; aliases += kv.first + string("->") + kv.second; }
+        LOG_WARN("[where/join bind] ambiguous attr: left='%s', right='%s', multi-table/alias query! Must specify table/alias. tables={%s} aliases={%s}", condition.left_attr.attribute_name.c_str(), condition.right_attr.attribute_name.c_str(), tbls.c_str(), aliases.c_str());
+        return RC::SCHEMA_FIELD_NOT_EXIST;
       }
     }
     // 如有外层相关列需求，需在表达式阶段处理，这里不创建相关列表达式

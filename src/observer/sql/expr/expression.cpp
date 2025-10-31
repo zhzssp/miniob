@@ -310,76 +310,65 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
       LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
       return rc;
     }
-    
-      // For IN operation, execute the subquery and check if left_value is in the result set
-      bool found = false;
-      
-      // Check if right is actually a SubqueryExpr
-      if (right_->type() != ExprType::SUB_QUERY) {
-        LOG_WARN("IN operation expected SUB_QUERY on right, got type=%d. Treating as not found.", (int)right_->type());
-        value.set_boolean(false);
-        return RC::SUCCESS;
-      }
-      
-      // Get the subquery expression
-      SubqueryExpr* subquery_expr = static_cast<SubqueryExpr*>(right_.get());
-      
-      // 执行子查询并收集所有结果，再做成员检查
-      bool any_equal = false;
-      // 打开子查询物理算子
-      Tuple *outer_tuple_ptr = const_cast<Tuple*>(&tuple);
-      rc = subquery_expr->open_physical_operator(outer_tuple_ptr);
-      if (rc != RC::SUCCESS) {
-        LOG_WARN("IN: failed to open subquery operator. rc=%s", strrc(rc));
-        value.set_boolean(false);
-        return RC::SUCCESS; // 当作不匹配
-      }
-
-      while ((rc = subquery_expr->physical_operator()->next()) == RC::SUCCESS) {
-        auto sub_t = subquery_expr->physical_operator()->current_tuple();
-        if (sub_t->cell_num() == 0) {
-          continue;
-        }
-        Value right_cell;
-        sub_t->cell_at(0, right_cell);
-
-        // 尝试类型对齐后比较
-        Value aligned_left = left_value;
-        Value aligned_right = right_cell;
-        Value casted;
-        if (right_cell.attr_type() != left_value.attr_type()) {
-          if (Value::cast_to(right_cell, left_value.attr_type(), casted) == RC::SUCCESS) {
-            aligned_right = casted;
-          } else if (Value::cast_to(left_value, right_cell.attr_type(), casted) == RC::SUCCESS) {
-            aligned_left = casted;
-          }
-        }
-        // 仅当类型可比较时才比较
-        if ((aligned_left.attr_type() == AttrType::INTS || aligned_left.attr_type() == AttrType::FLOATS || aligned_left.attr_type() == AttrType::CHARS) &&
-            (aligned_right.attr_type() == AttrType::INTS || aligned_right.attr_type() == AttrType::FLOATS || aligned_right.attr_type() == AttrType::CHARS)) {
-          if (aligned_left.compare(aligned_right) == 0) {
-            any_equal = true;
-            // 对 IN 可以提前结束；对 NOT IN 需要遍历完全确认“没有一个相等”，但已发现相等可提前确定为 false
-            if (comp_ == IN_OP) {
-              break;
-            }
-          }
-        }
-      }
-      // 关闭子查询
-      RC close_rc = subquery_expr->close_physical_operator();
-      if (close_rc != RC::SUCCESS) {
-        LOG_WARN("IN: failed to close subquery operator. rc=%s", strrc(close_rc));
-      }
-      if (rc != RC::SUCCESS && rc != RC::RECORD_EOF) {
-        LOG_WARN("IN: subquery execution error. rc=%s", strrc(rc));
-      }
-
-      found = (comp_ == IN_OP) ? any_equal : !any_equal;
-      LOG_WARN("IN: final found=%d (any_equal=%d)", found, any_equal);
-      
-      value.set_boolean(found);
+    LOG_WARN("[IN CHECK] lhs=%s", left_value.to_string().c_str());
+    bool found = false;
+    bool any_equal = false;
+    int sub_count = 0;
+    if (right_->type() != ExprType::SUB_QUERY) {
+      LOG_WARN("IN operation expected SUB_QUERY on right, got type=%d. Treating as not found.", (int)right_->type());
+      value.set_boolean(false);
       return RC::SUCCESS;
+    }
+    SubqueryExpr* subquery_expr = static_cast<SubqueryExpr*>(right_.get());
+    Tuple *outer_tuple_ptr = const_cast<Tuple*>(&tuple);
+    rc = subquery_expr->open_physical_operator(outer_tuple_ptr);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("IN: failed to open subquery operator. rc=%s", strrc(rc));
+      value.set_boolean(false);
+      return RC::SUCCESS;
+    }
+    while ((rc = subquery_expr->physical_operator()->next()) == RC::SUCCESS) {
+      ++sub_count;
+      auto sub_t = subquery_expr->physical_operator()->current_tuple();
+      LOG_WARN("[IN CHECK] subquery row %d, cell_num=%d", sub_count, sub_t ? sub_t->cell_num() : -1);
+      if (!sub_t || sub_t->cell_num() == 0) continue;
+      Value right_cell;
+      sub_t->cell_at(0, right_cell);
+      LOG_WARN("[IN CHECK]   lhs=%s subval=%s", left_value.to_string().c_str(), right_cell.to_string().c_str());
+      Value aligned_left = left_value;
+      Value aligned_right = right_cell;
+      Value casted;
+      if (right_cell.attr_type() != left_value.attr_type()) {
+        if (Value::cast_to(right_cell, left_value.attr_type(), casted) == RC::SUCCESS) {
+          aligned_right = casted;
+        } else if (Value::cast_to(left_value, right_cell.attr_type(), casted) == RC::SUCCESS) {
+          aligned_left = casted;
+        }
+      }
+      if ((aligned_left.attr_type() == AttrType::INTS || aligned_left.attr_type() == AttrType::FLOATS || aligned_left.attr_type() == AttrType::CHARS) &&
+          (aligned_right.attr_type() == AttrType::INTS || aligned_right.attr_type() == AttrType::FLOATS || aligned_right.attr_type() == AttrType::CHARS)) {
+        if (aligned_left.compare(aligned_right) == 0) {
+          any_equal = true;
+          if (comp_ == IN_OP) {
+            found = true;
+            break;
+          }
+        }
+      }
+    }
+    if (sub_count == 0)
+      LOG_WARN("[IN CHECK] subquery yielded no rows!");
+    RC close_rc = subquery_expr->close_physical_operator();
+    if (close_rc != RC::SUCCESS) {
+      LOG_WARN("IN: failed to close subquery operator. rc=%s", strrc(close_rc));
+    }
+    if (rc != RC::SUCCESS && rc != RC::RECORD_EOF) {
+      LOG_WARN("IN: subquery execution error. rc=%s", strrc(rc));
+    }
+    found = (comp_ == IN_OP) ? any_equal : !any_equal;
+    LOG_WARN("[IN CHECK] lhs=%s final found=%d (any_equal=%d) on sub_count=%d", left_value.to_string().c_str(), found, any_equal, sub_count);
+    value.set_boolean(found);
+    return RC::SUCCESS;
   }
   
   Value left_value;

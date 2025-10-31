@@ -116,6 +116,7 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
     filter_unit->set_left(filter_obj);
   } else if (condition.left_expr != nullptr) {
     FilterObj filter_obj;
+    LOG_WARN("[FilterStmt] Creating left filter_obj from expression, expr=%p, expr_type=%d", condition.left_expr, (int)condition.left_expr->type());
     filter_obj.init_expression(condition.left_expr->copy().release());
     filter_unit->set_left(filter_obj);
   } else {
@@ -136,11 +137,9 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
     filter_obj.init_attr(Field(table, field));
     filter_unit->set_right(filter_obj);
   } else if (condition.right_expr != nullptr) {
-    LOG_WARN("Creating FilterObj from condition.right_expr, type=%d", (int)condition.right_expr->type());
     FilterObj filter_obj;
-    auto copied_expr = condition.right_expr->copy();
-    filter_obj.init_expression(copied_expr.release());
-    LOG_WARN("Created FilterObj from expression, is_expr=%d, is_attr=%d", filter_obj.is_expr, filter_obj.is_attr);
+    LOG_WARN("[FilterStmt] Creating right filter_obj from expression, expr=%p, expr_type=%d", condition.right_expr, (int)condition.right_expr->type());
+    filter_obj.init_expression(condition.right_expr->copy().release());
     filter_unit->set_right(filter_obj);
   } else {
     LOG_WARN("Creating FilterObj from condition.right_value");
