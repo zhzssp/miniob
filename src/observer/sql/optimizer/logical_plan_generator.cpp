@@ -211,7 +211,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       }
     }
   }
-  
+
 
   if (predicate_oper) {
     if (*last_oper) {
@@ -303,7 +303,7 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
     
     if (has_subquery) {
       LOG_WARN("Found subquery in filter, skipping type check. left_type=%d, right_type=%d", 
-               (int)left->type(), (int)right->type());
+                (int)left->type(), (int)right->type());
     }
     
     if (!has_subquery && left->value_type() != right->value_type()) {
