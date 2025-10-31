@@ -18,7 +18,6 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/aggregate_vec_physical_operator.h"
 #include "sql/operator/calc_logical_operator.h"
 #include "sql/operator/calc_physical_operator.h"
-#include "sql/operator/predicate_logical_operator.h"
 #include "sql/operator/delete_logical_operator.h"
 #include "sql/operator/delete_physical_operator.h"
 #include "sql/operator/explain_logical_operator.h"
@@ -43,10 +42,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/hash_group_by_physical_operator.h"
 #include "sql/operator/scalar_group_by_physical_operator.h"
 #include "sql/operator/table_scan_vec_physical_operator.h"
-#include "sql/operator/update_logical_operator.h"
-#include "sql/operator/update_physical_operator.h"
 #include "sql/optimizer/physical_plan_generator.h"
-#include "sql/operator/hash_join_physical_operator.h"
 
 using namespace std;
 
@@ -79,9 +75,9 @@ RC PhysicalPlanGenerator::create(LogicalOperator &logical_operator, unique_ptr<P
       return create_plan(static_cast<DeleteLogicalOperator &>(logical_operator), oper, session);
     } break;
 
-    case LogicalOperatorType::UPDATE: {
-      return create_plan(static_cast<UpdateLogicalOperator &>(logical_operator), oper, session);
-    } break;
+    // case LogicalOperatorType::UPDATE: {
+    //   return create_plan(static_cast<UpdateLogicalOperator &>(logical_operator), oper, session);
+    // } break;
 
     case LogicalOperatorType::EXPLAIN: {
       return create_plan(static_cast<ExplainLogicalOperator &>(logical_operator), oper, session);
@@ -304,30 +300,30 @@ RC PhysicalPlanGenerator::create_plan(DeleteLogicalOperator &delete_oper, unique
   return rc;
 }
 
-RC PhysicalPlanGenerator::create_plan(UpdateLogicalOperator &update_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
-{
-  vector<unique_ptr<LogicalOperator>> &child_opers = update_oper.children();
+// RC PhysicalPlanGenerator::create_plan(UpdateLogicalOperator &update_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
+// {
+//   vector<unique_ptr<LogicalOperator>> &child_opers = update_oper.children();
 
-  unique_ptr<PhysicalOperator> child_physical_oper;
+//   unique_ptr<PhysicalOperator> child_physical_oper;
 
-  RC rc = RC::SUCCESS;
-  if (!child_opers.empty()) {
-    LogicalOperator *child_oper = child_opers.front().get();
+//   RC rc = RC::SUCCESS;
+//   if (!child_opers.empty()) {
+//     LogicalOperator *child_oper = child_opers.front().get();
 
-    rc = create(*child_oper, child_physical_oper, session);
-    if (rc != RC::SUCCESS) {
-      LOG_WARN("failed to create physical operator. rc=%s", strrc(rc));
-      return rc;
-    }
-  }
+//     rc = create(*child_oper, child_physical_oper, session);
+//     if (rc != RC::SUCCESS) {
+//       LOG_WARN("failed to create physical operator. rc=%s", strrc(rc));
+//       return rc;
+//     }
+//   }
 
-  oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(update_oper.table(), update_oper.attribute_name(), update_oper.value()));
+//   oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(update_oper.table(), update_oper.attribute_name(), update_oper.value()));
 
-  if (child_physical_oper) {
-    oper->add_child(std::move(child_physical_oper));
-  }
-  return rc;
-}
+//   if (child_physical_oper) {
+//     oper->add_child(std::move(child_physical_oper));
+//   }
+//   return rc;
+// }
 
 RC PhysicalPlanGenerator::create_plan(ExplainLogicalOperator &explain_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
@@ -360,104 +356,8 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
     LOG_WARN("join operator should have 2 children, but have %d", child_opers.size());
     return RC::INTERNAL;
   }
-  //LOG_INFO("Session hash_join_on: %s", session->hash_join_on() ? "true" : "false");
   if (session->hash_join_on() && can_use_hash_join(join_oper)) {
-    //LOG_INFO("Using Hash Join for this query");
-    // 创建哈希连接操作符
-    unique_ptr<HashJoinPhysicalOperator> hash_join_oper(new HashJoinPhysicalOperator());
-    
-    // 智能选择 JOIN 字段 - 找到与当前 JOIN 相关的等值条件
-    const auto &join_predicates = join_oper.get_join_predicates();
-    
-    for (const auto &predicate : join_predicates) {
-      auto *comp_expr = dynamic_cast<ComparisonExpr*>(predicate.get());
-      if (comp_expr != nullptr && comp_expr->comp() == CompOp::EQUAL_TO) {
-        auto *left_field = dynamic_cast<FieldExpr*>(comp_expr->left().get());
-        auto *right_field = dynamic_cast<FieldExpr*>(comp_expr->right().get());
-        if (left_field != nullptr && right_field != nullptr) {
-          // 检查字段是否与当前 JOIN 相关
-          const char *left_table = left_field->field().table_name();
-          const char *right_table = right_field->field().table_name();
-          
-          
-          // 获取当前 JOIN 的子操作符
-          const auto &children = join_oper.children();
-          if (children.size() >= 2) {
-            // 检查字段来源：是否分别来自左/右子树
-            bool left_from_left = false;
-            bool right_from_right = false;
-            bool left_from_right = false;
-            bool right_from_left = false;
-
-            // 检查左子树（可能是单个表或之前 JOIN 的结果）
-            if (children[0]->type() == LogicalOperatorType::TABLE_GET) {
-              auto *left_table_get = dynamic_cast<TableGetLogicalOperator*>(children[0].get());
-              if (left_table_get != nullptr) {
-                const char *lt_name = left_table_get->table()->name();
-                if (strcmp(lt_name, left_table) == 0) {
-                  left_from_left = true;
-                }
-                if (strcmp(lt_name, right_table) == 0) {
-                  right_from_left = true;
-                }
-              }
-            } else if (children[0]->type() == LogicalOperatorType::JOIN) {
-              // 左子树是 JOIN 结果，保守认为可能包含两侧字段
-              left_from_left = true;
-              right_from_left = true;
-            }
-
-            // 检查右子树（当前表）
-            if (children[1]->type() == LogicalOperatorType::TABLE_GET) {
-              auto *right_table_get = dynamic_cast<TableGetLogicalOperator*>(children[1].get());
-              if (right_table_get != nullptr) {
-                const char *rt_name = right_table_get->table()->name();
-                if (strcmp(rt_name, right_table) == 0) {
-                  right_from_right = true;
-                }
-                if (strcmp(rt_name, left_table) == 0) {
-                  left_from_right = true;
-                }
-              }
-            }
-
-
-            // 顺序匹配：左字段来自左子树，右字段来自右子树
-            if (left_from_left && right_from_right) {
-              hash_join_oper->set_join_fields(left_field, right_field);
-              break;
-            }
-            // 反向匹配：左字段来自右子树，右字段来自左子树 -> 交换
-            if (left_from_right && right_from_left) {
-              hash_join_oper->set_join_fields(right_field, left_field);
-              break;
-            }
-          }
-        }
-      }
-    }
-    
-    // 设置过滤条件 - 从 JoinLogicalOperator 的 predicate_op_ 中获取
-    auto *predicate_op = join_oper.get_predicate_op();
-    if (predicate_op != nullptr) {
-      auto *predicate_oper = dynamic_cast<PredicateLogicalOperator*>(predicate_op);
-      if (predicate_oper != nullptr) {
-        hash_join_oper->set_filter_expressions(predicate_oper->expressions());
-      }
-    }
-    
-    for (auto &child_oper : child_opers) {
-      unique_ptr<PhysicalOperator> child_physical_oper;
-      rc = create(*child_oper, child_physical_oper, session);
-      if (rc != RC::SUCCESS) {
-        LOG_WARN("failed to create physical child oper. rc=%s", strrc(rc));
-        return rc;
-      }
-      hash_join_oper->add_child(std::move(child_physical_oper));
-    }
-    
-    oper = std::move(hash_join_oper);
-    //LOG_INFO("Created HashJoinPhysicalOperator");
+    // your code here
   } else {
     unique_ptr<PhysicalOperator> join_physical_oper(new NestedLoopJoinPhysicalOperator());
     for (auto &child_oper : child_opers) {
@@ -478,13 +378,8 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
 
 bool PhysicalPlanGenerator::can_use_hash_join(JoinLogicalOperator &join_oper)
 {
-  //LOG_INFO("Checking if can use hash join...");
-  
-  // 总是使用 Hash Join，因为它可以处理所有情况：
-  // 1. 等值条件：使用正常的 Hash Join 算法
-  // 2. 非等值条件：退化为 Nested Loop Join 行为
-  // 3. 混合条件：Hash Join + 过滤
-  return true;
+  // your code here
+  return false;
 }
 
 RC PhysicalPlanGenerator::create_plan(CalcLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session* session)

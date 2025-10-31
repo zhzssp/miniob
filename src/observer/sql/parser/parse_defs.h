@@ -64,43 +64,10 @@ enum CompOp
  */
 struct ConditionSqlNode
 {
-  int left_is_attr;              ///< TRUE if left-hand side is an attribute
-                                 ///< 1时，操作符左边是属性名，0时，是属性值
-  Value          left_value;     ///< left-hand side value if left_is_attr = FALSE
-  RelAttrSqlNode left_attr;      ///< left-hand side attribute
-  CompOp         comp;           ///< comparison operator
-  int            right_is_attr;  ///< TRUE if right-hand side is an attribute
-                                 ///< 1时，操作符右边是属性名，0时，是属性值
-  RelAttrSqlNode right_attr;     ///< right-hand side attribute if right_is_attr = TRUE 右边的属性
-  Value          right_value;    ///< right-hand side value if right_is_attr = FALSE
-};
-
-
-/**
- * @brief 描述一个 JOIN 条件
- * @ingroup SQLParser
- */
-struct JoinConditionSqlNode
-{
-  int left_is_attr;              ///< TRUE if left-hand side is an attribute
-  RelAttrSqlNode left_attr;      ///< 左表属性 (if left_is_attr = true)
-  Value left_value;              ///< 左表值 (if left_is_attr = false)
-  int right_is_attr;             ///< TRUE if right-hand side is an attribute
-  RelAttrSqlNode right_attr;     ///< 右表属性 (if right_is_attr = true)
-  Value right_value;             ///< 右表值 (if right_is_attr = false)
-  CompOp comp;                   ///< 比较操作符
-};
-
-/**
- * @brief 描述一个表引用（可能是表名或子查询）
- * @ingroup SQLParser
- */
-struct TableReferenceSqlNode
-{
-  string table_name;                    ///< 表名
-  string alias;                         ///< 表别名
-  vector<JoinConditionSqlNode> join_conditions;  ///< JOIN 条件
-  bool is_join;                         ///< 是否为 JOIN 操作
+  std::unique_ptr<Expression> left_expr;  // 任意表达式
+  std::unique_ptr<Expression> right_expr;   // 任意表达式
+  CompOp comp_op;                          // 比较操作符
+  char conjunction_type = 0;
 };
 
 /**
@@ -117,8 +84,7 @@ struct TableReferenceSqlNode
 struct SelectSqlNode
 {
   vector<unique_ptr<Expression>> expressions;  ///< 查询的表达式
-  vector<string>                 relations;    ///< 查询的表（保持向后兼容）
-  vector<TableReferenceSqlNode>  table_references;  ///< 表引用（支持 JOIN）
+  vector<string>                 relations;    ///< 查询的表
   vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件
   vector<unique_ptr<Expression>> group_by;     ///< group by clause
 };

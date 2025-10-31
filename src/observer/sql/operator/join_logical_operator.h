@@ -29,7 +29,6 @@ public:
 
   LogicalOperatorType type() const override { return LogicalOperatorType::JOIN; }
   void                add_predicate_op(LogicalOperator *predicate_op) { predicate_op_ = predicate_op; }
-  LogicalOperator*    get_predicate_op() const { return predicate_op_; }
   auto                predicates() -> Expression *
   {
     if (predicate_op_ != nullptr && predicate_op_->expressions().size() == 1) {

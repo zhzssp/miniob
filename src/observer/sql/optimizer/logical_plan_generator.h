@@ -27,8 +27,6 @@ class DeleteStmt;
 class UpdateStmt;
 class ExplainStmt;
 class LogicalOperator;
-class FilterObj;
-class Expression;
 
 class LogicalPlanGenerator
 {
@@ -50,8 +48,4 @@ private:
   RC create_group_by_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator);
 
   int implicit_cast_cost(AttrType from, AttrType to);
-
-private:
-  // 辅助方法：将 FilterObj 转换为 Expression
-  static unique_ptr<Expression> create_expression_from_filter_obj(const FilterObj &filter_obj);
 };

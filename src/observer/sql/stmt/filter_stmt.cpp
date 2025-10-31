@@ -18,117 +18,168 @@ See the Mulan PSL v2 for more details. */
 #include "common/sys/rc.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
+#include "sql/parser/expression_binder.h"
 
 FilterStmt::~FilterStmt()
 {
-  for (FilterUnit *unit : filter_units_) {
-    delete unit;
-  }
-  filter_units_.clear();
+  conditions_.clear();
 }
 
-RC FilterStmt::create(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
-    const ConditionSqlNode *conditions, int condition_num, FilterStmt *&stmt)
+RC FilterStmt::create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
+  std::vector<ConditionSqlNode> &conditions, FilterStmt *&stmt)
 {
+  // default_table 没有使用
   RC rc = RC::SUCCESS;
   stmt  = nullptr;
 
-  FilterStmt *tmp_stmt = new FilterStmt();
-  for (int i = 0; i < condition_num; i++) {
-    FilterUnit *filter_unit = nullptr;
+  // 从 ConditionSqlNode 创建 ComparisonExpr 和 LikeExpr
+  vector<unique_ptr<Expression>> conditions_exprs;
+  for (auto &condition : conditions) {
+    switch (condition.comp_op) {
+      case CompOp::EQUAL_TO:
+      case CompOp::LESS_EQUAL:
+      case CompOp::NOT_EQUAL:
+      case CompOp::LESS_THAN:
+      case CompOp::GREAT_EQUAL:
+      case CompOp::GREAT_THAN: {
+        // hint: 子查询会加入到这其中的一个 expr
+        conditions_exprs.emplace_back(
+            new ComparisonExpr(condition.comp_op, std::move(condition.left_expr), std::move(condition.right_expr)));
+      } break;
+      default: {
+        LOG_WARN("unsupported condition operator. comp_op=%d", condition.comp_op);
+        return RC::INVALID_ARGUMENT;
+      }
+    }
+  }
 
-    rc = create_filter_unit(db, default_table, tables, conditions[i], filter_unit);
+  // 绑定表达式
+  BinderContext binder_context;
+  for (auto &table : *tables) {
+    binder_context.add_table(table.second);
+  }
+  ExpressionBinder expression_binder(binder_context);
+
+  vector<unique_ptr<Expression>> bound_conditions;
+
+  auto *tmp_stmt = new FilterStmt();
+  for (size_t i = 0; i < conditions.size(); i++) {
+    // 把连接符加入到 conjunction_types_ 中，用于后续的条件连接
+    tmp_stmt->conjunction_types_.push_back(conditions[i].conjunction_type);
+    RC rc = expression_binder.bind_expression(conditions_exprs[i], bound_conditions);
     if (rc != RC::SUCCESS) {
       delete tmp_stmt;
       LOG_WARN("failed to create filter unit. condition index=%d", i);
       return rc;
     }
-    tmp_stmt->filter_units_.push_back(filter_unit);
   }
+
+  tmp_stmt->conditions_.swap(bound_conditions);
 
   stmt = tmp_stmt;
   return rc;
 }
 
-RC get_table_and_field(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
-    const RelAttrSqlNode &attr, Table *&table, const FieldMeta *&field)
-{
-  
-  if (common::is_blank(attr.relation_name.c_str())) {
-    table = default_table;
-  } else if (nullptr != tables) {
-    auto iter = tables->find(attr.relation_name);
-    if (iter != tables->end()) {
-      table = iter->second;
-    } else {
-    }
-  } else {
-    table = db->find_table(attr.relation_name.c_str());
-  }
-  if (nullptr == table) {
-    LOG_WARN("No such table: attr.relation_name: %s", attr.relation_name.c_str());
-    return RC::SCHEMA_TABLE_NOT_EXIST;
-  }
+// RC FilterStmt::create(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
+//     const ConditionSqlNode *conditions, int condition_num, FilterStmt *&stmt)
+// {
+//   RC rc = RC::SUCCESS;
+//   stmt  = nullptr;
 
-  field = table->table_meta().field(attr.attribute_name.c_str());
-  if (nullptr == field) {
-    LOG_WARN("no such field in table: table %s, field %s", table->name(), attr.attribute_name.c_str());
-    table = nullptr;
-    return RC::SCHEMA_FIELD_NOT_EXIST;
-  }
+//   FilterStmt *tmp_stmt = new FilterStmt();
+//   for (int i = 0; i < condition_num; i++) {
+//     FilterUnit *filter_unit = nullptr;
 
-  return RC::SUCCESS;
-}
+//     rc = create_filter_unit(db, default_table, tables, conditions[i], filter_unit);
+//     if (rc != RC::SUCCESS) {
+//       delete tmp_stmt;
+//       LOG_WARN("failed to create filter unit. condition index=%d", i);
+//       return rc;
+//     }
+//     tmp_stmt->filter_units_.push_back(filter_unit);
+//   }
 
-RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
-    const ConditionSqlNode &condition, FilterUnit *&filter_unit)
-{
-  RC rc = RC::SUCCESS;
+//   stmt = tmp_stmt;
+//   return rc;
+// }
 
-  CompOp comp = condition.comp;
-  if (comp < EQUAL_TO || comp >= NO_OP) {
-    LOG_WARN("invalid compare operator : %d", comp);
-    return RC::INVALID_ARGUMENT;
-  }
+// RC get_table_and_field(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
+//     const RelAttrSqlNode &attr, Table *&table, const FieldMeta *&field)
+// {
+//   if (common::is_blank(attr.relation_name.c_str())) {
+//     table = default_table;
+//   } else if (nullptr != tables) {
+//     auto iter = tables->find(attr.relation_name);
+//     if (iter != tables->end()) {
+//       table = iter->second;
+//     }
+//   } else {
+//     table = db->find_table(attr.relation_name.c_str());
+//   }
+//   if (nullptr == table) {
+//     LOG_WARN("No such table: attr.relation_name: %s", attr.relation_name.c_str());
+//     return RC::SCHEMA_TABLE_NOT_EXIST;
+//   }
 
-  filter_unit = new FilterUnit;
+//   field = table->table_meta().field(attr.attribute_name.c_str());
+//   if (nullptr == field) {
+//     LOG_WARN("no such field in table: table %s, field %s", table->name(), attr.attribute_name.c_str());
+//     table = nullptr;
+//     return RC::SCHEMA_FIELD_NOT_EXIST;
+//   }
 
-  if (condition.left_is_attr) {
-    Table           *table = nullptr;
-    const FieldMeta *field = nullptr;
-    rc                     = get_table_and_field(db, default_table, tables, condition.left_attr, table, field);
-    if (rc != RC::SUCCESS) {
-      LOG_WARN("cannot find attr");
-      return rc;
-    }
-    FilterObj filter_obj;
-    filter_obj.init_attr(Field(table, field));
-    filter_unit->set_left(filter_obj);
-  } else {
-    FilterObj filter_obj;
-    filter_obj.init_value(condition.left_value);
-    filter_unit->set_left(filter_obj);
-  }
+//   return RC::SUCCESS;
+// }
 
-  if (condition.right_is_attr) {
-    Table           *table = nullptr;
-    const FieldMeta *field = nullptr;
-    rc                     = get_table_and_field(db, default_table, tables, condition.right_attr, table, field);
-    if (rc != RC::SUCCESS) {
-      LOG_WARN("cannot find attr");
-      return rc;
-    }
-    FilterObj filter_obj;
-    filter_obj.init_attr(Field(table, field));
-    filter_unit->set_right(filter_obj);
-  } else {
-    FilterObj filter_obj;
-    filter_obj.init_value(condition.right_value);
-    filter_unit->set_right(filter_obj);
-  }
+// RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
+//     const ConditionSqlNode &condition, FilterUnit *&filter_unit)
+// {
+//   RC rc = RC::SUCCESS;
 
-  filter_unit->set_comp(comp);
+//   CompOp comp = condition.comp;
+//   if (comp < EQUAL_TO || comp >= NO_OP) {
+//     LOG_WARN("invalid compare operator : %d", comp);
+//     return RC::INVALID_ARGUMENT;
+//   }
 
-  // 检查两个类型是否能够比较
-  return rc;
-}
+//   filter_unit = new FilterUnit;
+
+//   if (condition.left_is_attr) {
+//     Table           *table = nullptr;
+//     const FieldMeta *field = nullptr;
+//     rc                     = get_table_and_field(db, default_table, tables, condition.left_attr, table, field);
+//     if (rc != RC::SUCCESS) {
+//       LOG_WARN("cannot find attr");
+//       return rc;
+//     }
+//     FilterObj filter_obj;
+//     filter_obj.init_attr(Field(table, field));
+//     filter_unit->set_left(filter_obj);
+//   } else {
+//     FilterObj filter_obj;
+//     filter_obj.init_value(condition.left_value);
+//     filter_unit->set_left(filter_obj);
+//   }
+
+//   if (condition.right_is_attr) {
+//     Table           *table = nullptr;
+//     const FieldMeta *field = nullptr;
+//     rc                     = get_table_and_field(db, default_table, tables, condition.right_attr, table, field);
+//     if (rc != RC::SUCCESS) {
+//       LOG_WARN("cannot find attr");
+//       return rc;
+//     }
+//     FilterObj filter_obj;
+//     filter_obj.init_attr(Field(table, field));
+//     filter_unit->set_right(filter_obj);
+//   } else {
+//     FilterObj filter_obj;
+//     filter_obj.init_value(condition.right_value);
+//     filter_unit->set_right(filter_obj);
+//   }
+
+//   filter_unit->set_comp(comp);
+
+//   // 检查两个类型是否能够比较
+//   return rc;
+// }

@@ -29,11 +29,6 @@ SelectStmt::~SelectStmt()
     delete filter_stmt_;
     filter_stmt_ = nullptr;
   }
-  
-  if (nullptr != join_filter_stmt_) {
-    delete join_filter_stmt_;
-    join_filter_stmt_ = nullptr;
-  }
 }
 
 RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
@@ -48,8 +43,6 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   // collect tables in `from` statement
   vector<Table *>                tables;
   unordered_map<string, Table *> table_map;
-  
-  // 处理传统的 relations（向后兼容）
   for (size_t i = 0; i < select_sql.relations.size(); i++) {
     const char *table_name = select_sql.relations[i].c_str();
     if (nullptr == table_name) {
@@ -66,35 +59,6 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     binder_context.add_table(table);
     tables.push_back(table);
     table_map.insert({table_name, table});
-  }
-  
-  // 处理新的 table_references（支持 JOIN）
-  for (const auto &table_ref : select_sql.table_references) {
-    const char *table_name = table_ref.table_name.c_str();
-    if (nullptr == table_name) {
-      LOG_WARN("invalid argument. table name is null");
-      return RC::INVALID_ARGUMENT;
-    }
-
-    // 检查表是否已经存在，避免重复添加
-    if (table_map.find(table_name) != table_map.end()) {
-      //LOG_INFO("Table %s already exists, skipping duplicate", table_name);
-      continue;
-    }
-
-    Table *table = db->find_table(table_name);
-    if (nullptr == table) {
-      LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
-      return RC::SCHEMA_TABLE_NOT_EXIST;
-    }
-
-    binder_context.add_table(table);
-    tables.push_back(table);
-    table_map.insert({table_name, table});
-    
-    // 处理 JOIN 条件
-    if (table_ref.is_join && !table_ref.join_conditions.empty()) {
-    }
   }
 
   // collect query fields in `select` statement
@@ -125,68 +89,18 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
   // create filter statement in `where` statement
   FilterStmt *filter_stmt = nullptr;
-  RC          rc          = FilterStmt::create(db,
-      default_table,
-      &table_map,
-      select_sql.conditions.data(),
-      static_cast<int>(select_sql.conditions.size()),
-      filter_stmt);
+  RC          rc          = FilterStmt::create(db, default_table, &table_map, select_sql.conditions, filter_stmt);
   if (rc != RC::SUCCESS) {
     LOG_WARN("cannot construct filter stmt");
     return rc;
-  }
-
-  // 处理 JOIN 条件
-  FilterStmt *join_filter_stmt = nullptr;
-  vector<FilterStmt*> table_join_filters; // 临时存储，稍后设置到 SelectStmt 对象中
-  
-  if (!select_sql.table_references.empty()) {
-    // 收集所有 JOIN 条件到一个全局的 FilterStmt 中
-    vector<ConditionSqlNode> all_join_conditions;
-    for (const auto &table_ref : select_sql.table_references) {
-      if (table_ref.is_join && !table_ref.join_conditions.empty()) {
-        for (const auto &join_cond : table_ref.join_conditions) {
-          ConditionSqlNode condition;
-          condition.left_is_attr = join_cond.left_is_attr;
-          condition.left_attr = join_cond.left_attr;
-          condition.left_value = join_cond.left_value;
-          condition.right_is_attr = join_cond.right_is_attr;
-          condition.right_attr = join_cond.right_attr;
-          condition.right_value = join_cond.right_value;
-          condition.comp = join_cond.comp;
-          all_join_conditions.push_back(condition);
-        }
-      }
-    }
-    
-    // 创建全局的 JOIN 条件过滤器
-    if (!all_join_conditions.empty()) {
-      rc = FilterStmt::create(db,
-          default_table,
-          &table_map,
-          all_join_conditions.data(),
-          static_cast<int>(all_join_conditions.size()),
-          join_filter_stmt);
-      if (rc != RC::SUCCESS) {
-        LOG_WARN("cannot construct join filter stmt");
-        return rc;
-      }
-    }
-    
-    // 为每个表创建空的 JOIN 条件过滤器（保持接口兼容性）
-    for (size_t k = 0; k < select_sql.table_references.size(); k++) {
-      table_join_filters.push_back(nullptr);
-    }
   }
 
   // everything alright
   SelectStmt *select_stmt = new SelectStmt();
 
   select_stmt->tables_.swap(tables);
-  select_stmt->table_join_filters_.swap(table_join_filters);
   select_stmt->query_expressions_.swap(bound_expressions);
   select_stmt->filter_stmt_ = filter_stmt;
-  select_stmt->join_filter_stmt_ = join_filter_stmt;
   select_stmt->group_by_.swap(group_by_expressions);
   stmt                      = select_stmt;
   return RC::SUCCESS;
