@@ -230,6 +230,7 @@ RC Table::open(Db *db, const char *meta_file, const char *base_dir)
 
 RC Table::insert_record(Record &record)
 {
+  LOG_TRACE("Table::insert_record() is called");
   return engine_->insert_record(record);
 }
 
@@ -280,20 +281,31 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
 
   // 不是从第一个字段开始的吗？
   const int normal_field_start_index = table_meta_.sys_field_num();
-  // 复制所有字段的值
-  int   record_size = table_meta_.record_size();
+  // 复制所有字段的值 --> 应当把bitmap在这里一同持久化保存
+  int   fields_record_size = table_meta_.fields_record_size();
+  int   bitmap_record_size = table_meta_.bitmap_record_size();
+  int          record_size = fields_record_size + bitmap_record_size;
   char *record_data = (char *)malloc(record_size);
   memset(record_data, 0, record_size);
+
+  LOG_DEBUG("bitmap size = %d, field_num * sizeof bool = %d", bitmap_record_size, table_meta_.field_num());
+  assert(bitmap_record_size == sizeof(bool) * table_meta_.field_num());  // 确认定义没问题
+  // 暂时使用bool数组 --> 可以进一步优化为bitmap
+  bool tmp[table_meta_.field_num()];
 
   /* 根据各个字段的元数据，将一个元组中的Values一项一项记录到record的data指针中 */
   for (int i = 0; i < value_num && OB_SUCC(rc); i++) {
     const FieldMeta *field = table_meta_.field(i + normal_field_start_index);
     const Value     &value = values[i];
-    // 直接让record中，值为null的字段置为0 --> 在record中实现bitmap进行记录即可
+    
+    // 值为null的字段不做更改，保持全0 --> 在record中实现bitmap进行记录 --> 持久化存储到元组数据的最后
     if(value.is_null()) {
       LOG_INFO("Num %d value is null, set record's field %s to be null", i, attr_type_to_string(field->type()));
       record.set_is_null(i);
+      tmp[i] = true;
       continue;
+    } else {
+      tmp[i] = false;
     }
 
     if (field->type() != value.attr_type()) {
@@ -316,6 +328,8 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
     free(record_data);
     return rc;
   }
+
+  memcpy(record_data + fields_record_size, tmp, bitmap_record_size);
 
   // 将数据指针交由record内部进行管理
   record.set_data_owner(record_data, record_size);

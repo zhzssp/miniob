@@ -38,10 +38,22 @@ RC TableScanPhysicalOperator::next()
     LOG_ERROR("In table_scan_physical_operator, record_scanner_ is nullptr");
     return RC::INTERNAL;
   }
-  // 这里next出问题 ？
+  // 这里next出问题 ？--> record在从底下读出来时，是否没有bitmap的信息了？
   while (OB_SUCC(rc = record_scanner_->next(current_record_))) {
     LOG_TRACE("got a record. rid=%s", current_record_.rid().to_string().c_str());
-    
+
+    // 重新获取vector<bool> is_null_信息
+    const TableMeta &table_meta = table_->table_meta();
+    LOG_INFO("Initialize bitmap of length %d in TableScannerPhysicalOperator::next()", table_meta.field_num());
+    current_record_.init_bitmap(table_meta.field_num());
+
+    bool *null_bitmap = reinterpret_cast<bool *>(current_record_.data() + table_meta.fields_record_size());
+    for(int i = 0; i < table_meta.bitmap_record_size() / sizeof(bool); i++) {
+      if(null_bitmap[i]) {
+        current_record_.set_is_null(i);
+      }
+    }
+
     // 将从表中读取到的记录, 以元组格式进行保存
     tuple_.set_record(&current_record_);
     rc = filter(tuple_, filter_result);

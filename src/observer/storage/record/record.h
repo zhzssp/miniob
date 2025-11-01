@@ -194,7 +194,13 @@ public:
   void init_bitmap(int len) { 
     is_null_ = vector<bool>(len, false);
   }
-  void set_is_null(int index) { is_null_[index] = true; }
+  void set_is_null(int index) {
+    if (index < 0 || index >= is_null_.size()) {
+      LOG_WARN("Record::set_is_null() out of range, return directly !");
+      return;
+    }
+    is_null_[index] = true; 
+  }
 
   RC copy_data(const char *data, int len)
   {
@@ -267,7 +273,13 @@ public:
   const RID    &rid() const { return rid_; }
   void          set_key(const string &key) { key_ = key; }
   const string &key() const { return key_; }
-  bool is_null(int index) const { return is_null_[index]; }
+  bool is_null(int index) const {
+    if (index < 0 || index >= is_null_.size()) {
+      LOG_WARN("Record::is_null() out of range !");
+      return false;
+    }
+    return is_null_[index]; 
+  }
 
 private:
   RID    rid_;

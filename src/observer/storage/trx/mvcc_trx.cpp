@@ -113,6 +113,7 @@ MvccTrx::~MvccTrx() {}
 
 RC MvccTrx::insert_record(Table *table, Record &record)
 {
+  LOG_TRACE("MvccTrx::insert_record() is called");
   Field begin_field;
   Field end_field;
   trx_fields(table, begin_field, end_field);

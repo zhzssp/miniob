@@ -200,10 +200,11 @@ public:
     if(!record_->is_null(index)) {
       // 非null的情况
       // 严格使用field_meta中记录的字段offset，来获取目标字段上数据的指针
+      // 在调用Tuple::to_string时，is_null_已经设置好
       cell.set_data(this->record_->data() + field_meta->offset(), field_meta->len());
       cell.set_null(false);
     } else {
-      cell.set_data(static_cast<char *>(nullptr), 0);
+      // cell.set_data(static_cast<char *>(nullptr), 0);
       cell.set_null(true);
     }
     return RC::SUCCESS;

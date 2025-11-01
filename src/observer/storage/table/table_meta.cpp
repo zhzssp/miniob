@@ -29,6 +29,8 @@ static const Json::StaticString FIELD_FIELDS("fields");
 static const Json::StaticString FIELD_INDEXES("indexes");
 static const Json::StaticString FIELD_PRIMARY_KEYS("primary_keys");
 static const Json::StaticString FIELD_NULLABLE("nullable");
+static const Json::StaticString FIELD_FIELDS_RECORD_SIZE("fields_record_size");
+static const Json::StaticString FIELD_BITMAP_RECORD_SIZE("bitmap_record_size");
 
 TableMeta::TableMeta(const TableMeta &other)
     : table_id_(other.table_id_),
@@ -38,7 +40,9 @@ TableMeta::TableMeta(const TableMeta &other)
       indexes_(other.indexes_),
       storage_format_(other.storage_format_),
       storage_engine_(other.storage_engine_),
-      record_size_(other.record_size_)
+      record_size_(other.record_size_),
+      fields_record_size_(other.fields_record_size_),
+      bitmap_record_size_(other.bitmap_record_size_)
 {}
 
 void TableMeta::swap(TableMeta &other) noexcept
@@ -48,6 +52,8 @@ void TableMeta::swap(TableMeta &other) noexcept
   indexes_.swap(other.indexes_);
   nullable_.swap(other.nullable_);
   std::swap(record_size_, other.record_size_);
+  std::swap(fields_record_size_, other.fields_record_size_);
+  std::swap(bitmap_record_size_, other.bitmap_record_size_);
 }
 
 RC TableMeta::init(int32_t table_id, const char *name, const vector<FieldMeta> *trx_fields,
@@ -98,7 +104,11 @@ RC TableMeta::init(int32_t table_id, const char *name, const vector<FieldMeta> *
   }
 
   primary_keys_ = primary_keys;
-  record_size_ = field_offset;
+  // 字段总长度 + bitmap长度
+  LOG_INFO("Remain %d size of bool for bitmap to manage null value", fields_.size());
+  fields_record_size_ = field_offset;
+  bitmap_record_size_ = sizeof(bool) * fields_.size();
+  record_size_ = fields_record_size_ + bitmap_record_size_;
 
   table_id_ = table_id;
   name_     = name;
@@ -182,6 +192,8 @@ const IndexMeta *TableMeta::index(int i) const { return &indexes_[i]; }
 int TableMeta::index_num() const { return indexes_.size(); }
 
 int TableMeta::record_size() const { return record_size_; }
+int TableMeta::fields_record_size() const { return fields_record_size_; }
+int TableMeta::bitmap_record_size() const { return bitmap_record_size_; }
 
 int TableMeta::serialize(ostream &ss) const
 {
@@ -190,6 +202,9 @@ int TableMeta::serialize(ostream &ss) const
   table_value[FIELD_TABLE_NAME] = name_;
   table_value[FIELD_STORAGE_FORMAT] = static_cast<int>(storage_format_);
   table_value[FIELD_STORAGE_ENGINE] = static_cast<int>(storage_engine_);
+
+  table_value[FIELD_FIELDS_RECORD_SIZE] = fields_record_size_;
+  table_value[FIELD_BITMAP_RECORD_SIZE] = bitmap_record_size_;
 
   Json::Value fields_value;
   for (const FieldMeta &field : fields_) {
@@ -307,13 +322,26 @@ int TableMeta::deserialize(istream &is)
   storage_engine_ = static_cast<StorageEngine>(storage_engine);
   name_.swap(table_name);
   fields_.swap(fields);
-  record_size_ = fields_.back().offset() + fields_.back().len() - fields_.begin()->offset();
+
+  // record_size_ = fields_.back().offset() + fields_.back().len() - fields_.begin()->offset();
+  const Json::Value &fields_record_size_value = table_value[FIELD_FIELDS_RECORD_SIZE];
+  const Json::Value &bitmap_record_size_value = table_value[FIELD_BITMAP_RECORD_SIZE];
+
+  if (fields_record_size_value.isInt()) {
+    fields_record_size_ = fields_record_size_value.asInt();
+  }
+
+  if (bitmap_record_size_value.isInt()) {
+    bitmap_record_size_ = bitmap_record_size_value.asInt();
+  }
 
   for (const FieldMeta &field_meta : fields_) {
     if (!field_meta.visible()) {
       trx_fields_.push_back(field_meta); // 字段加上trx标识更好
     }
   }
+
+  record_size_ = fields_record_size_ + bitmap_record_size_;
 
   /* 从JSON中获取indexes数据 */
   const Json::Value &indexes_value = table_value[FIELD_INDEXES];

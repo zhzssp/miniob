@@ -64,6 +64,8 @@ public:
   const vector<string> &primary_keys() const { return primary_keys_; }
 
   int record_size() const;
+  int fields_record_size() const;
+  int bitmap_record_size() const;
   // 暂时没有做越界检查
   bool field_nullable(int index) const { return nullable_[index]; }
 
@@ -85,6 +87,7 @@ protected:
   StorageFormat     storage_format_;
   StorageEngine     storage_engine_;
 
-  // 在哪里设置的 ？
   int record_size_ = 0;
+  int fields_record_size_ = 0;
+  int bitmap_record_size_ = 0;
 };

@@ -276,7 +276,6 @@ RC PlainCommunicator::write_tuple_result(SqlResult *sql_result)
   Tuple *tuple = nullptr;
   while (RC::SUCCESS == (rc = sql_result->next_tuple(tuple))) {
     // assert(tuple != nullptr);
-    // 补丁 --> nullptr无法正确检测 ？
     if(tuple == nullptr || tuple->cell_num() <= 0) {
       LOG_WARN("Get null tuple, viewed as read completion");
       rc = RC::RECORD_EOF;
