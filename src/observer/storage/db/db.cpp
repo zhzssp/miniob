@@ -150,7 +150,7 @@ RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, cons
   return rc;
 }
 
-/* is_nullable信息保存在AttrInfoSqlNode之中，使用span以支持不拷贝也不持有数据的访问 */
+/* nullable信息保存在AttrInfoSqlNode之中，使用span以支持不拷贝也不持有数据的访问 */
 RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attributes, const vector<string>& primary_keys, const StorageFormat storage_format)
 {
   RC rc = RC::SUCCESS;

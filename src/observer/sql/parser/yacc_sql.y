@@ -807,6 +807,7 @@ where:
       $$ = $2;  
     }
     ;
+
 condition_list:
     /* empty */
     {
@@ -823,7 +824,9 @@ condition_list:
       delete $1;
     }
     ;
+
 condition:
+    // 按照比较的不同表达形式进行分类
     rel_attr comp_op value
     {
       $$ = new ConditionSqlNode;

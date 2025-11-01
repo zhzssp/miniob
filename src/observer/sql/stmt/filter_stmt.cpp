@@ -93,23 +93,28 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
 
   filter_unit = new FilterUnit;
 
+  // 左边是字段
   if (condition.left_is_attr) {
     Table           *table = nullptr;
     const FieldMeta *field = nullptr;
+    // 获取table和field meta
     rc                     = get_table_and_field(db, default_table, tables, condition.left_attr, table, field);
     if (rc != RC::SUCCESS) {
       LOG_WARN("cannot find attr");
       return rc;
     }
     FilterObj filter_obj;
+    // 以字段的方式进行初始化
     filter_obj.init_attr(Field(table, field));
     filter_unit->set_left(filter_obj);
   } else {
     FilterObj filter_obj;
+    // 左边是值 --> 直接以值的方式进行初始化
     filter_obj.init_value(condition.left_value);
     filter_unit->set_left(filter_obj);
   }
 
+  // 右边同理
   if (condition.right_is_attr) {
     Table           *table = nullptr;
     const FieldMeta *field = nullptr;
@@ -127,6 +132,7 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
     filter_unit->set_right(filter_obj);
   }
 
+  // 设置比较运算符
   filter_unit->set_comp(comp);
 
   // 检查两个类型是否能够比较

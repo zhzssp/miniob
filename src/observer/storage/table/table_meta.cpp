@@ -115,7 +115,8 @@ RC TableMeta::init(int32_t table_id, const char *name, const vector<FieldMeta> *
   storage_format_ = storage_format;
   storage_engine_ = storage_engine;
 
-  LOG_INFO("Begin to record nullable information");
+  // table_meta_中保存字段可否为null的信息
+  LOG_INFO("Begin to record fields' nullable information");
   nullable_.reserve(attributes.size());
   for(auto attr: attributes) {
     nullable_.emplace_back(attr.nullable);
