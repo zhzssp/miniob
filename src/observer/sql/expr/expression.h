@@ -402,11 +402,33 @@ public:
 
   unique_ptr<Expression> copy() const override
   {
+    LOG_INFO("copy from ArithmeticExpr");
+    if (arithmetic_type_ == Type::NEGATIVE) {
+      // 一元负号表达式：left_为空，right_有值
+      if (!left_ && right_) {
+        return make_unique<ArithmeticExpr>(arithmetic_type_, nullptr, right_->copy());
+      }
+    } 
+    // 二元算术表达式
     if (right_) {
       return make_unique<ArithmeticExpr>(arithmetic_type_, left_->copy(), right_->copy());
     } else {
       return make_unique<ArithmeticExpr>(arithmetic_type_, left_->copy(), nullptr);
     }
+
+    // // 应该是所有表达式都有右值，但不一定有左值?
+    // LOG_INFO("copy from ArithmeticExpr");
+    // if (left_) {
+    //   return make_unique<ArithmeticExpr>(arithmetic_type_, left_->copy(), right_->copy());
+    // } else {
+    //   return make_unique<ArithmeticExpr>(arithmetic_type_, nullptr, right_->copy());
+    // }
+
+    // if (right_) {
+    //   return make_unique<ArithmeticExpr>(arithmetic_type_, left_->copy(), right_->copy());
+    // } else {
+    //   return make_unique<ArithmeticExpr>(arithmetic_type_, left_->copy(), nullptr);
+    // }
   }
 
   bool     equal(const Expression &other) const override;

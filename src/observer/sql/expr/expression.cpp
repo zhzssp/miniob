@@ -389,7 +389,7 @@ RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value,
     } break;
 
     case Type::NEGATIVE: {
-      Value::negative(left_value, value);
+      Value::negative(right_value, value);
     } break;
 
     default: {
