@@ -84,6 +84,15 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
 // 处理字段别名
   for (size_t i = 0; i < select_sql.expressions.size(); i++) {
       Expression *expr = select_sql.expressions[i].get();
+      // 检查独立的 StarExpr（*）是否有别名，如果有则报错
+      // 注意：不检查聚合函数内的 *（如 count(*)），因为那些会在绑定阶段被替换为 ValueExpr
+      if (expr->type() == ExprType::STAR) {
+        StarExpr *star_expr = static_cast<StarExpr *>(expr);
+        if (star_expr->has_alias()) {
+          LOG_WARN("Cannot use alias with '*' (star expression). alias: %s", star_expr->alias());
+          return RC::INVALID_ARGUMENT;
+        }
+      }
       if (expr->has_alias()) {
           field_alias_map[expr->alias()] = expr->name();
       }
