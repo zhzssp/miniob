@@ -41,6 +41,8 @@ struct FilterObj
     is_attr     = false;
     this->value = value;
   }
+
+  bool is_null() const { return value.is_null(); }
 };
 
 class FilterUnit

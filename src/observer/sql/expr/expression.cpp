@@ -141,13 +141,34 @@ ComparisonExpr::~ComparisonExpr() {}
 
 RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &result) const
 {
-  if (left.is_null() || right.is_null()) {
-    result = false;
-    return RC::SUCCESS;
-  }
-
   RC  rc         = RC::SUCCESS;
   int cmp_result = 0;
+
+  // 第二个数只能是null
+  if (comp_ == IS_OP) {
+    if (!left.is_null() && right.is_null()) {
+      result = false;
+      return rc;
+    } else if (left.is_null() && right.is_null()) {
+      result = true;
+      return rc;
+    }
+    else {
+      return RC::INVALID_DATE_FORMAT;
+    }
+  } else if(comp_ == IS_NOT_OP) {
+    if (!left.is_null() && right.is_null()) {
+      result = true;
+      return rc;
+    } else if (left.is_null() && right.is_null()) {
+      result = false;
+      return rc;
+    } else {
+      return RC::INVALID_DATE_FORMAT;
+    }
+  } else {
+    LOG_INFO("ComparisonExpr's comp_ is not related to null");
+  }
 
   // 安全类型对齐：在比较前尽量将不同类型转换为可比较的同一类型
   // 规则：
