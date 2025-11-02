@@ -39,6 +39,7 @@ public:
   friend class CharType;
   friend class VectorType;
   friend class BooleanType;
+  friend class DateType;
 
   Value() = default;
 
@@ -49,6 +50,7 @@ public:
   explicit Value(int val);
   explicit Value(float val);
   explicit Value(bool val);
+  explicit Value(int year, int month, int day);
   explicit Value(const char *s, int len = 0);
   explicit Value(const string_t &val);
 
@@ -120,6 +122,8 @@ public:
   void set_int(int val);
   void set_float(float val);
   void set_string(const char *s, int len = 0);
+  void set_date(int year,int month,int day);
+  void set_date(int val);
   void set_empty_string(int len);
   void set_string_from_other(const Value &other);
 

@@ -129,8 +129,6 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         GE
         NE
         IN
-        INNER
-        JOIN
         NULL_T
         NOT
 
@@ -182,7 +180,6 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <value>               value
 %type <number>              number
 %type <number>              null_spec
-%type <cstring>             relation
 %type <comp>                comp_op
 %type <rel_attr>            rel_attr
 %type <attr_infos>          attr_def_list

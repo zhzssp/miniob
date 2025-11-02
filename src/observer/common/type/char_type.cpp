@@ -12,6 +12,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "common/type/char_type.h"
 #include "common/value.h"
+#include "common/type/date_type.h"
 
 int CharType::compare(const Value &left, const Value &right) const
 {
