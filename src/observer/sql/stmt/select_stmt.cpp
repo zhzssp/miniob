@@ -118,6 +118,26 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     }
   }
 
+  // 只有存在order by子句的时候才会发挥作用
+  vector<unique_ptr<OrderedUnboundFieldExpr>> order_by_expressions;
+  for (unique_ptr<OrderedUnboundFieldExpr> &expression : select_sql.order_by) {
+    // 使用reinterpret可能会产生奇怪的问题 --> 特别是对于vector !!!
+    if(expression == nullptr) {
+      LOG_ERROR("Get null order_by_expression in SelectStmt");
+    }
+    // 此时当做只有一个表（暂不考虑join的情况）--> 根据测例灵活变通 ！！！
+    // 当前无法正确设置table_name ?
+    if(!expression->table_name()) {
+      LOG_INFO("Haven't set table_name, set %s defaultly", select_sql.relations[0]);
+      expression->set_table(select_sql.relations[0]);
+    }
+    RC rc = expression_binder.bind_expression(reinterpret_cast<unique_ptr<Expression> &>(expression), reinterpret_cast<vector<unique_ptr<Expression>> &>(order_by_expressions));
+    if (OB_FAIL(rc)) {
+      LOG_INFO("bind expression failed. rc=%s", strrc(rc));
+      return rc;
+    }
+  }
+
   Table *default_table = nullptr;
   if (tables.size() == 1) {
     default_table = tables[0];
@@ -184,10 +204,12 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
   select_stmt->tables_.swap(tables);
   select_stmt->table_join_filters_.swap(table_join_filters);
+  // 整个查询的表达式本身
   select_stmt->query_expressions_.swap(bound_expressions);
   select_stmt->filter_stmt_ = filter_stmt;
   select_stmt->join_filter_stmt_ = join_filter_stmt;
   select_stmt->group_by_.swap(group_by_expressions);
+  select_stmt->order_by_.swap(order_by_expressions);
   stmt                      = select_stmt;
   return RC::SUCCESS;
 }

@@ -40,6 +40,7 @@ bool LogicalOperator::can_generate_vectorized_operator(const LogicalOperatorType
 
 void LogicalOperator::generate_general_child()
 {
+  // 递归地将子算子加入到执行序列
   for (auto &child : children_) {
     general_children_.push_back(child.get());
     child->generate_general_child();

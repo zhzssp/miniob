@@ -34,6 +34,8 @@ RC OptimizeStage::handle_request(SQLStageEvent *sql_event)
 {
   unique_ptr<LogicalOperator> logical_operator;
 
+  // 初始化logical_operator --> 包含tuple
+  LOG_TRACE("------------ Try to get project logical operator in handle_request ---------------");
   RC rc = create_logical_plan(sql_event, logical_operator);
   if (rc != RC::SUCCESS) {
     if (rc != RC::UNIMPLEMENTED) {
@@ -43,6 +45,7 @@ RC OptimizeStage::handle_request(SQLStageEvent *sql_event)
   }
 
   ASSERT(logical_operator, "logical operator is null");
+  LOG_TRACE("------------ Successfully get project LOGICAL operator in handle_request ---------------");
 
   // TODO: unify the RBO and CBO
   rc = rewrite(logical_operator);
@@ -67,6 +70,8 @@ RC OptimizeStage::handle_request(SQLStageEvent *sql_event)
 
     LOG_INFO("cascade physical plan:\n%s", phys_plan_str.c_str());
   } else {
+    // 初始化physical_operator
+    LOG_TRACE("------------ Try to get project PHYSICAL operator in handle_request ---------------");
     rc = generate_physical_plan(logical_operator, physical_operator, sql_event->session_event()->session());
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to generate physical plan. rc=%s", strrc(rc));
@@ -75,6 +80,8 @@ RC OptimizeStage::handle_request(SQLStageEvent *sql_event)
   }
 
   sql_event->set_operator(std::move(physical_operator));
+
+  LOG_TRACE("------------ Successfully get project PHYSICAL operator and put it into sql_event in handle_request ---------------");
 
   return rc;
 }
@@ -85,15 +92,18 @@ RC OptimizeStage::optimize(unique_ptr<LogicalOperator> &oper)
   return RC::SUCCESS;
 }
 
+// 递归初始化physical operator
 RC OptimizeStage::generate_physical_plan(
     unique_ptr<LogicalOperator> &logical_operator, unique_ptr<PhysicalOperator> &physical_operator, Session *session)
 {
   RC rc = RC::SUCCESS;
+  // 向量模型 --> operator一次返回一组元组
   if (session->get_execution_mode() == ExecutionMode::CHUNK_ITERATOR && LogicalOperator::can_generate_vectorized_operator(logical_operator->type())) {
     LOG_TRACE("use chunk iterator");
     session->set_used_chunk_mode(true);
     rc    = physical_plan_generator_.create_vec(*logical_operator, physical_operator, session);
   } else {
+    // 火山模型（默认） --> operator一次返回一个tuple
     LOG_TRACE("use tuple iterator");
     session->set_used_chunk_mode(false);
     rc = physical_plan_generator_.create(*logical_operator, physical_operator, session);
@@ -123,6 +133,7 @@ RC OptimizeStage::rewrite(unique_ptr<LogicalOperator> &logical_operator)
 
 RC OptimizeStage::create_logical_plan(SQLStageEvent *sql_event, unique_ptr<LogicalOperator> &logical_operator)
 {
+  // 得到ProjectLogicalOperator
   Stmt *stmt = sql_event->stmt();
   if (nullptr == stmt) {
     return RC::UNIMPLEMENTED;

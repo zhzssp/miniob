@@ -20,6 +20,7 @@ using namespace std;
 
 RC TableScanPhysicalOperator::open(Trx *trx)
 {
+  // record_scanner在此初始化
   RC rc = table_->get_record_scanner(record_scanner_, trx, mode_);
   if (rc == RC::SUCCESS) {
     tuple_.set_schema(table_, table_->table_meta().field_metas());
@@ -33,9 +34,27 @@ RC TableScanPhysicalOperator::next()
   RC rc = RC::SUCCESS;
 
   bool filter_result = false;
+  if(record_scanner_ == nullptr) {
+    LOG_ERROR("In table_scan_physical_operator, record_scanner_ is nullptr");
+    return RC::INTERNAL;
+  }
+  // 这里next出问题 ？--> record在从底下读出来时，是否没有bitmap的信息了？
   while (OB_SUCC(rc = record_scanner_->next(current_record_))) {
     LOG_TRACE("got a record. rid=%s", current_record_.rid().to_string().c_str());
-    
+
+    // 重新获取vector<bool> is_null_信息
+    const TableMeta &table_meta = table_->table_meta();
+    LOG_INFO("Initialize bitmap of length %d in TableScannerPhysicalOperator::next()", table_meta.field_num());
+    current_record_.init_bitmap(table_meta.field_num());
+
+    bool *null_bitmap = reinterpret_cast<bool *>(current_record_.data() + table_meta.fields_record_size());
+    for(int i = 0; i < table_meta.bitmap_record_size() / sizeof(bool); i++) {
+      if(null_bitmap[i]) {
+        current_record_.set_is_null(i);
+      }
+    }
+
+    // 将从表中读取到的记录, 以元组格式进行保存
     tuple_.set_record(&current_record_);
     rc = filter(tuple_, filter_result);
     if (rc != RC::SUCCESS) {
@@ -43,11 +62,12 @@ RC TableScanPhysicalOperator::next()
       return rc;
     }
 
+    // 结果已被保存到tuple_中，通过current_tuple()即可获取
     if (filter_result) {
-      sql_debug("get a tuple: %s", tuple_.to_string().c_str());
+      sql_debug("Get a tuple: %s", tuple_.to_string().c_str());
       break;
     } else {
-      sql_debug("a tuple is filtered: %s", tuple_.to_string().c_str());
+      sql_debug("A tuple is filtered: %s", tuple_.to_string().c_str());
     }
   }
   return rc;
@@ -80,11 +100,14 @@ void TableScanPhysicalOperator::set_predicates(vector<unique_ptr<Expression>> &&
   predicates_ = std::move(exprs);
 }
 
+/* 返回结果为false时，表示当前tuple被过滤掉 */
 RC TableScanPhysicalOperator::filter(RowTuple &tuple, bool &result)
 {
   RC    rc = RC::SUCCESS;
   Value value;
+  // 每个过滤条件仅针对单个字段 --> 获取对应Value进行判断 ？
   for (unique_ptr<Expression> &expr : predicates_) {
+    // 还不是OrderedUnBoundFieldExpr，类型是ComparisonExpr ？
     rc = expr->get_value(tuple, value);
     if (rc != RC::SUCCESS) {
       return rc;

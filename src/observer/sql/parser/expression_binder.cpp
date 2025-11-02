@@ -54,6 +54,10 @@ RC ExpressionBinder::bind_expression(unique_ptr<Expression> &expr, vector<unique
       return bind_star_expression(expr, bound_expressions);
     } break;
 
+    case ExprType::ORDERED_UNBOUND_FIELD: {
+      return bind_ordered_unbound_field_expression(expr, bound_expressions); 
+    } break;
+
     case ExprType::UNBOUND_FIELD: {
       return bind_unbound_field_expression(expr, bound_expressions);
     } break;
@@ -127,6 +131,16 @@ RC ExpressionBinder::bind_star_expression(
     wildcard_fields(table, bound_expressions);
   }
 
+  return RC::SUCCESS;
+}
+
+RC ExpressionBinder::bind_ordered_unbound_field_expression(
+    unique_ptr<Expression> &expr, vector<unique_ptr<Expression>> &bound_expressions) {
+  // release释放所有权，同时返回裸指针
+  std::unique_ptr<OrderedUnboundFieldExpr> order_expr;
+  // reset替换原来的指针，获得管理权
+  order_expr.reset(static_cast<OrderedUnboundFieldExpr*>(expr.release()));
+  bound_expressions.emplace_back(std::move(order_expr));
   return RC::SUCCESS;
 }
 
