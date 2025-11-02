@@ -15,6 +15,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/expr/expression.h"
 #include "sql/expr/tuple.h"
 #include "sql/expr/arithmetic_operator.hpp"
+#include "sql/expr/subquery_expr.h"
+#include "sql/operator/physical_operator.h"
 
 using namespace std;
 
@@ -297,6 +299,78 @@ RC ComparisonExpr::try_get_value(Value &cell) const
 
 RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
 {
+  // Handle IN and NOT IN operations specially
+  if (comp_ == IN_OP || comp_ == NOT_IN_OP) {
+    LOG_WARN("IN operation: comp_=%d, right type=%d, left type=%d, right_ptr=%p, left_ptr=%p", 
+             (int)comp_, (int)right_->type(), (int)left_->type(), right_.get(), left_.get());
+    
+    Value left_value;
+    RC rc = left_->get_value(tuple, left_value);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
+      return rc;
+    }
+    LOG_WARN("[IN CHECK] lhs=%s", left_value.to_string().c_str());
+    bool found = false;
+    bool any_equal = false;
+    int sub_count = 0;
+    if (right_->type() != ExprType::SUB_QUERY) {
+      LOG_WARN("IN operation expected SUB_QUERY on right, got type=%d. Treating as not found.", (int)right_->type());
+      value.set_boolean(false);
+      return RC::SUCCESS;
+    }
+    SubqueryExpr* subquery_expr = static_cast<SubqueryExpr*>(right_.get());
+    Tuple *outer_tuple_ptr = const_cast<Tuple*>(&tuple);
+    rc = subquery_expr->open_physical_operator(outer_tuple_ptr);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("IN: failed to open subquery operator. rc=%s", strrc(rc));
+      value.set_boolean(false);
+      return RC::SUCCESS;
+    }
+    while ((rc = subquery_expr->physical_operator()->next()) == RC::SUCCESS) {
+      ++sub_count;
+      auto sub_t = subquery_expr->physical_operator()->current_tuple();
+      LOG_WARN("[IN CHECK] subquery row %d, cell_num=%d", sub_count, sub_t ? sub_t->cell_num() : -1);
+      if (!sub_t || sub_t->cell_num() == 0) continue;
+      Value right_cell;
+      sub_t->cell_at(0, right_cell);
+      LOG_WARN("[IN CHECK]   lhs=%s subval=%s", left_value.to_string().c_str(), right_cell.to_string().c_str());
+      Value aligned_left = left_value;
+      Value aligned_right = right_cell;
+      Value casted;
+      if (right_cell.attr_type() != left_value.attr_type()) {
+        if (Value::cast_to(right_cell, left_value.attr_type(), casted) == RC::SUCCESS) {
+          aligned_right = casted;
+        } else if (Value::cast_to(left_value, right_cell.attr_type(), casted) == RC::SUCCESS) {
+          aligned_left = casted;
+        }
+      }
+      if ((aligned_left.attr_type() == AttrType::INTS || aligned_left.attr_type() == AttrType::FLOATS || aligned_left.attr_type() == AttrType::CHARS) &&
+          (aligned_right.attr_type() == AttrType::INTS || aligned_right.attr_type() == AttrType::FLOATS || aligned_right.attr_type() == AttrType::CHARS)) {
+        if (aligned_left.compare(aligned_right) == 0) {
+          any_equal = true;
+          if (comp_ == IN_OP) {
+            found = true;
+            break;
+          }
+        }
+      }
+    }
+    if (sub_count == 0)
+      LOG_WARN("[IN CHECK] subquery yielded no rows!");
+    RC close_rc = subquery_expr->close_physical_operator();
+    if (close_rc != RC::SUCCESS) {
+      LOG_WARN("IN: failed to close subquery operator. rc=%s", strrc(close_rc));
+    }
+    if (rc != RC::SUCCESS && rc != RC::RECORD_EOF) {
+      LOG_WARN("IN: subquery execution error. rc=%s", strrc(rc));
+    }
+    found = (comp_ == IN_OP) ? any_equal : !any_equal;
+    LOG_WARN("[IN CHECK] lhs=%s final found=%d (any_equal=%d) on sub_count=%d", left_value.to_string().c_str(), found, any_equal, sub_count);
+    value.set_boolean(found);
+    return RC::SUCCESS;
+  }
+  
   Value left_value;
   Value right_value;
 
@@ -697,6 +771,22 @@ unique_ptr<Aggregator> AggregateExpr::create_aggregator() const
   switch (aggregate_type_) {
     case Type::SUM: {
       aggregator = make_unique<SumAggregator>();
+      break;
+    }
+    case Type::COUNT: {
+      aggregator = make_unique<CountAggregator>();
+      break;
+    }
+    case Type::AVG: {
+      aggregator = make_unique<AvgAggregator>();
+      break;
+    }
+    case Type::MAX: {
+      aggregator = make_unique<MaxAggregator>();
+      break;
+    }
+    case Type::MIN: {
+      aggregator = make_unique<MinAggregator>();
       break;
     }
     default: {

@@ -47,6 +47,7 @@ enum class ExprType
   CONJUNCTION,  ///< 多个表达式使用同一种关系(AND或OR)来联结
   ARITHMETIC,   ///< 算术运算
   AGGREGATION,  ///< 聚合运算
+  SUB_QUERY,    ///< 子查询表达式
 };
 
 /**
@@ -128,6 +129,15 @@ public:
    */
   virtual RC eval(Chunk &chunk, vector<uint8_t> &select) { return RC::UNIMPLEMENTED; }
 
+  void set_alias(const std::string &alias) { alias_ = alias; }
+  const char *alias() const { return alias_.c_str(); }
+  const std::string alias_std_string() const { return alias_; }
+  bool has_alias() const { return !alias_.empty(); }
+
+  void set_table_alias(const std::string &table_alias) { table_alias_ = table_alias; }
+  const char *table_alias() const { return table_alias_.c_str(); }
+  const std::string table_alias_std_string() const { return table_alias_; }
+
 protected:
   /**
    * @brief 表达式在下层算子返回的 chunk 中的位置
@@ -139,6 +149,10 @@ protected:
 
 private:
   string name_;
+  
+  std::string alias_;
+
+  std::string table_alias_;
 };
 
 class StarExpr : public Expression
@@ -154,7 +168,6 @@ public:
   AttrType value_type() const override { return AttrType::UNDEFINED; }
 
   RC get_value(const Tuple &tuple, Value &value) const override { return RC::UNIMPLEMENTED; }  // 不需要实现
-
   const char *table_name() const { return table_name_.c_str(); }
 
 private:
@@ -176,9 +189,11 @@ public:
   AttrType value_type() const override { return AttrType::UNDEFINED; }
 
   RC get_value(const Tuple &tuple, Value &value) const override { return RC::INTERNAL; }
-
   const char *table_name() const { return table_name_.c_str(); }
   const char *field_name() const { return field_name_.c_str(); }
+  
+  void set_table_name(const string &table_name) { table_name_ = table_name; }
+  void set_field_name(const string &field_name) { field_name_ = field_name; }
 
 private:
   string table_name_;
@@ -271,6 +286,7 @@ public:
   ExprType type() const override { return ExprType::CAST; }
 
   RC get_value(const Tuple &tuple, Value &value) const override;
+
   RC get_column(Chunk &chunk, Column &column) override;
 
   RC try_get_value(Value &value) const override;
@@ -528,3 +544,8 @@ private:
   Type                   aggregate_type_;
   unique_ptr<Expression> child_;
 };
+
+// 前向声明
+class SelectStmt;
+class ParsedSqlNode;
+class SubqueryExpr;

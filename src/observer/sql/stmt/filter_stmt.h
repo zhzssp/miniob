@@ -27,19 +27,30 @@ class FieldMeta;
 struct FilterObj
 {
   bool  is_attr;
+  bool  is_expr;
   Field field;
   Value value;
+  Expression* expression;
 
   void init_attr(const Field &field)
   {
     is_attr     = true;
+    is_expr     = false;
     this->field = field;
   }
 
   void init_value(const Value &value)
   {
     is_attr     = false;
+    is_expr     = false;
     this->value = value;
+  }
+  
+  void init_expression(Expression* expr)
+  {
+    is_attr     = false;
+    is_expr     = true;
+    this->expression = expr;
   }
 };
 
