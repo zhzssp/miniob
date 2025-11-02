@@ -36,6 +36,7 @@ Value::Value(const Value &other)
   this->attr_type_ = other.attr_type_;
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
+  this->is_null_   = other.is_null_;
   switch (this->attr_type_) {
     case AttrType::CHARS: {
       set_string_from_other(other);
@@ -53,6 +54,7 @@ Value::Value(Value &&other)
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
   this->value_     = other.value_;
+  this->is_null_   = other.is_null_;
   other.own_data_  = false;
   other.length_    = 0;
 }
@@ -66,6 +68,7 @@ Value &Value::operator=(const Value &other)
   this->attr_type_ = other.attr_type_;
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
+  this->is_null_   = other.is_null_;
   switch (this->attr_type_) {
     case AttrType::CHARS: {
       set_string_from_other(other);
@@ -88,6 +91,7 @@ Value &Value::operator=(Value &&other)
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
   this->value_     = other.value_;
+  this->is_null_   = other.is_null_;
   other.own_data_  = false;
   other.length_    = 0;
   return *this;
@@ -108,6 +112,7 @@ void Value::reset()
   attr_type_ = AttrType::UNDEFINED;
   length_    = 0;
   own_data_  = false;
+  is_null_   = false;   // reset的时候设为默认值false
 }
 
 void Value::set_data(char *data, int length)
@@ -123,6 +128,10 @@ void Value::set_data(char *data, int length)
     case AttrType::FLOATS: {
       value_.float_value_ = *(float *)data;
       length_             = length;
+    } break;
+    case AttrType::DATES: {
+      value_.int_value_ = *(int *)data;
+      length_           = length;
     } break;
     case AttrType::BOOLEANS: {
       value_.bool_value_ = *(int *)data != 0;
@@ -236,6 +245,11 @@ char *Value::data() const
 
 string Value::to_string() const
 {
+  if(this->is_null()) {
+    LOG_INFO("Get null value, return string(null)");
+    return string("null");
+  }
+
   string res;
   RC     rc = DataType::type_instance(this->attr_type_)->to_string(*this, res);
   if (OB_FAIL(rc)) {
@@ -263,6 +277,9 @@ int Value::get_int() const
     }
     case AttrType::FLOATS: {
       return (int)(value_.float_value_);
+    }
+    case AttrType::DATES: {
+      return value_.int_value_;
     }
     case AttrType::BOOLEANS: {
       return (int)(value_.bool_value_);

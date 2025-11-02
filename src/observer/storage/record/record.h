@@ -111,11 +111,12 @@ public:
 
   Record(const Record &other)
   {
-    rid_   = other.rid_;
-    key_   = other.key_;
-    data_  = other.data_;
-    len_   = other.len_;
-    owner_ = other.owner_;
+    rid_     = other.rid_;
+    key_     = other.key_;
+    data_    = other.data_;
+    len_     = other.len_;
+    owner_   = other.owner_;
+    is_null_ = other.is_null_;
 
     if (other.owner_) {
       char *tmp = (char *)malloc(other.len_);
@@ -138,6 +139,7 @@ public:
     }
     this->rid_ = other.rid_;
     this->key_ = other.key_;
+    this->is_null_ = other.is_null_;
     memcpy(data_, other.data_, other.len_);
     return *this;
   }
@@ -149,12 +151,14 @@ public:
     if (!other.owner_) {
       data_        = other.data_;
       len_         = other.len_;
+      is_null_     = other.is_null_;
       other.data_  = nullptr;
       other.len_   = 0;
       this->owner_ = false;
     } else {
       data_        = other.data_;
       len_         = other.len_;
+      is_null_     = other.is_null_;
       other.data_  = nullptr;
       other.len_   = 0;
       this->owner_ = true;
@@ -185,6 +189,17 @@ public:
     this->data_  = data;
     this->len_   = len;
     this->owner_ = true;
+  }
+
+  void init_bitmap(int len) { 
+    is_null_ = vector<bool>(len, false);
+  }
+  void set_is_null(int index) {
+    if (index < 0 || index >= is_null_.size()) {
+      LOG_WARN("Record::set_is_null() out of range, return directly !");
+      return;
+    }
+    is_null_[index] = true; 
   }
 
   RC copy_data(const char *data, int len)
@@ -258,11 +273,19 @@ public:
   const RID    &rid() const { return rid_; }
   void          set_key(const string &key) { key_ = key; }
   const string &key() const { return key_; }
+  bool is_null(int index) const {
+    if (index < 0 || index >= is_null_.size()) {
+      LOG_WARN("Record::is_null() out of range !");
+      return false;
+    }
+    return is_null_[index]; 
+  }
 
 private:
   RID    rid_;
   string key_;  //// 记录的主键，用于 lsm-tree 引擎，需要考虑重构 Record
-  char  *data_  = nullptr;
+  char  *data_  = nullptr;  // Value::data()获取到的具体值的指针
   int    len_   = 0;      /// 如果不是record自己来管理内存，这个字段可能是无效的
   bool   owner_ = false;  /// 表示当前是否由record来管理内存
+  vector<bool> is_null_;
 };

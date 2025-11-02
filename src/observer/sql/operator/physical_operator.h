@@ -49,9 +49,11 @@ enum class PhysicalOperatorType
   DELETE,
   INSERT,
   UPDATE,
-  SCALAR_GROUP_BY,
+  SCALAR_GROUP_BY,  // 两个共同构成了group by
   HASH_GROUP_BY,
+  ORDER_BY,
   GROUP_BY_VEC,
+  ORDER_BY_VEC,
   AGGREGATE_VEC,
   EXPR_VEC,
 };

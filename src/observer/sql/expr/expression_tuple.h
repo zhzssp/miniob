@@ -86,5 +86,6 @@ private:
 
 private:
   const vector<ExprPointerType> &expressions_;
+  // 接收来自子算子next?得到的tuple
   const Tuple                   *child_tuple_ = nullptr;
 };

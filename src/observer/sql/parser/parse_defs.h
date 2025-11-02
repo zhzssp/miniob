@@ -22,6 +22,7 @@ See the Mulan PSL v2 for more details. */
 // 前向声明
 class Expression;
 #include "common/lang/utility.h"
+class OrderedUnboundFieldExpr;
 
 /**
  * @defgroup SQLParser SQL Parser
@@ -179,6 +180,7 @@ struct SelectSqlNode
   vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件
   vector<unique_ptr<Expression>> group_by;     ///< group by clause
   vector<RelationSqlNode>        ALIASES;      ///< 别名列表
+  vector<unique_ptr<OrderedUnboundFieldExpr>> order_by;
 };
 
 /**
@@ -233,6 +235,7 @@ struct AttrInfoSqlNode
   AttrType type;    ///< Type of attribute
   string   name;    ///< Attribute name
   size_t   length;  ///< Length of attribute
+  bool nullable = true;
 };
 
 /**

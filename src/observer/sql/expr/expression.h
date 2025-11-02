@@ -39,6 +39,7 @@ enum class ExprType
   STAR,                 ///< 星号，表示所有字段
   UNBOUND_FIELD,        ///< 未绑定的字段，需要在resolver阶段解析为FieldExpr
   UNBOUND_AGGREGATION,  ///< 未绑定的聚合函数，需要在resolver阶段解析为AggregateExpr
+  ORDERED_UNBOUND_FIELD, ///< 为order by创建的类型 --> 解析为Order的类型
 
   FIELD,        ///< 字段。在实际执行时，根据行数据内容提取对应字段的值
   VALUE,        ///< 常量值
@@ -189,6 +190,8 @@ public:
   AttrType value_type() const override { return AttrType::UNDEFINED; }
 
   RC get_value(const Tuple &tuple, Value &value) const override { return RC::INTERNAL; }
+
+  void        set_table(string table_name) { table_name_ = table_name; }
   const char *table_name() const { return table_name_.c_str(); }
   const char *field_name() const { return field_name_.c_str(); }
   
@@ -198,6 +201,32 @@ public:
 private:
   string table_name_;
   string field_name_;
+};
+
+class OrderedUnboundFieldExpr : public UnboundFieldExpr
+{
+public:
+  OrderedUnboundFieldExpr(const string &table_name, const string &field_name)
+      : UnboundFieldExpr(table_name, field_name), order_(1) {}
+
+  // 设置排序方式
+  void set_order(int order) { order_ = order; }
+
+  // 获取排序方式
+  int order() const { return order_; }
+
+  ExprType type() const override { return ExprType::ORDERED_UNBOUND_FIELD; }
+
+  // 拷贝构造函数
+  unique_ptr<Expression> copy() const override
+  {
+    auto copy_expr = make_unique<OrderedUnboundFieldExpr>(table_name(), field_name());
+    copy_expr->set_order(order_);
+    return copy_expr;
+  }
+
+private:
+  int order_;  // 1表示升序，-1表示降序
 };
 
 /**

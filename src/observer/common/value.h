@@ -19,6 +19,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/type/attr_type.h"
 #include "common/type/data_type.h"
 #include "common/type/string_t.h"
+#include "common/log/log.h"
 
 /**
  * @brief 属性的值
@@ -31,11 +32,13 @@ class Value final
 {
 public:
   friend class DataType;
+  friend class CharType;
   friend class IntegerType;
   friend class FloatType;
   friend class BooleanType;
   friend class CharType;
   friend class VectorType;
+  friend class BooleanType;
 
   Value() = default;
 
@@ -120,9 +123,14 @@ public:
   void set_empty_string(int len);
   void set_string_from_other(const Value &other);
 
+  void set_null(bool n) { is_null_ = n; }
+  bool is_null() const { return is_null_; }
+
 private:
   AttrType attr_type_ = AttrType::UNDEFINED;
   int      length_    = 0;
+  // 只能显式设置为null类型
+  bool is_null_ = false;
 
   union Val
   {
