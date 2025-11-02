@@ -29,6 +29,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/order_by_logical_operator.h"
 
 #include "sql/expr/expression.h"
+#include "sql/expr/subquery_expr.h"
 
 #include "sql/stmt/calc_stmt.h"
 #include "sql/stmt/delete_stmt.h"
@@ -107,6 +108,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   }
 
   const vector<Table *> &tables = select_stmt->tables();
+  
   for (size_t i = 0; i < tables.size(); i++) {
     Table *table = tables[i];
     // 这里设置READ_ONLY --> 
@@ -152,6 +154,12 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
           if (filter_unit->left().is_attr && filter_unit->right().is_attr) {
             const Table *left_field_table = filter_unit->left().field.table();
             const Table *right_field_table = filter_unit->right().field.table();
+            
+           // LOG_WARN("JOIN: Checking condition %s.%s = %s.%s", 
+                     left_field_table ? left_field_table->name() : "NULL",
+                     filter_unit->left().field.field_name(),
+                     right_field_table ? right_field_table->name() : "NULL",
+                     filter_unit->right().field.field_name();
             
             
             // 条件涉及左表和右表
@@ -206,6 +214,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       // 第二层
       LOG_TRACE("Set join %d as the second level logical operator", i);
       table_oper = unique_ptr<LogicalOperator>(join_oper);
+      
       
       // 如果有过滤条件，将其设置到 JoinLogicalOperator 中
       if (predicate_oper) {
@@ -278,19 +287,61 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
   RC                                  rc = RC::SUCCESS;
   vector<unique_ptr<Expression>> cmp_exprs;
   const vector<FilterUnit *>    &filter_units = filter_stmt->filter_units();
+  
   for (const FilterUnit *filter_unit : filter_units) {
     const FilterObj &filter_obj_left  = filter_unit->left();
     const FilterObj &filter_obj_right = filter_unit->right();
 
-    unique_ptr<Expression> left(filter_obj_left.is_attr
-                                    ? static_cast<Expression *>(new FieldExpr(filter_obj_left.field))
-                                    : static_cast<Expression *>(new ValueExpr(filter_obj_left.value)));
+    unique_ptr<Expression> left;
+    if (filter_obj_left.is_expr) {
+      left = unique_ptr<Expression>(filter_obj_left.expression->copy().release());
+      // 递归处理表达式中可能包含的子查询
+      rc = process_subquery_in_expression(left);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to process subquery in left expression. rc=%s", strrc(rc));
+        return rc;
+      }
+    } else if (filter_obj_left.is_attr) {
+      left = make_unique<FieldExpr>(filter_obj_left.field);
+    } else {
+      left = make_unique<ValueExpr>(filter_obj_left.value);
+    }
 
-    unique_ptr<Expression> right(filter_obj_right.is_attr
-                                     ? static_cast<Expression *>(new FieldExpr(filter_obj_right.field))
-                                     : static_cast<Expression *>(new ValueExpr(filter_obj_right.value)));
-
-    if (left->value_type() != right->value_type()) {
+    unique_ptr<Expression> right;
+    LOG_WARN("Creating right expression from FilterObj, is_expr=%d, is_attr=%d", filter_obj_right.is_expr, filter_obj_right.is_attr);
+    if (filter_obj_right.is_expr) {
+      LOG_WARN("Creating right expression from FilterObj, original expression type=%d", (int)filter_obj_right.expression->type());
+      right = unique_ptr<Expression>(filter_obj_right.expression->copy().release());
+      LOG_WARN("Right expression after copy, type=%d", (int)right->type());
+      // 递归处理表达式中可能包含的子查询
+      rc = process_subquery_in_expression(right);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to process subquery in right expression. rc=%s", strrc(rc));
+        return rc;
+      }
+      LOG_WARN("Right expression after process_subquery, type=%d", (int)right->type());
+    } else if (filter_obj_right.is_attr) {
+      right = make_unique<FieldExpr>(filter_obj_right.field);
+    } else {
+      right = make_unique<ValueExpr>(filter_obj_right.value);
+    }
+    
+    // 跳过子查询表达式的类型检查
+    // 如果 right 的 value_type 是 UNDEFINED，很可能包含子查询
+    bool has_subquery = (right->value_type() == AttrType::UNDEFINED) || 
+                        (left->value_type() == AttrType::UNDEFINED) ||
+                        expression_has_subquery(left) || 
+                        expression_has_subquery(right);
+    
+    LOG_WARN("Checking subquery: has_subquery=%d, left_type=%d, right_type=%d, left_value_type=%d, right_value_type=%d",
+             has_subquery, (int)left->type(), (int)right->type(), (int)left->value_type(), (int)right->value_type());
+    
+    if (has_subquery) {
+      LOG_WARN("Found subquery in filter, skipping type check. left_type=%d, right_type=%d", 
+                (int)left->type(), (int)right->type());
+    }
+    
+    if (!has_subquery && left->value_type() != right->value_type()) {
       auto left_to_right_cost = implicit_cast_cost(left->value_type(), right->value_type());
       auto right_to_left_cost = implicit_cast_cost(right->value_type(), left->value_type());
       if (left_to_right_cost <= right_to_left_cost && left_to_right_cost != INT32_MAX) {
@@ -349,6 +400,183 @@ int LogicalPlanGenerator::implicit_cast_cost(AttrType from, AttrType to)
     return 0;
   }
   return DataType::type_instance(from)->cast_cost(to);
+}
+
+RC LogicalPlanGenerator::process_subquery_in_expression(unique_ptr<Expression> &expr)
+{
+  if (expr == nullptr) {
+    return RC::SUCCESS;
+  }
+
+  // 检查当前表达式是否是子查询
+  if (expr->type() == ExprType::SUB_QUERY) {
+    auto sub_query_expr = static_cast<SubqueryExpr *>(expr.get());
+    auto sub_query_stmt = sub_query_expr->stmt();
+    if (sub_query_stmt == nullptr) {
+      LOG_WARN("subquery statement is null, attempting to re-create from sub_query_sn_");
+      // 如果 stmt_ 为 nullptr，尝试从 sub_query_sn_->selection 重新创建
+      // 但这需要 db 参数，我们暂时不在这里处理
+      LOG_WARN("Cannot re-create subquery stmt without db context");
+      return RC::INVALID_ARGUMENT;
+    }
+    
+    unique_ptr<LogicalOperator> sub_query_oper;
+    RC rc = create_plan(sub_query_stmt, sub_query_oper);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to create subquery logical operator. rc=%s", strrc(rc));
+      return rc;
+    }
+    sub_query_expr->set_logical_operator(std::move(sub_query_oper));
+    return RC::SUCCESS;
+  }
+
+  // 递归处理子表达式
+  switch (expr->type()) {
+    case ExprType::COMPARISON: {
+      auto cmp_expr = static_cast<ComparisonExpr *>(expr.get());
+      // 处理左表达式
+      if (cmp_expr->left() != nullptr) {
+        RC rc = process_subquery_in_expression(cmp_expr->left());
+        if (rc != RC::SUCCESS) {
+          return rc;
+        }
+      }
+      // 处理右表达式
+      if (cmp_expr->right() != nullptr) {
+        RC rc = process_subquery_in_expression(cmp_expr->right());
+        if (rc != RC::SUCCESS) {
+          return rc;
+        }
+      }
+    } break;
+    
+    case ExprType::CONJUNCTION: {
+      auto conj_expr = static_cast<ConjunctionExpr *>(expr.get());
+      for (auto &child : conj_expr->children()) {
+        RC rc = process_subquery_in_expression(child);
+        if (rc != RC::SUCCESS) {
+          return rc;
+        }
+      }
+    } break;
+    
+    case ExprType::ARITHMETIC: {
+      auto arith_expr = static_cast<ArithmeticExpr *>(expr.get());
+      if (arith_expr->left() != nullptr) {
+        RC rc = process_subquery_in_expression(arith_expr->left());
+        if (rc != RC::SUCCESS) {
+          return rc;
+        }
+      }
+      if (arith_expr->right() != nullptr) {
+        RC rc = process_subquery_in_expression(arith_expr->right());
+        if (rc != RC::SUCCESS) {
+          return rc;
+        }
+      }
+    } break;
+    
+    case ExprType::AGGREGATION: {
+      auto agg_expr = static_cast<AggregateExpr *>(expr.get());
+      if (agg_expr->child() != nullptr) {
+        RC rc = process_subquery_in_expression(agg_expr->child());
+        if (rc != RC::SUCCESS) {
+          return rc;
+        }
+      }
+    } break;
+    
+    case ExprType::CAST: {
+      auto cast_expr = static_cast<CastExpr *>(expr.get());
+      if (cast_expr->child() != nullptr) {
+        RC rc = process_subquery_in_expression(cast_expr->child());
+        if (rc != RC::SUCCESS) {
+          return rc;
+        }
+      }
+    } break;
+    
+    default:
+      // 其他类型的表达式不包含子表达式，或不需要特殊处理
+      break;
+  }
+
+  return RC::SUCCESS;
+}
+
+bool LogicalPlanGenerator::expression_has_subquery(unique_ptr<Expression> &expr)
+{
+  if (expr == nullptr) {
+    return false;
+  }
+
+  ExprType expr_type = expr->type();
+  LOG_WARN("expression_has_subquery: expr_type=%d", (int)expr_type);
+
+  // 检查当前表达式是否是子查询
+  if (expr_type == ExprType::SUB_QUERY) {
+    LOG_WARN("Found SUB_QUERY expression in expression_has_subquery");
+    return true;
+  }
+
+  // 递归检查子表达式
+  switch (expr_type) {
+    case ExprType::COMPARISON: {
+      LOG_WARN("Checking COMPARISON expression");
+      auto cmp_expr = static_cast<ComparisonExpr *>(expr.get());
+      if (cmp_expr->left() != nullptr) {
+        LOG_WARN("Checking left child of COMPARISON");
+        if (expression_has_subquery(cmp_expr->left())) {
+          return true;
+        }
+      }
+      if (cmp_expr->right() != nullptr) {
+        LOG_WARN("Checking right child of COMPARISON");
+        if (expression_has_subquery(cmp_expr->right())) {
+          return true;
+        }
+      }
+    } break;
+    
+    case ExprType::CONJUNCTION: {
+      auto conj_expr = static_cast<ConjunctionExpr *>(expr.get());
+      for (auto &child : conj_expr->children()) {
+        if (expression_has_subquery(child)) {
+          return true;
+        }
+      }
+    } break;
+    
+    case ExprType::ARITHMETIC: {
+      auto arith_expr = static_cast<ArithmeticExpr *>(expr.get());
+      if (arith_expr->left() != nullptr && expression_has_subquery(arith_expr->left())) {
+        return true;
+      }
+      if (arith_expr->right() != nullptr && expression_has_subquery(arith_expr->right())) {
+        return true;
+      }
+    } break;
+    
+    case ExprType::AGGREGATION: {
+      auto agg_expr = static_cast<AggregateExpr *>(expr.get());
+      if (agg_expr->child() != nullptr && expression_has_subquery(agg_expr->child())) {
+        return true;
+      }
+    } break;
+    
+    case ExprType::CAST: {
+      auto cast_expr = static_cast<CastExpr *>(expr.get());
+      if (cast_expr->child() != nullptr && expression_has_subquery(cast_expr->child())) {
+        return true;
+      }
+    } break;
+    
+    default:
+      // 其他类型的表达式不包含子表达式
+      break;
+  }
+
+  return false;
 }
 
 RC LogicalPlanGenerator::create_plan(InsertStmt *insert_stmt, unique_ptr<LogicalOperator> &logical_operator)
