@@ -47,12 +47,12 @@ RC InsertStmt::create(Db *db, const InsertSqlNode &inserts, Stmt *&stmt)
     return RC::SCHEMA_FIELD_MISSING;
   }
 
-  // check table meta
-  for (int i = 0; i < inserts.values.size(); i++) {
-    if(!table_meta.field_nullable(i) && inserts.values[i].is_null()) {
-      return RC::NOT_NULL;
-    }
-  }
+  // // check table meta
+  // for (int i = 0; i < inserts.values.size(); i++) {
+  //   if(!table_meta.field_nullable(i) && inserts.values[i].is_null()) {
+  //     return RC::NOT_NULL;
+  //   }
+  // }
 
   // everything alright
   stmt = new InsertStmt(table, values, value_num);
