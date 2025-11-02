@@ -40,28 +40,6 @@ void AvgState<T>::update(const T *values, int size)
 }
 
 template <typename T>
-void MaxState<T>::update(const T *values, int size)
-{
-  for (int i = 0; i < size; ++i) {
-    if (!initialized || values[i] > value) {
-      value = values[i];
-      initialized = true;
-    }
-  }
-}
-
-template <typename T>
-void MinState<T>::update(const T *values, int size)
-{
-  for (int i = 0; i < size; ++i) {
-    if (!initialized || values[i] < value) {
-      value = values[i];
-      initialized = true;
-    }
-  }
-}
-
-template <typename T>
 void CountState<T>::update(const T *values, int size)
 {
   value += size;
@@ -93,26 +71,6 @@ void* create_aggregate_state(AggregateExpr::Type aggr_type, AttrType attr_type)
     } else {
       LOG_WARN("unsupported aggregate value type");
     }
-  } else if (aggr_type == AggregateExpr::Type::MAX) {
-    if (attr_type == AttrType::INTS) {
-      state_ptr = malloc(sizeof(MaxState<int>));
-      new (state_ptr) MaxState<int>();
-    } else if (attr_type == AttrType::FLOATS) {
-      state_ptr = malloc(sizeof(MaxState<float>));
-      new (state_ptr) MaxState<float>();
-    } else {
-      LOG_WARN("unsupported aggregate value type");
-    }
-  } else if (aggr_type == AggregateExpr::Type::MIN) {
-    if (attr_type == AttrType::INTS) {
-      state_ptr = malloc(sizeof(MinState<int>));
-      new (state_ptr) MinState<int>();
-    } else if (attr_type == AttrType::FLOATS) {
-      state_ptr = malloc(sizeof(MinState<float>));
-      new (state_ptr) MinState<float>();
-    } else {
-      LOG_WARN("unsupported aggregate value type");
-    }
   } else {
     LOG_WARN("unsupported aggregator type");
   }
@@ -138,24 +96,6 @@ RC aggregate_state_update_by_value(void *state, AggregateExpr::Type aggr_type, A
       static_cast<AvgState<int>*>(state)->update(val.get_int());
     } else if (attr_type == AttrType::FLOATS) {
       static_cast<AvgState<float>*>(state)->update(val.get_float());
-    } else {
-      LOG_WARN("unsupported aggregate value type");
-      return RC::UNIMPLEMENTED;
-    }
-  } else if (aggr_type == AggregateExpr::Type::MAX) {
-    if (attr_type == AttrType::INTS) {
-      static_cast<MaxState<int>*>(state)->update(val.get_int());
-    } else if (attr_type == AttrType::FLOATS) {
-      static_cast<MaxState<float>*>(state)->update(val.get_float());
-    } else {
-      LOG_WARN("unsupported aggregate value type");
-      return RC::UNIMPLEMENTED;
-    }
-  } else if (aggr_type == AggregateExpr::Type::MIN) {
-    if (attr_type == AttrType::INTS) {
-      static_cast<MinState<int>*>(state)->update(val.get_int());
-    } else if (attr_type == AttrType::FLOATS) {
-      static_cast<MinState<float>*>(state)->update(val.get_float());
     } else {
       LOG_WARN("unsupported aggregate value type");
       return RC::UNIMPLEMENTED;
@@ -198,24 +138,6 @@ RC finialize_aggregate_state(void *state, AggregateExpr::Type aggr_type, AttrTyp
       rc = RC::UNIMPLEMENTED;
       LOG_WARN("unsupported aggregate value type");
     }// 
-  } else if (aggr_type == AggregateExpr::Type::MAX) {
-    if (attr_type == AttrType::INTS) {
-      append_to_column<MaxState<int>, int>(state, col);
-    } else if (attr_type == AttrType::FLOATS) {
-      append_to_column<MaxState<float>, float>(state, col);
-    } else {
-      rc = RC::UNIMPLEMENTED;
-      LOG_WARN("unsupported aggregate value type");
-    }
-  } else if (aggr_type == AggregateExpr::Type::MIN) {
-    if (attr_type == AttrType::INTS) {
-      append_to_column<MinState<int>, int>(state, col);
-    } else if (attr_type == AttrType::FLOATS) {
-      append_to_column<MinState<float>, float>(state, col);
-    } else {
-      rc = RC::UNIMPLEMENTED;
-      LOG_WARN("unsupported aggregate value type");
-    }
   } else {
     rc = RC::UNIMPLEMENTED;
     LOG_WARN("unsupported aggregator type");
@@ -254,24 +176,6 @@ RC aggregate_state_update_by_column(void *state, AggregateExpr::Type aggr_type, 
       LOG_WARN("unsupported aggregate value type");
       rc = RC::UNIMPLEMENTED;
     }
-  } else if (aggr_type == AggregateExpr::Type::MAX) {
-    if (attr_type == AttrType::INTS) {
-      update_aggregate_state<MaxState<int>, int>(state, col);
-    } else if (attr_type == AttrType::FLOATS) {
-      update_aggregate_state<MaxState<float>, float>(state, col);
-    } else {
-      LOG_WARN("unsupported aggregate value type");
-      rc = RC::UNIMPLEMENTED;
-    }
-  } else if (aggr_type == AggregateExpr::Type::MIN) {
-    if (attr_type == AttrType::INTS) {
-      update_aggregate_state<MinState<int>, int>(state, col);
-    } else if (attr_type == AttrType::FLOATS) {
-      update_aggregate_state<MinState<float>, float>(state, col);
-    } else {
-      LOG_WARN("unsupported aggregate value type");
-      rc = RC::UNIMPLEMENTED;
-    }
   } else {
     LOG_WARN("unsupported aggregator type");
     rc = RC::UNIMPLEMENTED;
@@ -286,9 +190,3 @@ template class CountState<int>;
 
 template class AvgState<int>;
 template class AvgState<float>;
-
-template class MaxState<int>;
-template class MaxState<float>;
-
-template class MinState<int>;
-template class MinState<float>;
