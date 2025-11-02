@@ -54,12 +54,12 @@ RC InsertStmt::create(Db *db, const InsertSqlNode &inserts, Stmt *&stmt)
     copied_values[i] = values[i];  
   }
 
-  // // check table meta
-  // for (int i = 0; i < inserts.values.size(); i++) {
-  //   if(!table_meta.field_nullable(i) && inserts.values[i].is_null()) {
-  //     return RC::NOT_NULL;
-  //   }
-  // }
+  // check table meta
+  for (int i = 0; i < inserts.values.size(); i++) {
+    if(!table_meta.field_nullable(i) && copied_values[i].is_null()) {
+      return RC::NOT_NULL;
+    }
+  }
 
   // everything alright
   stmt = new InsertStmt(table, copied_values, value_num);
