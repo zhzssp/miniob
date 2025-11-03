@@ -14,7 +14,9 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/log/log.h"
 #include "sql/expr/expression.h"
+#include "sql/expr/subquery_expr.h"
 #include "session/session.h"
+#include <unordered_map>
 #include "sql/operator/aggregate_vec_physical_operator.h"
 #include "sql/operator/calc_logical_operator.h"
 #include "sql/operator/calc_physical_operator.h"
@@ -151,12 +153,45 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
   bool       has_not_equal = false;  // 检查是否有NOT_EQUAL查询
   
   for (auto &expr : predicates) {
+    
     if (expr->type() == ExprType::COMPARISON) {
       auto comparison_expr = static_cast<ComparisonExpr *>(expr.get());
-      // 检查
+      // 检查是否有NOT_EQUAL查询
+      // 创建子查询
+      if (comparison_expr->left()->type() == ExprType::SUB_QUERY) {
+        LOG_WARN("Creating subquery physical operator for left child");
+        auto sub_query_expr = static_cast<SubqueryExpr *>(comparison_expr->left().get());
+        
+        if (sub_query_expr->physical_operator() != nullptr) {
+          LOG_WARN("[UNEXPECTED] subquery physical operator is not null!");
+        }
+        unique_ptr<PhysicalOperator> subquery_phy_oper = nullptr;
+        RC rc = create(*sub_query_expr->logical_operator(), subquery_phy_oper,session);
+        if (rc != RC::SUCCESS) {
+          LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
+          return rc;
+        }
+        sub_query_expr->set_physical_operator(std::move(subquery_phy_oper));
+      } 
+      if (comparison_expr->right()->type() == ExprType::SUB_QUERY) {
+        LOG_WARN("Creating subquery physical operator for right child");
+        auto sub_query_expr = static_cast<SubqueryExpr *>(comparison_expr->right().get());
+        if (sub_query_expr->physical_operator() != nullptr) {
+          LOG_WARN("[UNEXPECTED] subquery physical operator is not null!");
+        }
+        unique_ptr<PhysicalOperator> subquery_phy_oper = nullptr;
+        RC rc = create(*sub_query_expr->logical_operator(), subquery_phy_oper,session);
+        if (rc != RC::SUCCESS) {
+          LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
+          return rc;
+        }
+        sub_query_expr->set_physical_operator(std::move(subquery_phy_oper));
+      }
       if (comparison_expr->comp() == NOT_EQUAL) {
         has_not_equal = true;
+        break;  // 如果有NOT_EQUAL，不使用索引扫描
       }
+      // 简单处理，就找等值查询
       if (comparison_expr->comp() != EQUAL_TO) {
         continue;
       }
@@ -193,7 +228,7 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
 
   if (index != nullptr) {
     if (has_not_equal) {
-      // 使用索引全表扫描在过滤阶段应用条件
+      // 对于NOT_EQUAL查询，使用索引进行全表扫描，然后在过滤阶段应用条件
       IndexScanPhysicalOperator *index_scan_oper = new IndexScanPhysicalOperator(table,
           index,
           table_get_oper.read_write_mode(),
@@ -251,8 +286,63 @@ RC PhysicalPlanGenerator::create_plan(PredicateLogicalOperator &pred_oper, uniqu
   vector<unique_ptr<Expression>> &expressions = pred_oper.expressions();
   ASSERT(expressions.size() == 1, "predicate logical operator's children should be 1");
 
-  unique_ptr<Expression> expression = std::move(expressions.front());
-  oper = unique_ptr<PhysicalOperator>(new PredicatePhysicalOperator(std::move(expression)));
+  unique_ptr<Expression> &expression = expressions.front(); // Use reference instead of move
+  
+   // 取出子查询的逻辑算子，创建物理算子
+  std::vector<ComparisonExpr *> comparison_exprs;
+  if (expression->type() == ExprType::CONJUNCTION) {
+    auto conjunction_expr = static_cast<ConjunctionExpr *>(expression.get());
+    vector<unique_ptr<Expression>> &children = conjunction_expr->children();
+    for (auto &child_expr : children) {
+      if (child_expr->type() == ExprType::COMPARISON) {
+        comparison_exprs.push_back(static_cast<ComparisonExpr *>(child_expr.get()));
+      }
+    }
+  } else if (expression->type() == ExprType::COMPARISON) {
+    comparison_exprs.push_back(static_cast<ComparisonExpr *>(expression.get()));
+  }
+
+  for (auto &comparison_expr : comparison_exprs) {
+    if (comparison_expr->left()->type() == ExprType::SUB_QUERY) {
+      auto sub_query_expr = static_cast<SubqueryExpr *>(comparison_expr->left().get());
+      // 为子查询表达式设置事务上下文，保证后续 open/scan 的上下文有效
+      if (session != nullptr) {
+        sub_query_expr->set_trx(session->current_trx());
+      }
+      if (sub_query_expr->physical_operator() != nullptr) {
+        LOG_WARN("[UNEXPECTED] subquery physical operator is not null!");
+      }
+      unique_ptr<PhysicalOperator> subquery_phy_oper = nullptr;
+      RC rc = create(*sub_query_expr->logical_operator(), subquery_phy_oper, session);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
+        return rc;
+      }
+      sub_query_expr->set_physical_operator(std::move(subquery_phy_oper));
+    }
+    if (comparison_expr->right()->type() == ExprType::SUB_QUERY) {
+      auto sub_query_expr = static_cast<SubqueryExpr *>(comparison_expr->right().get());
+      // 为子查询表达式设置事务上下文，保证后续 open/scan 的上下文有效
+      if (session != nullptr) {
+        sub_query_expr->set_trx(session->current_trx());
+      }
+      if (sub_query_expr->physical_operator() != nullptr) {
+        LOG_WARN("[UNEXPECTED] subquery physical operator is not null!");
+      }
+      unique_ptr<PhysicalOperator> subquery_phy_oper = nullptr;
+      RC rc = create(*sub_query_expr->logical_operator(), subquery_phy_oper, session);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
+        return rc;
+      }
+      sub_query_expr->set_physical_operator(std::move(subquery_phy_oper));
+    }
+  }
+  
+  // Move the original expression into the predicate operator so that any
+  // SubqueryExpr retains its already-built physical operators.
+  unique_ptr<Expression> moved_expr = std::move(expression);
+  oper = unique_ptr<PhysicalOperator>(new PredicatePhysicalOperator(std::move(moved_expr)));
   oper->add_child(std::move(child_phy_oper));
   return rc;
 }
@@ -404,61 +494,43 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
         auto *left_field = dynamic_cast<FieldExpr*>(comp_expr->left().get());
         auto *right_field = dynamic_cast<FieldExpr*>(comp_expr->right().get());
         if (left_field != nullptr && right_field != nullptr) {
+         // LOG_WARN("HashJoin: Found join condition: %s.%s = %s.%s", 
+                   left_field->field().table_name(), left_field->field().field_name(),
+                   right_field->field().table_name(), right_field->field().field_name();
           // 检查字段是否与当前 JOIN 相关
           const char *left_table = left_field->field().table_name();
           const char *right_table = right_field->field().table_name();
           
-          
           // 获取当前 JOIN 的子操作符
           const auto &children = join_oper.children();
           if (children.size() >= 2) {
-            // 检查字段来源：是否分别来自左/右子树
+            // 检查左字段是否来自左子树，右字段是否来自右子树
             bool left_from_left = false;
             bool right_from_right = false;
-            bool left_from_right = false;
-            bool right_from_left = false;
-
+            
             // 检查左子树（可能是单个表或之前 JOIN 的结果）
             if (children[0]->type() == LogicalOperatorType::TABLE_GET) {
               auto *left_table_get = dynamic_cast<TableGetLogicalOperator*>(children[0].get());
-              if (left_table_get != nullptr) {
-                const char *lt_name = left_table_get->table()->name();
-                if (strcmp(lt_name, left_table) == 0) {
-                  left_from_left = true;
-                }
-                if (strcmp(lt_name, right_table) == 0) {
-                  right_from_left = true;
-                }
+              if (left_table_get != nullptr && strcmp(left_table_get->table()->name(), left_table) == 0) {
+                left_from_left = true;
               }
             } else if (children[0]->type() == LogicalOperatorType::JOIN) {
-              // 左子树是 JOIN 结果，保守认为可能包含两侧字段
-              left_from_left = true;
-              right_from_left = true;
+              // 左子树是 JOIN 结果，检查是否包含左字段的表
+              // 简化检查：如果左字段的表名在左子树中，认为来自左子树
+              left_from_left = true; // 暂时简化，假设左字段来自左子树
             }
-
+            
             // 检查右子树（当前表）
             if (children[1]->type() == LogicalOperatorType::TABLE_GET) {
               auto *right_table_get = dynamic_cast<TableGetLogicalOperator*>(children[1].get());
-              if (right_table_get != nullptr) {
-                const char *rt_name = right_table_get->table()->name();
-                if (strcmp(rt_name, right_table) == 0) {
-                  right_from_right = true;
-                }
-                if (strcmp(rt_name, left_table) == 0) {
-                  left_from_right = true;
-                }
+              if (right_table_get != nullptr && strcmp(right_table_get->table()->name(), right_table) == 0) {
+                right_from_right = true;
               }
             }
-
-
-            // 顺序匹配：左字段来自左子树，右字段来自右子树
+            
+            // 如果左字段来自左子树，右字段来自右子树，则使用这个条件
             if (left_from_left && right_from_right) {
               hash_join_oper->set_join_fields(left_field, right_field);
-              break;
-            }
-            // 反向匹配：左字段来自右子树，右字段来自左子树 -> 交换
-            if (left_from_right && right_from_left) {
-              hash_join_oper->set_join_fields(right_field, left_field);
               break;
             }
           }
@@ -488,6 +560,7 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
     oper = std::move(hash_join_oper);
     //LOG_INFO("Created HashJoinPhysicalOperator");
   } else {
+    LOG_INFO("Using Nested Loop Join for this query");
     unique_ptr<PhysicalOperator> join_physical_oper(new NestedLoopJoinPhysicalOperator());
     for (auto &child_oper : child_opers) {
       unique_ptr<PhysicalOperator> child_physical_oper;

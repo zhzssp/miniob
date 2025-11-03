@@ -35,9 +35,11 @@ public:
   friend class CharType;
   friend class IntegerType;
   friend class FloatType;
-  friend class DateType;
+  friend class BooleanType;
+  friend class CharType;
   friend class VectorType;
   friend class BooleanType;
+  friend class DateType;
 
   Value() = default;
 

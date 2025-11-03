@@ -11,6 +11,7 @@
 #include "sql/parser/yacc_sql.hpp"
 #include "sql/parser/lex_sql.h"
 #include "sql/expr/expression.h"
+#include "sql/expr/subquery_expr.h"
 
 using namespace std;
 
@@ -112,6 +113,9 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         EXPLAIN
         STORAGE
         FORMAT
+        AS
+        INNER
+        JOIN
         PRIMARY
         KEY
         ANALYZE
@@ -124,8 +128,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         LE
         GE
         NE
-        INNER
-        JOIN
+        IN
         NULL_T
         NOT
         IS
@@ -137,6 +140,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   Value *                                    value;
   enum CompOp                                comp;
   RelAttrSqlNode *                           rel_attr;
+  RelationSqlNode *                          relation_sql_node;
   vector<AttrInfoSqlNode> *                  attr_infos;
   AttrInfoSqlNode *                          attr_info;
   Expression *                               expression;
@@ -177,7 +181,6 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <value>               value
 %type <number>              number
 %type <number>              null_spec
-%type <cstring>             relation
 %type <comp>                comp_op
 %type <rel_attr>            rel_attr
 %type <attr_infos>          attr_def_list
@@ -189,6 +192,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <key_list>            primary_key
 %type <key_list>            attr_list
 %type <relation_list>       rel_list
+%type <relation_sql_node>   relation
 %type <expression>          expression
 %type <expression>          aggregate_expression
 %type <expression_list>     expression_list
@@ -226,6 +230,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <cstring>             table_name
 %type <condition>            join_condition
 %type <join_condition_list>  join_condition_list
+%type <sql_node>             subquery_stmt
 
 %left '+' '-'
 %left '*' '/'
@@ -540,6 +545,48 @@ update_stmt:      /*  update 语句的语法解析树*/
       }
     }
     ;
+subquery_stmt: 
+    SELECT expression_list FROM rel_list where group_by
+    {
+      $$ = new ParsedSqlNode(SCF_SELECT);
+      if ($2 != nullptr) {
+        $$->selection.expressions.swap(*$2);
+        delete $2;
+      }
+
+      if ($4 != nullptr) {
+        $$->selection.relations.swap(*$4);
+        delete $4;
+      }
+
+      if ($5 != nullptr) {
+        $$->selection.conditions.swap(*$5);
+        delete $5;
+      }
+
+      if ($6 != nullptr) {
+        $$->selection.group_by.swap(*$6);
+        delete $6;
+      }
+      
+      // 处理 JOIN 条件
+      if (!g_table_references.empty()) {
+        $$->selection.table_references = g_table_references;
+        // 同时填充 ALIASES 字段
+        for (const auto &ref : g_table_references) {
+          RelationSqlNode alias_node;
+          alias_node.name = ref.table_name;
+          alias_node.alias = ref.alias;
+          $$->selection.ALIASES.push_back(alias_node);
+        }
+      }
+      
+      // 清空 JOIN 条件相关的全局变量
+      g_join_conditions.clear();
+      g_table_references.clear();
+    }
+    ;
+
 select_stmt:        /*  select 语句的语法解析树*/
     SELECT expression_list FROM rel_list where group_by order_by
     {
@@ -573,7 +620,14 @@ select_stmt:        /*  select 语句的语法解析树*/
       // 处理 JOIN 条件
       if (!g_table_references.empty()) {
         $$->selection.table_references = g_table_references;
-        g_table_references.clear();
+        // 同时填充 ALIASES 字段
+        for (const auto& table_ref : g_table_references) {
+          RelationSqlNode alias_node;
+          alias_node.name = table_ref.table_name;
+          alias_node.alias = table_ref.alias;
+          $$->selection.ALIASES.push_back(alias_node);
+        }
+        // 不要在这里清空 g_table_references，让它在 sql_list 中统一清理
       }
     }
     ;
@@ -589,15 +643,61 @@ calc_stmt:
 expression_list:
     expression
     {
-      $$ = new vector<unique_ptr<Expression>>;
+      $$ = new std::vector<std::unique_ptr<Expression>>;
       $$->emplace_back($1);
+    }
+    | expression ID{
+      if ($1 != nullptr && $2 != nullptr) {
+        $$ = new std::vector<std::unique_ptr<Expression>>;
+        $1->set_alias(std::string($2));
+        $$->emplace_back($1);
+      } else {
+        $$ = nullptr;
+      }
+    }
+    | expression AS ID{
+      if ($1 != nullptr && $3 != nullptr) {
+        $$ = new std::vector<std::unique_ptr<Expression>>;
+        $1->set_alias(std::string($3));
+        $$->emplace_back($1);
+      } else {
+        $$ = nullptr;
+      }
+    }
+    | expression ID COMMA expression_list
+    {
+      if ($1 != nullptr && $2 != nullptr) {
+        if ($4 != nullptr) {
+          $$ = $4;
+        } else {
+          $$ = new std::vector<std::unique_ptr<Expression>>;
+        }
+        $1->set_alias(std::string($2));
+        $$->emplace($$->begin(), $1);
+      } else {
+        $$ = $4;
+      }
+    }
+    | expression AS ID COMMA expression_list
+    {
+      if ($1 != nullptr && $3 != nullptr) {
+        if ($5 != nullptr) {
+          $$ = $5;
+        } else {
+          $$ = new std::vector<std::unique_ptr<Expression>>;
+        }
+        $1->set_alias(std::string($3));
+        $$->emplace($$->begin(), $1);
+      } else {
+        $$ = $5;
+      }
     }
     | expression COMMA expression_list
     {
       if ($3 != nullptr) {
         $$ = $3;
       } else {
-        $$ = new vector<unique_ptr<Expression>>;
+        $$ = new std::vector<std::unique_ptr<Expression>>;
       }
       $$->emplace($$->begin(), $1);
     }
@@ -630,6 +730,11 @@ expression:
       $$->set_name(token_name(sql_string, &@$));
       delete $1;
     }
+    | ID DOT '*' {
+      // 支持表限定的星号：t2.*
+      $$ = new StarExpr($1);
+      $$->set_name(token_name(sql_string, &@$));
+    }
     | rel_attr {
       RelAttrSqlNode *node = $1;
       $$ = new UnboundFieldExpr(node->relation_name, node->attribute_name);
@@ -638,6 +743,11 @@ expression:
     }
     | aggregate_expression {
       $$ = $1;
+    }
+    | LBRACE select_stmt RBRACE {
+      // 子查询表达式
+      $$ = new SubqueryExpr($2);
+      $$->set_name(token_name(sql_string, &@$));
     }
     ;
 
@@ -661,13 +771,54 @@ rel_attr:
 
 relation:
     ID {
-      $$ = $1;
+      $$ = new RelationSqlNode;
+      $$->name = $1;
+    }
+    | ID AS ID {
+      $$ = new RelationSqlNode;
+      $$->name = $1;
+      $$->alias = $3;
+    }
+    | ID ID {
+      $$ = new RelationSqlNode;
+      $$->name = $1;
+      $$->alias = $2;
     }
     ;
 rel_list:
-    relation {
+    relation INNER JOIN relation ON join_condition_list {
       $$ = new vector<string>();
-      $$->push_back($1);
+      $$->push_back($1->name);
+      $$->push_back($4->name);
+      
+      // 创建表引用并存储 JOIN 条件
+      TableReferenceSqlNode left_table;
+      left_table.table_name = $1->name;
+      left_table.alias = $1->alias;
+      left_table.is_join = false;
+      
+      TableReferenceSqlNode right_table;
+      right_table.table_name = $4->name;
+      right_table.alias = $4->alias;
+      right_table.is_join = true;
+      right_table.join_conditions = *$6;
+      
+      g_table_references.push_back(left_table);
+      g_table_references.push_back(right_table);
+      
+      delete $1;
+      delete $4;
+      delete $6;
+    }
+    | relation {
+      $$ = new vector<string>();
+      $$->push_back($1->name);
+      // 存储表引用信息到全局变量
+      TableReferenceSqlNode table_ref;
+      table_ref.table_name = $1->name;
+      table_ref.alias = $1->alias;
+      g_table_references.push_back(table_ref);
+      delete $1;
     }
     | relation COMMA rel_list {
       if ($3 != nullptr) {
@@ -675,27 +826,13 @@ rel_list:
       } else {
         $$ = new vector<string>;
       }
-      $$->insert($$->begin(), $1);
-    }
-    | relation INNER JOIN relation ON join_condition_list {
-      $$ = new vector<string>();
-      $$->push_back($1);
-      $$->push_back($4);
-      
-      // 创建表引用并存储 JOIN 条件
-      TableReferenceSqlNode left_table;
-      left_table.table_name = $1;
-      left_table.is_join = false;
-      
-      TableReferenceSqlNode right_table;
-      right_table.table_name = $4;
-      right_table.is_join = true;
-      right_table.join_conditions = *$6;
-      
-      g_table_references.push_back(left_table);
-      g_table_references.push_back(right_table);
-      
-      delete $6;
+      $$->insert($$->begin(), $1->name);
+      // 存储表引用信息到全局变量
+      TableReferenceSqlNode table_ref;
+      table_ref.table_name = $1->name;
+      table_ref.alias = $1->alias;
+      g_table_references.push_back(table_ref);
+      delete $1;
     }
     | rel_list INNER JOIN relation ON join_condition_list {
       if ($1 != nullptr) {
@@ -703,16 +840,18 @@ rel_list:
       } else {
         $$ = new vector<string>;
       }
-      $$->push_back($4);
+      $$->push_back($4->name);
       
       // 创建表引用并存储 JOIN 条件
       TableReferenceSqlNode right_table;
-      right_table.table_name = $4;
+      right_table.table_name = $4->name;
+      right_table.alias = $4->alias;
       right_table.is_join = true;
       right_table.join_conditions = *$6;
       
       g_table_references.push_back(right_table);
       
+      delete $4;
       delete $6;
     }
     | rel_list COMMA relation {
@@ -721,7 +860,14 @@ rel_list:
       } else {
         $$ = new vector<string>;
       }
-      $$->push_back($3);
+      $$->push_back($3->name);
+      
+      // 存储表引用信息到全局变量
+      TableReferenceSqlNode table_ref;
+      table_ref.table_name = $3->name;
+      table_ref.alias = $3->alias;
+      g_table_references.push_back(table_ref);
+      delete $3;
     }
     ;
 
@@ -799,6 +945,12 @@ table_name:
     }
     ;
 
+table_references:
+    ID
+    {
+
+    }
+
 where:
     /* empty */
     {
@@ -816,12 +968,12 @@ condition_list:
     }
     | condition {
       $$ = new vector<ConditionSqlNode>;
-      $$->emplace_back(*$1);
+      $$->push_back(std::move(*$1));
       delete $1;
     }
     | condition AND condition_list {
       $$ = $3;
-      $$->emplace_back(*$1);
+      $$->push_back(std::move(*$1));
       delete $1;
     }
     ;
@@ -864,17 +1016,56 @@ condition:
       delete $1;
       delete $3;
     }
-    | value comp_op rel_attr
+    | expression comp_op expression
     {
       $$ = new ConditionSqlNode;
       $$->left_is_attr = 0;
-      $$->left_value = *$1;
-      $$->right_is_attr = 1;
-      $$->right_attr = *$3;
+      $$->left_expr = $1;
+      $$->right_is_attr = 0;
+      $$->right_expr = $3;
       $$->comp = $2;
-
+    }
+    | rel_attr IN LBRACE subquery_stmt RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 1;
+      $$->left_attr = *$1;
+      $$->right_is_attr = 0;
+      $$->right_expr =new SubqueryExpr($4);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = IN_OP;
       delete $1;
-      delete $3;
+    }
+    | rel_attr NOT IN LBRACE subquery_stmt RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 1;
+      $$->left_attr = *$1;
+      $$->right_is_attr = 0;
+      $$->right_expr =new SubqueryExpr($5);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = NOT_IN_OP;
+      delete $1;
+    }
+    | expression IN LBRACE subquery_stmt RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 0;
+      $$->left_expr = $1;
+      $$->right_is_attr = 0;
+      $$->right_expr =new SubqueryExpr($4);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = IN_OP;
+    }
+    | expression NOT IN LBRACE subquery_stmt RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 0;
+      $$->left_expr = $1;
+      $$->right_is_attr = 0;
+      $$->right_expr =new SubqueryExpr($5);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = NOT_IN_OP;
     }
     | rel_attr IS NULL_T
     {
@@ -942,6 +1133,8 @@ comp_op:
     | LE { $$ = LESS_EQUAL; }
     | GE { $$ = GREAT_EQUAL; }
     | NE { $$ = NOT_EQUAL; }
+    | IN { $$ = IN_OP; }
+    | NOT IN { $$ = NOT_IN_OP; }
     ;
 
 // your code here

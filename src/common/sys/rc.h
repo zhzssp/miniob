@@ -22,7 +22,6 @@ See the Mulan PSL v2 for more details. */
 #define DEFINE_RCS                       \
   DEFINE_RC(SUCCESS)                     \
   DEFINE_RC(INVALID_ARGUMENT)            \
-  DEFINE_RC(INVALID_DATE_FORMAT)         \
   DEFINE_RC(UNIMPLEMENTED)               \
   DEFINE_RC(SQL_SYNTAX)                  \
   DEFINE_RC(INTERNAL)                    \
@@ -87,8 +86,8 @@ See the Mulan PSL v2 for more details. */
   DEFINE_RC(UNEXPECTED_END_OF_STRING)    \
   DEFINE_RC(SYNTAX_ERROR)                \
   DEFINE_RC(UNSUPPORTED)                 \
-  DEFINE_RC(NOT_NULL)
-
+  DEFINE_RC(NOT_NULL)                    \
+  DEFINE_RC(INVALID_DATE_FORMAT)         
 enum class RC
 {
 #define DEFINE_RC(name) name,
