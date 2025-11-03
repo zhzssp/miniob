@@ -32,16 +32,8 @@ RC CharType::cast_to(const Value &val, AttrType type, Value &result) const
   switch (type) {
     case AttrType::DATES: 
     {
-      // 去除字符串两端的引号（单引号或双引号）
-      string date_str = val.value_.pointer_value_;
-      if (!date_str.empty()) {
-        if ((date_str.front() == '\'' && date_str.back() == '\'') ||
-            (date_str.front() == '"' && date_str.back() == '"')) {
-          date_str = date_str.substr(1, date_str.length() - 2);
-        }
-      }
       result.attr_type_ = AttrType::DATES;
-      return DateType().set_value_from_str(result, date_str);
+      return DateType().set_value_from_str(result,val.value_.pointer_value_);
     }
     default: return RC::UNIMPLEMENTED;
   }
@@ -54,7 +46,7 @@ int CharType::cast_cost(AttrType type)
     return 0;
   }
   if (type == AttrType::DATES) {
-    return 1;  // 允许字符串转换为日期，代价为1
+    return 1;
   }
   return INT32_MAX;
 }
