@@ -67,7 +67,7 @@ struct ConditionSqlNode
   std::unique_ptr<Expression> left_expr;  // 任意表达式
   std::unique_ptr<Expression> right_expr;   // 任意表达式
   CompOp comp_op;                          // 比较操作符
-  char conjunction_type = 0;
+  char conjunction_type = 0; // 连接 condition 的类型，0: no conjunction, 1: and, 2: or
 };
 
 /**
