@@ -342,13 +342,13 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
                 (int)left->type(), (int)right->type());
     }
 
-    // is null判断 --> 避免进入cast部分
-    if (filter_obj_left.is_null() || filter_obj_right.is_null()) {
-      LOG_INFO("Null appears, cannot implicitly cast value.");
-      ComparisonExpr *cmp_expr = new ComparisonExpr(filter_unit->comp(), std::move(left), std::move(right));
-      cmp_exprs.emplace_back(cmp_expr);
-      continue;
-    }
+    // // is null判断 --> 避免进入cast部分
+    // if (filter_obj_left.is_null() || filter_obj_right.is_null()) {
+    //   LOG_INFO("Null appears, cannot implicitly cast value.");
+    //   ComparisonExpr *cmp_expr = new ComparisonExpr(filter_unit->comp(), std::move(left), std::move(right));
+    //   cmp_exprs.emplace_back(cmp_expr);
+    //   continue;
+    // }
 
     if (!has_subquery && left->value_type() != right->value_type()) {
       auto left_to_right_cost = implicit_cast_cost(left->value_type(), right->value_type());
