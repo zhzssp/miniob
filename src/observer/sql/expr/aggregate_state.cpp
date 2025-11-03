@@ -59,6 +59,7 @@ void* create_aggregate_state(AggregateExpr::Type aggr_type, AttrType attr_type)
       LOG_WARN("unsupported aggregate value type");
     }
   } else if (aggr_type == AggregateExpr::Type::COUNT) {
+    LOG_TRACE("Initializing CountState");
     state_ptr = malloc(sizeof(CountState<int>));
     new (state_ptr) CountState<int>();
   } else if (aggr_type == AggregateExpr::Type::AVG) {

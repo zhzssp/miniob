@@ -86,9 +86,6 @@ RC AvgAggregator::evaluate(Value& result)
   return RC::SUCCESS;
 }
 
-
-
-
 RC CountAggregator::count(const Value &value)
 {
   // COUNT 聚合函数：每次调用递增计数
@@ -97,7 +94,7 @@ RC CountAggregator::count(const Value &value)
   
   if (value_.attr_type() == AttrType::UNDEFINED) {
     // 第一次调用：初始化计数，通常传入的值是1（对于COUNT(*)）或expr的值（对于COUNT(expr)）
-    value_ = value;
+    value_ = Value(1);
     return RC::SUCCESS;
   }
   
@@ -105,10 +102,10 @@ RC CountAggregator::count(const Value &value)
   // 对于 COUNT(*)，value 通常是1；对于 COUNT(expr)，value 可能是 expr 的值（需要处理NULL）
   Value one(1);  // 对于COUNT，每次应该加1，但为了兼容性，我们使用传入的值
   // 实际上，COUNT(expr) 应该检查 expr 是否为 NULL，如果不为 NULL 才计数
-  // 但这里简化处理，直接累加传入的值（假设调用者已经处理了NULL的情况）
   
   if(!value.is_null()) {
-    Value::add(value, value_, value_);
+    Value::add(one, value_, value_);
+    LOG_TRACE("Count + 1, cause that value is not null");
   }
   return RC::SUCCESS;
 }
