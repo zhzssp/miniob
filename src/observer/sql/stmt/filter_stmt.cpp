@@ -93,7 +93,7 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
   RC rc = RC::SUCCESS;
 
   CompOp comp = condition.comp;
-  if (comp < EQUAL_TO || comp >= IS_NOT_OP) {
+  if (comp < EQUAL_TO || comp > IS_NOT_OP) {
     LOG_WARN("invalid compare operator : %d", comp);
     return RC::INVALID_ARGUMENT;
   }

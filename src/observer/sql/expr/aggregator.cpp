@@ -25,7 +25,10 @@ RC SumAggregator::accumulate(const Value &value)
   ASSERT(value.attr_type() == value_.attr_type(), "type mismatch. value type: %s, value_.type: %s", 
         attr_type_to_string(value.attr_type()), attr_type_to_string(value_.attr_type()));
   
-  Value::add(value, value_, value_);
+  // left, right, result
+  if(!value.is_null()) {
+    Value::add(value, value_, value_);
+  }
   return RC::SUCCESS;
 }
 
@@ -50,8 +53,10 @@ RC AvgAggregator::average(const Value &value)
         attr_type_to_string(value.attr_type()), attr_type_to_string(value_.attr_type()));
   
   // 累积值的总和
-  Value::add(value, value_, value_);
-  count_++;
+  if(!value.is_null()) {
+    Value::add(value, value_, value_);
+    count_++;
+  }
   return RC::SUCCESS;
 }
 
@@ -102,7 +107,9 @@ RC CountAggregator::count(const Value &value)
   // 实际上，COUNT(expr) 应该检查 expr 是否为 NULL，如果不为 NULL 才计数
   // 但这里简化处理，直接累加传入的值（假设调用者已经处理了NULL的情况）
   
-  Value::add(value, value_, value_);
+  if(!value.is_null()) {
+    Value::add(value, value_, value_);
+  }
   return RC::SUCCESS;
 }
 

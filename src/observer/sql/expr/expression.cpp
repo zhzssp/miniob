@@ -146,7 +146,7 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
   RC  rc         = RC::SUCCESS;
   int cmp_result = 0;
 
-  // 第二个数只能是null
+  // is / is not --> 第二个数只能是null
   if (comp_ == IS_OP) {
     if (!left.is_null() && right.is_null()) {
       result = false;
@@ -169,8 +169,13 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
       return RC::INVALID_DATE_FORMAT;
     }
   } else {
-    LOG_INFO("ComparisonExpr's comp_ is not related to null");
+    // 其余全部当作传统运算符对待
+    if(left.is_null() || right.is_null()) {
+      result = false;
+      return rc;
+    }
   }
+  LOG_INFO("ComparisonExpr's comp_ is not related to is null / is not null");
 
   // 安全类型对齐：在比较前尽量将不同类型转换为可比较的同一类型
   // 规则：
