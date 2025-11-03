@@ -28,13 +28,18 @@ RC SumAggregator::accumulate(const Value &value)
   // left, right, result
   if(!value.is_null()) {
     Value::add(value, value_, value_);
+    not_null_count_++;
   }
   return RC::SUCCESS;
 }
 
 RC SumAggregator::evaluate(Value& result)
 {
-  result = value_;
+  if(not_null_count_ == 0) {
+    result = Value("NULL", 4);
+  } else {
+    result = value_;
+  }
   return RC::SUCCESS;
 }
 
@@ -45,7 +50,11 @@ RC AvgAggregator::average(const Value &value)
   // AVG 聚合函数：累积值的总和和计数
   if (value_.attr_type() == AttrType::UNDEFINED) {
     value_ = value;
-    count_ = 1;
+    if(!value.is_null()) {
+      count_ = 1;
+    } else {
+      count_ = 0;
+    }
     return RC::SUCCESS;
   }
   
@@ -64,8 +73,8 @@ RC AvgAggregator::evaluate(Value& result)
 {
   // 计算平均值：总和 / 计数
   if (count_ == 0) {
-    // 如果没有值，返回0或NULL（这里返回0）
-    result = Value(0.0f);
+    // 如果没有值，返回0或NULL（这里返回NULL）
+    result = Value("NULL", 4);
     return RC::SUCCESS;
   }
   
