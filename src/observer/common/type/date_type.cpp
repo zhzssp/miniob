@@ -15,22 +15,24 @@
 int DateType::compare(const Value &left, const Value &right) const
 {
   //处理字符串和日期类型比较的情况
-  
+  LOG_INFO("before transform, left attr_type:%s, right attr_type:%s",attr_type_to_string(left.attr_type_),attr_type_to_string(right.attr_type_));
   if (left.attr_type() == AttrType::CHARS)
   {
     Value l;
     set_value_from_str(l,left.value_.pointer_value_);
+    LOG_INFO("l.value_.int_value_:%d, compare_int:%d",l.value_.int_value_,common::compare_int((void *)&l.value_.int_value_, (void *)&right.value_.int_value_));
     return common::compare_int((void *)&l.value_.int_value_, (void *)&right.value_.int_value_);
   }
   else if (right.attr_type() == AttrType::CHARS)
   {
     Value r;
     set_value_from_str(r,right.value_.pointer_value_);
+    LOG_INFO("r.value_.int_value_:%d, compare_int:%d",r.value_.int_value_,common::compare_int((void *)&r.value_.int_value_, (void *)&right.value_.int_value_));
     return common::compare_int((void *)&left.value_.int_value_, (void *)&r.value_.int_value_);
   }
-  LOG_INFO("left attr_type:%s, right attr_type:%s",attr_type_to_string(left.attr_type_),attr_type_to_string(right.attr_type_));
+  // LOG_INFO("left attr_type:%s, right attr_type:%s",attr_type_to_string(left.attr_type_),attr_type_to_string(right.attr_type_));
   ASSERT(left.attr_type() == AttrType::DATES && right.attr_type() == AttrType::DATES, "invalid type");
-  LOG_INFO("compare from DateType");
+  LOG_INFO("compare from DateType,compare_int:%d",common::compare_int((void *)&left.value_.int_value_, (void *)&right.value_.int_value_));
   return common::compare_int((void *)&left.value_.int_value_, (void *)&right.value_.int_value_);
 }
 

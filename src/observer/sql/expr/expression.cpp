@@ -154,7 +154,7 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
   result         = false;
   switch (comp_) {
     case EQUAL_TO: {
-      result = (0 == cmp_result);
+      result = (cmp_result == 0);
     } break;
     case LESS_EQUAL: {
       result = (cmp_result <= 0);
