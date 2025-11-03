@@ -5,6 +5,7 @@
 #include "common/type/date_type.h"
 #include "common/value.h"
 #include "common/time/datetime.h"
+
 /**
  * 
  * @brief 日期类型
@@ -13,18 +14,22 @@
 
 int DateType::compare(const Value &left, const Value &right) const
 {
+  //处理字符串和日期类型比较的情况
+  
+  if (left.attr_type() == AttrType::CHARS)
+  {
+    Value l;
+    set_value_from_str(l,left.value_.pointer_value_);
+    return common::compare_int((void *)&l.value_.int_value_, (void *)&right.value_.int_value_);
+  }
+  else if (right.attr_type() == AttrType::CHARS)
+  {
+    Value r;
+    set_value_from_str(r,right.value_.pointer_value_);
+    return common::compare_int((void *)&left.value_.int_value_, (void *)&r.value_.int_value_);
+  }
+  LOG_INFO("left attr_type:%s, right attr_type:%s",attr_type_to_string(left.attr_type_),attr_type_to_string(right.attr_type_));
   ASSERT(left.attr_type() == AttrType::DATES && right.attr_type() == AttrType::DATES, "invalid type");
-  // int i1 = left.value_.int_value_;
-  // int i2 = right.value_.int_value_;
-  // if (i1 > i2)
-  // {
-  //   return 1;
-  // }
-  // if (i1 < i2)
-  // {
-  //   return -1;
-  // }
-  // return 0;
   LOG_INFO("compare from DateType");
   return common::compare_int((void *)&left.value_.int_value_, (void *)&right.value_.int_value_);
 }

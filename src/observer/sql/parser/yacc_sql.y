@@ -208,7 +208,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 
 %left '+' '-'
 %left '*' '/'
-%right UMINUS
+%nonassoc UMINUS
 %%
 
 commands: command_wrapper opt_semicolon  //commands or sqls. parser starts here.
@@ -438,6 +438,11 @@ value:
     NUMBER {
       $$ = new Value((int)$1);
       @$ = @1;
+    }
+    | 
+    '-' NUMBER {
+      $$ = new Value(-(int)$2);
+      @$ = @2;
     }
     |FLOAT {
       $$ = new Value((float)$1);
