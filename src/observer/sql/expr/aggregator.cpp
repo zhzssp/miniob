@@ -94,7 +94,7 @@ RC CountAggregator::count(const Value &value)
   
   if (value_.attr_type() == AttrType::UNDEFINED) {
     // 第一次调用：初始化计数，通常传入的值是1（对于COUNT(*)）或expr的值（对于COUNT(expr)）
-    if(value_.is_null()) {
+    if(value.is_null()) {
       value_ = Value(0);
     } else {
       value_ = Value(1);
