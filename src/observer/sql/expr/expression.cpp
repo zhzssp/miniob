@@ -193,39 +193,80 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
   AttrType lt = left.attr_type();
   AttrType rt = right.attr_type();
 
-  if (lt != rt) {
+  if (lt != rt) 
+  {
+    // 新增，DATES和CHARS的比较
+    if ((lt == AttrType::DATES && rt == AttrType::CHARS) || (lt == AttrType::CHARS && rt == AttrType::DATES))
+    {
+      cmp_result = left.compare(right);
+      switch (comp_) 
+      {
+        case EQUAL_TO: {
+          result = (cmp_result == 0);
+        } break;
+        case LESS_EQUAL: {
+          result = (cmp_result <= 0);
+        } break;
+        case NOT_EQUAL: {
+          result = (cmp_result != 0);
+        } break;
+        case LESS_THAN: {
+          result = (cmp_result < 0);
+        } break;
+        case GREAT_EQUAL: {
+          result = (cmp_result >= 0);
+        } break;
+        case GREAT_THAN: {
+          result = (cmp_result > 0);
+        } break;
+        default: {
+          LOG_WARN("unsupported comparison. %d", comp_);
+          rc = RC::INTERNAL;
+        } break;
+      }
+      return RC::SUCCESS;
+    }
     // INTS/FLOATS 对齐为浮点比较
-    if ((lt == AttrType::INTS && rt == AttrType::FLOATS) || (lt == AttrType::FLOATS && rt == AttrType::INTS)) {
+    if ((lt == AttrType::INTS && rt == AttrType::FLOATS) || (lt == AttrType::FLOATS && rt == AttrType::INTS)) 
+    {
       Value l2 = left;
       Value r2 = right;
-      if (lt == AttrType::INTS) {
+      if (lt == AttrType::INTS) 
+      {
         // 提升左为float
         Value tmp;
         tmp.set_float(static_cast<float>(left.get_int()));
         l2 = tmp;
       }
-      if (rt == AttrType::INTS) {
+      if (rt == AttrType::INTS) 
+      {
         Value tmp;
         tmp.set_float(static_cast<float>(right.get_int()));
         r2 = tmp;
       }
       cmp_result = l2.compare(r2);
-    } else if ((lt == AttrType::CHARS && (rt == AttrType::INTS || rt == AttrType::FLOATS)) ||
-               (rt == AttrType::CHARS && (lt == AttrType::INTS || lt == AttrType::FLOATS))) {
+    } 
+    else if ((lt == AttrType::CHARS && (rt == AttrType::INTS || rt == AttrType::FLOATS)) ||
+               (rt == AttrType::CHARS && (lt == AttrType::INTS || lt == AttrType::FLOATS))) 
+    {
       // 解析字符串为数字
-      auto parse_to_double = [](const Value &v, double &out, bool &ok) {
+      auto parse_to_double = [](const Value &v, double &out, bool &ok) 
+      {
         ok = false;
-        if (v.attr_type() == AttrType::FLOATS) {
+        if (v.attr_type() == AttrType::FLOATS) 
+        {
           out = static_cast<double>(v.get_float());
           ok = true;
           return;
         }
-        if (v.attr_type() == AttrType::INTS) {
+        if (v.attr_type() == AttrType::INTS) 
+        {
           out = static_cast<double>(v.get_int());
           ok = true;
           return;
         }
-        if (v.attr_type() == AttrType::CHARS) {
+        if (v.attr_type() == AttrType::CHARS) 
+        {
           std::string s = v.to_string();
           // 去除可能的引号
           if (!s.empty() && s.front() == '\'' && s.back() == '\'' && s.size() >= 2) {
@@ -252,11 +293,13 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
       bool ok_l = false, ok_r = false;
       parse_to_double(left, dl, ok_l);
       parse_to_double(right, dr, ok_r);
-      if (ok_l && ok_r) {
+      if (ok_l && ok_r) 
+      {
         Value l2; l2.set_float(static_cast<float>(dl));
         Value r2; r2.set_float(static_cast<float>(dr));
         cmp_result = l2.compare(r2);
-      } else {
+      } else 
+      {
         // 无法比较的异类型，返回 false 结果
         cmp_result = 0;
         switch (comp_) {
@@ -269,7 +312,8 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
           default: break;
         }
       }
-    } else {
+    } else 
+    {
       // 未支持的跨类型比较，按不可比处理
       cmp_result = 0;
       switch (comp_) {
@@ -282,7 +326,8 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
         default: break;
       }
     }
-  } else {
+  } else 
+  {
     // 相同类型，直接比较
     cmp_result = left.compare(right);
   }
@@ -583,7 +628,7 @@ RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value,
     value.set_null(true);
     return rc;
   }
-  
+
   const AttrType target_type = value_type();
   value.set_type(target_type);
 
