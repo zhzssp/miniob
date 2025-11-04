@@ -288,6 +288,7 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
   vector<unique_ptr<Expression>> cmp_exprs;
   const vector<FilterUnit *>    &filter_units = filter_stmt->filter_units();
   
+  // 将所有的filter_units全部转化为ComparisonExpr
   for (const FilterUnit *filter_unit : filter_units) {
     const FilterObj &filter_obj_left  = filter_unit->left();
     const FilterObj &filter_obj_right = filter_unit->right();
@@ -325,7 +326,18 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
     } else {
       right = make_unique<ValueExpr>(filter_obj_right.value);
     }
-    
+
+    CompOp comp = filter_unit->comp();
+    if (comp == IS_OP || comp == IS_NOT_OP) {
+      // is null判断 --> 避免进入cast部分
+      if (filter_obj_left.is_null() || filter_obj_right.is_null()) {
+        LOG_INFO("Null appears, cannot implicitly cast value.");
+        ComparisonExpr *cmp_expr = new ComparisonExpr(filter_unit->comp(), std::move(left), std::move(right));
+        cmp_exprs.emplace_back(cmp_expr);
+        continue;
+      }
+    }
+
     // 跳过子查询表达式的类型检查
     // 如果 right 的 value_type 是 UNDEFINED，很可能包含子查询
     bool has_subquery = (right->value_type() == AttrType::UNDEFINED) || 
@@ -340,7 +352,7 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
       LOG_WARN("Found subquery in filter, skipping type check. left_type=%d, right_type=%d", 
                 (int)left->type(), (int)right->type());
     }
-    
+
     if (!has_subquery && left->value_type() != right->value_type()) {
       auto left_to_right_cost = implicit_cast_cost(left->value_type(), right->value_type());
       auto right_to_left_cost = implicit_cast_cost(right->value_type(), left->value_type());
@@ -386,6 +398,7 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
 
   unique_ptr<PredicateLogicalOperator> predicate_oper;
   if (!cmp_exprs.empty()) {
+    // AND OR连接条件
     unique_ptr<ConjunctionExpr> conjunction_expr(new ConjunctionExpr(ConjunctionExpr::Type::AND, cmp_exprs));
     predicate_oper = unique_ptr<PredicateLogicalOperator>(new PredicateLogicalOperator(std::move(conjunction_expr)));
   }

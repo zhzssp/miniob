@@ -273,12 +273,19 @@ public:
   const RID    &rid() const { return rid_; }
   void          set_key(const string &key) { key_ = key; }
   const string &key() const { return key_; }
+
   bool is_null(int index) const {
     if (index < 0 || index >= is_null_.size()) {
       LOG_WARN("Record::is_null() out of range !");
       return false;
     }
     return is_null_[index]; 
+  }
+
+  void set_bitmap(int field_id, int fields_record_size, bool n) {
+    bool *bitmap = reinterpret_cast<bool *>(data_ + fields_record_size);
+    bitmap[field_id] = n;
+    LOG_INFO("Set num %d field's bitmap information");
   }
 
 private:

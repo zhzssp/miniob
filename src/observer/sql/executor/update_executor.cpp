@@ -51,13 +51,14 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
 
     // 准备更新的值
     Value final_value;
-    if (value->attr_type() != field_meta->type()) {
+    if (!value->is_null() && value->attr_type() != field_meta->type()) {
       rc = Value::cast_to(*value, field_meta->type(), final_value);
       if (rc != RC::SUCCESS) {
         LOG_WARN("type mismatch and cannot cast. field=%s.%s, rc=%s", table->name(), attribute_name, strrc(rc));
         return rc;
       }
     } else {
+      LOG_INFO("Value's type is consistent or value is null !");
       final_value = *value;
     }
 
@@ -67,7 +68,8 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
     if (rc != RC::SUCCESS) {
       return rc;
     }
-
+    
+    // 将record给从页面中读取上来
     vector<Record> targets;
     Record record;
     while (OB_SUCC(rc = scanner->next(record))) {
@@ -140,15 +142,25 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
       return rc;
     }
 
+    // 将获取到的record进行更新
     Trx *trx = session->current_trx();
     for (Record &old_record : targets) {
       Record new_record;
+      // record的char *data中存储了bitmap
       rc = new_record.copy_data(old_record.data(), table_meta.record_size());
       if (rc != RC::SUCCESS) {
         return rc;
       }
-
-      rc = new_record.set_field(field_meta->offset(), field_meta->len(), (char *)final_value.data());
+      
+      // 只是将要修改的字段的新值给复制过去了 --> null对应的这段内存无用，不用设置都可以
+      if(!final_value.is_null()) {
+        rc = new_record.set_field(field_meta->offset(), field_meta->len(), (char *)final_value.data());
+      }
+      else {
+        LOG_INFO("Get null final_value, update is_null_ information");
+        new_record.set_bitmap(field_meta->field_id(), table_meta.fields_record_size(), true);
+        new_record.set_is_null(field_meta->field_id());
+      }
       if (rc != RC::SUCCESS) {
         return rc;
       }

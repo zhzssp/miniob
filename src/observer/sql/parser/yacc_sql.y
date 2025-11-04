@@ -131,6 +131,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         IN
         NULL_T
         NOT
+        IS
 
 /** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
 %union {
@@ -1066,8 +1067,65 @@ condition:
       $$->right_expr->set_name(token_name(sql_string, &@$));
       $$->comp = NOT_IN_OP;
     }
+    | rel_attr IS NULL_T
+    {
+        $$ = new ConditionSqlNode;
+        $$->left_is_attr = 1;
+        $$->left_attr = *$1;
+
+        $$->right_is_attr = 0;
+        $$->right_value = Value(); // 空值
+        $$->right_value.set_null(true);
+        
+        // 需要在 CompOp 中定义
+        $$->comp = IS_OP;   
+        delete $1;
+    }
+    | rel_attr IS NOT NULL_T
+    {
+        $$ = new ConditionSqlNode;
+        $$->left_is_attr = 1;
+        $$->left_attr = *$1;
+         
+        $$->right_is_attr = 0;
+        $$->right_value = Value();
+        $$->right_value.set_null(true);
+
+        // 需要在 CompOp 中定义
+        $$->comp = IS_NOT_OP; 
+        // 此时NULL_T为纯标识符，没有需要delete的对象
+        delete $1;
+    }
+    // 支持直接使用const is null / const is not null的形式 --> 直接判断即可
+    | value IS NULL_T
+    {
+        $$ = new ConditionSqlNode;
+        $$->left_is_attr = 0;
+        $$->left_value = *$1;
+        
+        $$->right_is_attr = 0;
+        $$->right_value = Value();
+        $$->right_value.set_null(true);
+
+        $$->comp = IS_OP;   
+        delete $1;
+    }
+    | value IS NOT NULL_T
+    {
+        $$ = new ConditionSqlNode;
+        $$->left_is_attr = 0;
+        $$->left_value = *$1;
+
+        $$->right_is_attr = 0;
+        $$->right_value = Value();
+        $$->right_value.set_null(true);
+
+        $$->comp = IS_NOT_OP;  
+        delete $1;
+    }
     ;
 
+// 枚举运算符token（识别符号得到），is / is not不加入该体系，直接赋值
 comp_op:
       EQ { $$ = EQUAL_TO; }
     | LT { $$ = LESS_THAN; }

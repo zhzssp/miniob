@@ -38,7 +38,8 @@ RC InsertStmt::create(Db *db, const InsertSqlNode &inserts, Stmt *&stmt)
   }
 
   // check the fields number
-  const Value     *values     = inserts.values.data();  // vector真正存储位置的指针
+  // vector真正存储位置的指针 --> 临时对象，很可能会由于其被删除而产生悬空指针
+  const Value     *values     = inserts.values.data();  
   const int        value_num  = static_cast<int>(inserts.values.size());
   const TableMeta &table_meta = table->table_meta();
   const int        field_num  = table_meta.field_num() - table_meta.sys_field_num();
@@ -47,14 +48,20 @@ RC InsertStmt::create(Db *db, const InsertSqlNode &inserts, Stmt *&stmt)
     return RC::SCHEMA_FIELD_MISSING;
   }
 
-  // // check table meta
-  // for (int i = 0; i < inserts.values.size(); i++) {
-  //   if(!table_meta.field_nullable(i) && inserts.values[i].is_null()) {
-  //     return RC::NOT_NULL;
-  //   }
-  // }
+  // 深拷贝 --> 增强指针使用的安全性
+  Value *copied_values = new Value[value_num];
+  for (int i = 0; i < value_num; i++) {
+    copied_values[i] = values[i];  
+  }
+
+  // check table meta
+  for (int i = 0; i < inserts.values.size(); i++) {
+    if(!table_meta.field_nullable(i) && copied_values[i].is_null()) {
+      return RC::NOT_NULL;
+    }
+  }
 
   // everything alright
-  stmt = new InsertStmt(table, values, value_num);
+  stmt = new InsertStmt(table, copied_values, value_num);
   return RC::SUCCESS;
 }

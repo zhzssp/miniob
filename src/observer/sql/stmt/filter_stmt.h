@@ -45,6 +45,8 @@ struct FilterObj
     is_expr     = false;
     this->value = value;
   }
+
+  bool is_null() const { return value.is_null(); }
   
   void init_expression(Expression* expr)
   {

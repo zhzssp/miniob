@@ -117,6 +117,7 @@ RC GroupByPhysicalOperator::evaluate(GroupValueType &group_value)
   vector<Value>  values;
   for (unique_ptr<Aggregator> &aggregator : aggregators) {
     Value value;
+    LOG_TRACE("Execute aggregator->evaluate(value)");
     rc = aggregator->evaluate(value);
     if (OB_FAIL(rc)) {
       LOG_WARN("failed to evaluate aggregator. rc=%s", strrc(rc));
