@@ -308,7 +308,7 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
       tmp[i] = false;
     }
 
-    if (field->type() != value.attr_type()) {
+    if (!value.is_null() && field->type() != value.attr_type()) {
       // 类型不符合的时候强行cast过去，比如float --> int
       Value real_value;
       rc = Value::cast_to(value, field->type(), real_value);
