@@ -995,6 +995,7 @@ RC MysqlCommunicator::write_tuple_result(SqlResult *sql_result, vector<char> &pa
     pos += store_int1(buf + pos, sequence_id_++);
 
     Value value;
+    // 获取输出的字段信息
     for (int i = 0; i < cell_num; i++) {
       rc = tuple->cell_at(i, value);
       if (rc != RC::SUCCESS) {
@@ -1016,6 +1017,7 @@ RC MysqlCommunicator::write_tuple_result(SqlResult *sql_result, vector<char> &pa
   }
   return rc;
 }
+
 RC MysqlCommunicator::write_chunk_result(SqlResult *sql_result, vector<char> &packet, int &affected_rows, bool &need_disconnect)
 {
   Chunk chunk;

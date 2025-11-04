@@ -54,6 +54,8 @@ RC GroupByPhysicalOperator::aggregate(AggregatorList &aggregator_list, const Tup
   const int size = static_cast<int>(aggregator_list.size());
   for (int i = 0; i < size; i++) {
     Aggregator *aggregator = aggregator_list[i].get();
+    auto *aggregate_expr = static_cast<AggregateExpr *>(aggregate_expressions_[i]);
+    AggregateExpr::Type aggr_type = aggregate_expr->aggregate_type();
 
     rc = tuple.cell_at(i, value);
     if (OB_FAIL(rc)) {
@@ -61,9 +63,37 @@ RC GroupByPhysicalOperator::aggregate(AggregatorList &aggregator_list, const Tup
       return rc;
     }
 
-    rc = aggregator->accumulate(value);
+    // 根据聚合类型调用相应的方法
+    switch (aggr_type) {
+      case AggregateExpr::Type::SUM: {
+        rc = aggregator->accumulate(value);
+        break;
+      }
+      case AggregateExpr::Type::COUNT: {
+        rc = aggregator->count(value);
+        break;
+      }
+      case AggregateExpr::Type::AVG: {
+        rc = aggregator->average(value);
+        break;
+      }
+      case AggregateExpr::Type::MAX: {
+        rc = aggregator->max(value);
+        break;
+      }
+      case AggregateExpr::Type::MIN: {
+        rc = aggregator->min(value);
+        break;
+      }
+      default: {
+        LOG_WARN("unsupported aggregate type: %d", static_cast<int>(aggr_type));
+        rc = RC::UNIMPLEMENTED;
+        break;
+      }
+    }
+
     if (OB_FAIL(rc)) {
-      LOG_WARN("failed to accumulate value. rc=%s", strrc(rc));
+      LOG_WARN("failed to aggregate value. aggregate_type=%d, rc=%s", static_cast<int>(aggr_type), strrc(rc));
       return rc;
     }
   }
@@ -87,6 +117,7 @@ RC GroupByPhysicalOperator::evaluate(GroupValueType &group_value)
   vector<Value>  values;
   for (unique_ptr<Aggregator> &aggregator : aggregators) {
     Value value;
+    LOG_TRACE("Execute aggregator->evaluate(value)");
     rc = aggregator->evaluate(value);
     if (OB_FAIL(rc)) {
       LOG_WARN("failed to evaluate aggregator. rc=%s", strrc(rc));

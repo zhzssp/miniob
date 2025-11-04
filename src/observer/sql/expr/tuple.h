@@ -197,7 +197,16 @@ public:
     const FieldMeta *field_meta = field_expr->field().meta();
     cell.reset();
     cell.set_type(field_meta->type());
-    cell.set_data(this->record_->data() + field_meta->offset(), field_meta->len());
+    if(!record_->is_null(index)) {
+      // 非null的情况
+      // 严格使用field_meta中记录的字段offset，来获取目标字段上数据的指针
+      // 在调用Tuple::to_string时，is_null_已经设置好
+      cell.set_data(this->record_->data() + field_meta->offset(), field_meta->len());
+      cell.set_null(false);
+    } else {
+      // cell.set_data(static_cast<char *>(nullptr), 0);
+      cell.set_null(true);
+    }
     return RC::SUCCESS;
   }
 
@@ -354,6 +363,23 @@ public:
     return RC::NOTFOUND;
   }
 
+  // 默认在查找时已知是来自哪个table
+  RC nonstrict_get_value(const char *field_name, Value &value)
+  {
+    ASSERT(cells_.size() == specs_.size(), "cells_.size()=%d, specs_.size()=%d", cells_.size(), specs_.size());
+
+    const int size = static_cast<int>(specs_.size());
+    for (int i = 0; i < size; i++) {
+      const char *fn = specs_[i].field_name();
+      // LOG_INFO("In nonstrict_get_value loop, find field %s", fn);
+      if (strcmp(fn, field_name) == 0) {
+        value = cells_[i];
+        return RC::SUCCESS;
+      }
+    }
+    return RC::NOTFOUND;
+  }
+
   static RC make(const Tuple &tuple, ValueListTuple &value_list)
   {
     const int cell_num = tuple.cell_num();
@@ -378,6 +404,7 @@ public:
 
 private:
   vector<Value>         cells_;
+  // 表名、字段名、别名
   vector<TupleCellSpec> specs_;
 };
 
@@ -429,7 +456,7 @@ public:
   RC find_cell(const TupleCellSpec &spec, Value &value) const override
   {
     RC rc = left_->find_cell(spec, value);
-    if (rc == RC::SUCCESS || rc != RC::NOTFOUND) {
+    if (rc == RC::SUCCESS) {
       return rc;
     }
 

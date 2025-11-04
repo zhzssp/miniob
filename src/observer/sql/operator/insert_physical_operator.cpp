@@ -26,12 +26,14 @@ InsertPhysicalOperator::InsertPhysicalOperator(Table *table, vector<Value> &&val
 RC InsertPhysicalOperator::open(Trx *trx)
 {
   Record record;
-  RC     rc = table_->make_record(static_cast<int>(values_.size()), values_.data(), record);
+  // 在Table Scanner中通过next接口读取这里制作的record
+  RC rc = table_->make_record(static_cast<int>(values_.size()), values_.data(), record);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to make record. rc=%s", strrc(rc));
     return rc;
   }
 
+  LOG_TRACE("After make_record, begin to insert it");
   rc = trx->insert_record(table_, record);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to insert record by transaction. rc=%s", strrc(rc));

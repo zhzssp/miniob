@@ -14,10 +14,13 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/log/log.h"
 #include "sql/expr/expression.h"
+#include "sql/expr/subquery_expr.h"
 #include "session/session.h"
+#include <unordered_map>
 #include "sql/operator/aggregate_vec_physical_operator.h"
 #include "sql/operator/calc_logical_operator.h"
 #include "sql/operator/calc_physical_operator.h"
+#include "sql/operator/predicate_logical_operator.h"
 #include "sql/operator/delete_logical_operator.h"
 #include "sql/operator/delete_physical_operator.h"
 #include "sql/operator/explain_logical_operator.h"
@@ -43,6 +46,11 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/scalar_group_by_physical_operator.h"
 #include "sql/operator/table_scan_vec_physical_operator.h"
 #include "sql/optimizer/physical_plan_generator.h"
+#include "sql/operator/hash_join_physical_operator.h"
+
+#include "sql/operator/order_by_logical_operator.h"
+#include "sql/operator/order_by_physical_operator.h"
+#include "sql/operator/order_by_vec_physical_operator.h"
 
 using namespace std;
 
@@ -91,6 +99,10 @@ RC PhysicalPlanGenerator::create(LogicalOperator &logical_operator, unique_ptr<P
       return create_plan(static_cast<GroupByLogicalOperator &>(logical_operator), oper, session);
     } break;
 
+    case LogicalOperatorType::ORDER_BY: {
+      return create_plan(static_cast<OrderByLogicalOperator &>(logical_operator), oper, session);
+    } break;
+
     default: {
       ASSERT(false, "unknown logical operator type");
       return RC::INVALID_ARGUMENT;
@@ -113,6 +125,9 @@ RC PhysicalPlanGenerator::create_vec(LogicalOperator &logical_operator, unique_p
     case LogicalOperatorType::GROUP_BY: {
       return create_vec_plan(static_cast<GroupByLogicalOperator &>(logical_operator), oper, session);
     } break;
+    case LogicalOperatorType::ORDER_BY: {
+      return create_vec_plan(static_cast<OrderByLogicalOperator &>(logical_operator), oper, session);
+    } break;
     case LogicalOperatorType::EXPLAIN: {
       return create_vec_plan(static_cast<ExplainLogicalOperator &>(logical_operator), oper, session);
     } break;
@@ -126,6 +141,7 @@ RC PhysicalPlanGenerator::create_vec(LogicalOperator &logical_operator, unique_p
 
 RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
+  LOG_TRACE("Create physical plan for table get logical operator");
   vector<unique_ptr<Expression>> &predicates = table_get_oper.predicates();
   // 看看是否有可以用于索引查找的表达式
   Table *table = table_get_oper.table();
@@ -135,12 +151,45 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
   bool       has_not_equal = false;  // 检查是否有NOT_EQUAL查询
   
   for (auto &expr : predicates) {
+    
     if (expr->type() == ExprType::COMPARISON) {
       auto comparison_expr = static_cast<ComparisonExpr *>(expr.get());
-      // 检查
+      // 检查是否有NOT_EQUAL查询
+      // 创建子查询
+      if (comparison_expr->left()->type() == ExprType::SUB_QUERY) {
+        LOG_WARN("Creating subquery physical operator for left child");
+        auto sub_query_expr = static_cast<SubqueryExpr *>(comparison_expr->left().get());
+        
+        if (sub_query_expr->physical_operator() != nullptr) {
+          LOG_WARN("[UNEXPECTED] subquery physical operator is not null!");
+        }
+        unique_ptr<PhysicalOperator> subquery_phy_oper = nullptr;
+        RC rc = create(*sub_query_expr->logical_operator(), subquery_phy_oper,session);
+        if (rc != RC::SUCCESS) {
+          LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
+          return rc;
+        }
+        sub_query_expr->set_physical_operator(std::move(subquery_phy_oper));
+      } 
+      if (comparison_expr->right()->type() == ExprType::SUB_QUERY) {
+        LOG_WARN("Creating subquery physical operator for right child");
+        auto sub_query_expr = static_cast<SubqueryExpr *>(comparison_expr->right().get());
+        if (sub_query_expr->physical_operator() != nullptr) {
+          LOG_WARN("[UNEXPECTED] subquery physical operator is not null!");
+        }
+        unique_ptr<PhysicalOperator> subquery_phy_oper = nullptr;
+        RC rc = create(*sub_query_expr->logical_operator(), subquery_phy_oper,session);
+        if (rc != RC::SUCCESS) {
+          LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
+          return rc;
+        }
+        sub_query_expr->set_physical_operator(std::move(subquery_phy_oper));
+      }
       if (comparison_expr->comp() == NOT_EQUAL) {
         has_not_equal = true;
+        break;  // 如果有NOT_EQUAL，不使用索引扫描
       }
+      // 简单处理，就找等值查询
       if (comparison_expr->comp() != EQUAL_TO) {
         continue;
       }
@@ -177,7 +226,7 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
 
   if (index != nullptr) {
     if (has_not_equal) {
-      // 使用索引全表扫描在过滤阶段应用条件
+      // 对于NOT_EQUAL查询，使用索引进行全表扫描，然后在过滤阶段应用条件
       IndexScanPhysicalOperator *index_scan_oper = new IndexScanPhysicalOperator(table,
           index,
           table_get_oper.read_write_mode(),
@@ -206,10 +255,11 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
       LOG_TRACE("use index scan for EQUAL query");
     }
   } else {
+    // 在这里初始化了table_scanner
     auto table_scan_oper = new TableScanPhysicalOperator(table, table_get_oper.read_write_mode());
     table_scan_oper->set_predicates(std::move(predicates));
     oper = unique_ptr<PhysicalOperator>(table_scan_oper);
-    LOG_TRACE("use table scan");
+    LOG_TRACE("Use table scan");
   }
 
   return RC::SUCCESS;
@@ -217,6 +267,7 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
 
 RC PhysicalPlanGenerator::create_plan(PredicateLogicalOperator &pred_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
+  LOG_TRACE("Create physical plan for predicate(filter) logical operator");
   vector<unique_ptr<LogicalOperator>> &children_opers = pred_oper.children();
   ASSERT(children_opers.size() == 1, "predicate logical operator's sub oper number should be 1");
 
@@ -229,23 +280,82 @@ RC PhysicalPlanGenerator::create_plan(PredicateLogicalOperator &pred_oper, uniqu
     return rc;
   }
 
+  // vector<ConjunctionExpr>
   vector<unique_ptr<Expression>> &expressions = pred_oper.expressions();
   ASSERT(expressions.size() == 1, "predicate logical operator's children should be 1");
 
-  unique_ptr<Expression> expression = std::move(expressions.front());
-  oper = unique_ptr<PhysicalOperator>(new PredicatePhysicalOperator(std::move(expression)));
+  unique_ptr<Expression> &expression = expressions.front(); // Use reference instead of move
+  
+   // 取出子查询的逻辑算子，创建物理算子
+  std::vector<ComparisonExpr *> comparison_exprs;
+  if (expression->type() == ExprType::CONJUNCTION) {
+    auto conjunction_expr = static_cast<ConjunctionExpr *>(expression.get());
+    vector<unique_ptr<Expression>> &children = conjunction_expr->children();
+    for (auto &child_expr : children) {
+      if (child_expr->type() == ExprType::COMPARISON) {
+        comparison_exprs.push_back(static_cast<ComparisonExpr *>(child_expr.get()));
+      }
+    }
+  } else if (expression->type() == ExprType::COMPARISON) {
+    comparison_exprs.push_back(static_cast<ComparisonExpr *>(expression.get()));
+  }
+
+  for (auto &comparison_expr : comparison_exprs) {
+    if (comparison_expr->left()->type() == ExprType::SUB_QUERY) {
+      auto sub_query_expr = static_cast<SubqueryExpr *>(comparison_expr->left().get());
+      // 为子查询表达式设置事务上下文，保证后续 open/scan 的上下文有效
+      if (session != nullptr) {
+        sub_query_expr->set_trx(session->current_trx());
+      }
+      if (sub_query_expr->physical_operator() != nullptr) {
+        LOG_WARN("[UNEXPECTED] subquery physical operator is not null!");
+      }
+      unique_ptr<PhysicalOperator> subquery_phy_oper = nullptr;
+      RC rc = create(*sub_query_expr->logical_operator(), subquery_phy_oper, session);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
+        return rc;
+      }
+      sub_query_expr->set_physical_operator(std::move(subquery_phy_oper));
+    }
+    if (comparison_expr->right()->type() == ExprType::SUB_QUERY) {
+      auto sub_query_expr = static_cast<SubqueryExpr *>(comparison_expr->right().get());
+      // 为子查询表达式设置事务上下文，保证后续 open/scan 的上下文有效
+      if (session != nullptr) {
+        sub_query_expr->set_trx(session->current_trx());
+      }
+      if (sub_query_expr->physical_operator() != nullptr) {
+        LOG_WARN("[UNEXPECTED] subquery physical operator is not null!");
+      }
+      unique_ptr<PhysicalOperator> subquery_phy_oper = nullptr;
+      RC rc = create(*sub_query_expr->logical_operator(), subquery_phy_oper, session);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
+        return rc;
+      }
+      sub_query_expr->set_physical_operator(std::move(subquery_phy_oper));
+    }
+  }
+  
+  // Move the original expression into the predicate operator so that any
+  // SubqueryExpr retains its already-built physical operators.
+  unique_ptr<Expression> moved_expr = std::move(expression);
+  oper = unique_ptr<PhysicalOperator>(new PredicatePhysicalOperator(std::move(moved_expr)));
   oper->add_child(std::move(child_phy_oper));
   return rc;
 }
 
+// 算子数的根节点
 RC PhysicalPlanGenerator::create_plan(ProjectLogicalOperator &project_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
+  LOG_TRACE("Begin to create physical plan for project logical operator");
   vector<unique_ptr<LogicalOperator>> &child_opers = project_oper.children();
 
   unique_ptr<PhysicalOperator> child_phy_oper;
 
   RC rc = RC::SUCCESS;
   if (!child_opers.empty()) {
+    // 首先进入order by --> 得到order by physical operator
     LogicalOperator *child_oper = child_opers.front().get();
 
     rc = create(*child_oper, child_phy_oper, session);
@@ -255,14 +365,17 @@ RC PhysicalPlanGenerator::create_plan(ProjectLogicalOperator &project_oper, uniq
     }
   }
 
-  auto project_operator = make_unique<ProjectPhysicalOperator>(std::move(project_oper.expressions()));
+  vector<unique_ptr<Expression>> &tmp_expressions = project_oper.expressions();
+  auto project_operator = make_unique<ProjectPhysicalOperator>(std::move(tmp_expressions));
+
   if (child_phy_oper) {
     project_operator->add_child(std::move(child_phy_oper));
   }
 
+  // 得到的为ProjectPhysicalOperator
   oper = std::move(project_operator);
 
-  LOG_TRACE("create a project physical operator");
+  LOG_TRACE("Successfully create a project physical operator");
   return rc;
 }
 
@@ -270,8 +383,15 @@ RC PhysicalPlanGenerator::create_plan(InsertLogicalOperator &insert_oper, unique
 {
   Table                  *table           = insert_oper.table();
   vector<Value>          &values          = insert_oper.values();
+  LOG_DEBUG("----------------------------------------");
+  for(int i = 0; i < values.size(); i++) {
+    if(values[i].is_null()) {
+      LOG_DEBUG("Num %d value in values is null when initializing insert physical operator", i);
+    }
+  }
+  LOG_DEBUG("----------------------------------------");
   InsertPhysicalOperator *insert_phy_oper = new InsertPhysicalOperator(table, std::move(values));
-  oper.reset(insert_phy_oper);
+  oper.reset(insert_phy_oper);  // 转移资源所有权
   return RC::SUCCESS;
 }
 
@@ -349,6 +469,7 @@ RC PhysicalPlanGenerator::create_plan(ExplainLogicalOperator &explain_oper, uniq
 
 RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
+  LOG_TRACE("Begin to create a physical plan for join logical operator");
   RC rc = RC::SUCCESS;
 
   vector<unique_ptr<LogicalOperator>> &child_opers = join_oper.children();
@@ -356,9 +477,88 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
     LOG_WARN("join operator should have 2 children, but have %d", child_opers.size());
     return RC::INTERNAL;
   }
+  //LOG_INFO("Session hash_join_on: %s", session->hash_join_on() ? "true" : "false");
   if (session->hash_join_on() && can_use_hash_join(join_oper)) {
-    // your code here
+    //LOG_INFO("Using Hash Join for this query");
+    // 创建哈希连接操作符
+    unique_ptr<HashJoinPhysicalOperator> hash_join_oper(new HashJoinPhysicalOperator());
+    
+    // 智能选择 JOIN 字段 - 找到与当前 JOIN 相关的等值条件
+    const auto &join_predicates = join_oper.get_join_predicates();
+    
+    for (const auto &predicate : join_predicates) {
+      auto *comp_expr = dynamic_cast<ComparisonExpr*>(predicate.get());
+      if (comp_expr != nullptr && comp_expr->comp() == CompOp::EQUAL_TO) {
+        auto *left_field = dynamic_cast<FieldExpr*>(comp_expr->left().get());
+        auto *right_field = dynamic_cast<FieldExpr*>(comp_expr->right().get());
+        if (left_field != nullptr && right_field != nullptr) {
+         // LOG_WARN("HashJoin: Found join condition: %s.%s = %s.%s", 
+                   left_field->field().table_name(), left_field->field().field_name(),
+                   right_field->field().table_name(), right_field->field().field_name();
+          // 检查字段是否与当前 JOIN 相关
+          const char *left_table = left_field->field().table_name();
+          const char *right_table = right_field->field().table_name();
+          
+          // 获取当前 JOIN 的子操作符
+          const auto &children = join_oper.children();
+          if (children.size() >= 2) {
+            // 检查左字段是否来自左子树，右字段是否来自右子树
+            bool left_from_left = false;
+            bool right_from_right = false;
+            
+            // 检查左子树（可能是单个表或之前 JOIN 的结果）
+            if (children[0]->type() == LogicalOperatorType::TABLE_GET) {
+              auto *left_table_get = dynamic_cast<TableGetLogicalOperator*>(children[0].get());
+              if (left_table_get != nullptr && strcmp(left_table_get->table()->name(), left_table) == 0) {
+                left_from_left = true;
+              }
+            } else if (children[0]->type() == LogicalOperatorType::JOIN) {
+              // 左子树是 JOIN 结果，检查是否包含左字段的表
+              // 简化检查：如果左字段的表名在左子树中，认为来自左子树
+              left_from_left = true; // 暂时简化，假设左字段来自左子树
+            }
+            
+            // 检查右子树（当前表）
+            if (children[1]->type() == LogicalOperatorType::TABLE_GET) {
+              auto *right_table_get = dynamic_cast<TableGetLogicalOperator*>(children[1].get());
+              if (right_table_get != nullptr && strcmp(right_table_get->table()->name(), right_table) == 0) {
+                right_from_right = true;
+              }
+            }
+            
+            // 如果左字段来自左子树，右字段来自右子树，则使用这个条件
+            if (left_from_left && right_from_right) {
+              hash_join_oper->set_join_fields(left_field, right_field);
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    // 设置过滤条件 - 从 JoinLogicalOperator 的 predicate_op_ 中获取
+    auto *predicate_op = join_oper.get_predicate_op();
+    if (predicate_op != nullptr) {
+      auto *predicate_oper = dynamic_cast<PredicateLogicalOperator*>(predicate_op);
+      if (predicate_oper != nullptr) {
+        hash_join_oper->set_filter_expressions(predicate_oper->expressions());
+      }
+    }
+    
+    for (auto &child_oper : child_opers) {
+      unique_ptr<PhysicalOperator> child_physical_oper;
+      rc = create(*child_oper, child_physical_oper, session);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to create physical child oper. rc=%s", strrc(rc));
+        return rc;
+      }
+      hash_join_oper->add_child(std::move(child_physical_oper));
+    }
+    
+    oper = std::move(hash_join_oper);
+    //LOG_INFO("Created HashJoinPhysicalOperator");
   } else {
+    LOG_INFO("Using Nested Loop Join for this query");
     unique_ptr<PhysicalOperator> join_physical_oper(new NestedLoopJoinPhysicalOperator());
     for (auto &child_oper : child_opers) {
       unique_ptr<PhysicalOperator> child_physical_oper;
@@ -378,8 +578,13 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
 
 bool PhysicalPlanGenerator::can_use_hash_join(JoinLogicalOperator &join_oper)
 {
-  // your code here
-  return false;
+  //LOG_INFO("Checking if can use hash join...");
+  
+  // 总是使用 Hash Join，因为它可以处理所有情况：
+  // 1. 等值条件：使用正常的 Hash Join 算法
+  // 2. 非等值条件：退化为 Nested Loop Join 行为
+  // 3. 混合条件：Hash Join + 过滤
+  return true;
 }
 
 RC PhysicalPlanGenerator::create_plan(CalcLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
@@ -393,6 +598,7 @@ RC PhysicalPlanGenerator::create_plan(CalcLogicalOperator &logical_oper, unique_
 
 RC PhysicalPlanGenerator::create_plan(GroupByLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
+  LOG_TRACE("Begin to create a physical plan for group by logical operator");
   RC rc = RC::SUCCESS;
 
   vector<unique_ptr<Expression>> &group_by_expressions = logical_oper.group_by_expressions();
@@ -420,6 +626,45 @@ RC PhysicalPlanGenerator::create_plan(GroupByLogicalOperator &logical_oper, uniq
   return rc;
 }
 
+RC PhysicalPlanGenerator::create_plan(OrderByLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session *session)
+{
+  LOG_TRACE("Begin to create a physical plan for order by logical operator");
+  RC rc = RC::SUCCESS;
+
+  // OrderedUnboundExpr
+  vector<unique_ptr<OrderedUnboundFieldExpr>> &order_by_expressions = logical_oper.order_by_expressions();
+  unique_ptr<OrderByPhysicalOperator> order_by_oper;
+
+  // 注意: 不能在析构函数之中释放std::move转移过去的观察者指针，否则会造成二次释放 ！
+  // 之前由于传入了裸指针，所以当OrderByLogicalOperator被析构，智能指针被释放时，裸指针会全部变为悬空指针 ！！！
+
+  // 使用expressions初始化physical operator
+  // 兼容聚合函数的排序 --> 暂不实现
+  if (order_by_expressions.empty()) {
+    LOG_WARN("When initializing order by physical operator in create_plan, cannot find expressions !");
+    return RC::SUCCESS;
+  } else {
+    order_by_oper = make_unique<OrderByPhysicalOperator>(
+        std::move(order_by_expressions));
+  }
+
+  ASSERT(logical_oper.children().size() == 1, "order by operator should have 1 child");
+
+  LogicalOperator             &child_oper = *logical_oper.children().front();
+  unique_ptr<PhysicalOperator> child_physical_oper;
+  // 应当进入group by
+  rc = create(child_oper, child_physical_oper, session);
+  if (OB_FAIL(rc)) {
+    LOG_WARN("failed to create child physical operator of order by operator. rc=%s", strrc(rc));
+    return rc;
+  }
+
+  order_by_oper->add_child(std::move(child_physical_oper));
+
+  oper = std::move(order_by_oper);
+  return rc;
+}
+
 RC PhysicalPlanGenerator::create_vec_plan(TableGetLogicalOperator &table_get_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
   vector<unique_ptr<Expression>> &predicates = table_get_oper.predicates();
@@ -435,19 +680,21 @@ RC PhysicalPlanGenerator::create_vec_plan(TableGetLogicalOperator &table_get_ope
 RC PhysicalPlanGenerator::create_vec_plan(GroupByLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
   RC rc = RC::SUCCESS;
+
+  // 从Logical Operator获取表达式
   unique_ptr<PhysicalOperator> physical_oper = nullptr;
   if (logical_oper.group_by_expressions().empty()) {
     physical_oper = make_unique<AggregateVecPhysicalOperator>(std::move(logical_oper.aggregate_expressions()));
   } else {
     physical_oper = make_unique<GroupByVecPhysicalOperator>(
       std::move(logical_oper.group_by_expressions()), std::move(logical_oper.aggregate_expressions()));
-
   }
 
   ASSERT(logical_oper.children().size() == 1, "group by operator should have 1 child");
 
   LogicalOperator             &child_oper = *logical_oper.children().front();
   unique_ptr<PhysicalOperator> child_physical_oper;
+  // 递归获取子算子的physical operator
   rc = create_vec(child_oper, child_physical_oper, session);
   if (OB_FAIL(rc)) {
     LOG_WARN("failed to create child physical operator of group by(vec) operator. rc=%s", strrc(rc));
@@ -458,8 +705,46 @@ RC PhysicalPlanGenerator::create_vec_plan(GroupByLogicalOperator &logical_oper, 
 
   oper = std::move(physical_oper);
   return rc;
+}
 
-  return RC::SUCCESS;
+RC PhysicalPlanGenerator::create_vec_plan(OrderByLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session *session)
+{
+  RC rc = RC::SUCCESS;
+  vector<unique_ptr<OrderedUnboundFieldExpr>> &order_by_expressions = logical_oper.order_by_expressions();
+
+  vector<OrderedUnboundFieldExpr *> raw_ptrs;
+  raw_ptrs.reserve(order_by_expressions.size());
+  for (auto &ptr : order_by_expressions) {
+    raw_ptrs.push_back(ptr.get());
+  }
+
+  // 从Logical Operator获取表达式
+  unique_ptr<PhysicalOperator> physical_oper = nullptr;
+  // 使用expressions初始化physical operator --> 为空的时候视为没有order by子句
+  if (logical_oper.order_by_expressions().empty()) {
+    LOG_WARN("When initializing order by physical operator in create_vec_plan, cannot find expressions !");
+    return RC::SUCCESS;
+  } else {
+    // unique_ptr(OrderedUnboundExpr) --> Expression *
+    physical_oper = make_unique<OrderByVecPhysicalOperator>(
+        std::move(raw_ptrs));
+  }
+
+  ASSERT(logical_oper.children().size() == 1, "order by operator should have 1 child");
+
+  LogicalOperator             &child_oper = *logical_oper.children().front();
+  unique_ptr<PhysicalOperator> child_physical_oper;
+  // 递归获取子算子的physical operator
+  rc = create_vec(child_oper, child_physical_oper, session);
+  if (OB_FAIL(rc)) {
+    LOG_WARN("failed to create child physical operator of order by(vec) operator. rc=%s", strrc(rc));
+    return rc;
+  }
+
+  physical_oper->add_child(std::move(child_physical_oper));
+
+  oper = std::move(physical_oper);
+  return rc;
 }
 
 RC PhysicalPlanGenerator::create_vec_plan(ProjectLogicalOperator &project_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
@@ -471,6 +756,7 @@ RC PhysicalPlanGenerator::create_vec_plan(ProjectLogicalOperator &project_oper, 
   RC rc = RC::SUCCESS;
   if (!child_opers.empty()) {
     LogicalOperator *child_oper = child_opers.front().get();
+    // 递归初始化子算子的physical operator
     rc                          = create_vec(*child_oper, child_phy_oper, session);
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to create project logical operator's child physical operator. rc=%s", strrc(rc));
@@ -483,6 +769,10 @@ RC PhysicalPlanGenerator::create_vec_plan(ProjectLogicalOperator &project_oper, 
   if (child_phy_oper != nullptr) {
     vector<Expression *> expressions;
     for (auto &expr : project_operator->expressions()) {
+      if(expr == nullptr) {
+        LOG_ERROR("Get null expression when initializing project physical operator");
+        return RC::INVALID_ARGUMENT;
+      }
       expressions.push_back(expr.get());
     }
     auto expr_operator = make_unique<ExprVecPhysicalOperator>(std::move(expressions));

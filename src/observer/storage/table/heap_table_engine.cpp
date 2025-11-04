@@ -36,9 +36,13 @@ HeapTableEngine::~HeapTableEngine()
 
   LOG_INFO("Table has been closed: %s", table_meta_->name());
 }
+
+/* 原先在make_record中定义的管理null值的bitmap此后被销毁 */
 RC HeapTableEngine::insert_record(Record &record)
 {
+  LOG_TRACE("HeapTableEngine::insert_record() is called");
   RC rc = RC::SUCCESS;
+  // 并没有实质上使用record --> record_file_handler中的接口暂时都还是Unimplemented
   rc    = record_handler_->insert_record(record.data(), table_meta_->record_size(), &record.rid());
   if (rc != RC::SUCCESS) {
     LOG_ERROR("Insert record failed. table name=%s, rc=%s", table_meta_->name(), strrc(rc));
@@ -223,8 +227,10 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
 
 RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid)
 {
+  LOG_TRACE("HeapTableEngine::insert_entry_of_indexes() is called");
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
+    // BplusTreeIndex::insert_entry --> index_handler_.insert_entry --> 与null无关了
     rc = index->insert_entry(record, &rid);
     if (rc != RC::SUCCESS) {
       break;

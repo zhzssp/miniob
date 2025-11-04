@@ -19,6 +19,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/physical_operator.h"
 #include "sql/operator/logical_operator.h"
 #include "sql/stmt/select_stmt.h"
+#include "sql/expr/subquery_expr.h"
 
 using namespace std;
 
@@ -150,7 +151,141 @@ ComparisonExpr::~ComparisonExpr() {}
 RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &result) const
 {
   RC  rc         = RC::SUCCESS;
-  int cmp_result = left.compare(right);
+  int cmp_result = 0;
+  
+  // is / is not --> 第二个数只能是null
+  if (comp_ == IS_OP) {
+    if (!left.is_null() && right.is_null()) {
+      result = false;
+      return rc;
+    } else if (left.is_null() && right.is_null()) {
+      result = true;
+      return rc;
+    }
+    else {
+      return RC::INVALID_DATE_FORMAT;
+    }
+  } else if(comp_ == IS_NOT_OP) {
+    if (!left.is_null() && right.is_null()) {
+      result = true;
+      return rc;
+    } else if (left.is_null() && right.is_null()) {
+      result = false;
+      return rc;
+    } else {
+      return RC::INVALID_DATE_FORMAT;
+    }
+  } else {
+    // 其余全部当作传统运算符对待
+    if(left.is_null() || right.is_null()) {
+      result = false;
+      return rc;
+    }
+  }
+  LOG_INFO("ComparisonExpr's comp_ is not related to is null / is not null");
+
+  // 安全类型对齐：在比较前尽量将不同类型转换为可比较的同一类型
+
+  // 规则：
+  // - INTS vs FLOATS -> 都转为 FLOATS
+  // - CHARS vs numeric -> 若可解析为数字，则都转为 FLOATS；否则按不可比处理（结果为 false）
+  // - 其他不同类型 -> 不可比（结果为 false）
+  AttrType lt = left.attr_type();
+  AttrType rt = right.attr_type();
+
+  if (lt != rt) {
+    // INTS/FLOATS 对齐为浮点比较
+    if ((lt == AttrType::INTS && rt == AttrType::FLOATS) || (lt == AttrType::FLOATS && rt == AttrType::INTS)) {
+      Value l2 = left;
+      Value r2 = right;
+      if (lt == AttrType::INTS) {
+        // 提升左为float
+        Value tmp;
+        tmp.set_float(static_cast<float>(left.get_int()));
+        l2 = tmp;
+      }
+      if (rt == AttrType::INTS) {
+        Value tmp;
+        tmp.set_float(static_cast<float>(right.get_int()));
+        r2 = tmp;
+      }
+      cmp_result = l2.compare(r2);
+    } else if ((lt == AttrType::CHARS && (rt == AttrType::INTS || rt == AttrType::FLOATS)) ||
+               (rt == AttrType::CHARS && (lt == AttrType::INTS || lt == AttrType::FLOATS))) {
+      // 解析字符串为数字
+      auto parse_to_double = [](const Value &v, double &out, bool &ok) {
+        ok = false;
+        if (v.attr_type() == AttrType::FLOATS) {
+          out = static_cast<double>(v.get_float());
+          ok = true;
+          return;
+        }
+        if (v.attr_type() == AttrType::INTS) {
+          out = static_cast<double>(v.get_int());
+          ok = true;
+          return;
+        }
+        if (v.attr_type() == AttrType::CHARS) {
+          std::string s = v.to_string();
+          // 去除可能的引号
+          if (!s.empty() && s.front() == '\'' && s.back() == '\'' && s.size() >= 2) {
+            s = s.substr(1, s.size() - 2);
+          }
+          char *endptr = nullptr;
+          const char *cstr = s.c_str();
+          errno = 0;
+          double val = strtod(cstr, &endptr);
+          if (errno == 0 && endptr != cstr) {
+            // 允许部分数字解析，如 '16a' -> 16.0
+            out = val;
+            ok = true;
+          } else if (s.size() == 1) {
+            // 单字符，按 ASCII 码进行数值比较
+            out = static_cast<unsigned char>(s[0]);
+            ok = true;
+          }
+          return;
+        }
+      };
+
+      double dl = 0.0, dr = 0.0;
+      bool ok_l = false, ok_r = false;
+      parse_to_double(left, dl, ok_l);
+      parse_to_double(right, dr, ok_r);
+      if (ok_l && ok_r) {
+        Value l2; l2.set_float(static_cast<float>(dl));
+        Value r2; r2.set_float(static_cast<float>(dr));
+        cmp_result = l2.compare(r2);
+      } else {
+        // 无法比较的异类型，返回 false 结果
+        cmp_result = 0;
+        switch (comp_) {
+          case EQUAL_TO:      result = false; return RC::SUCCESS;
+          case NOT_EQUAL:     result = false; return RC::SUCCESS;
+          case LESS_EQUAL:    result = false; return RC::SUCCESS;
+          case LESS_THAN:     result = false; return RC::SUCCESS;
+          case GREAT_EQUAL:   result = false; return RC::SUCCESS;
+          case GREAT_THAN:    result = false; return RC::SUCCESS;
+          default: break;
+        }
+      }
+    } else {
+      // 未支持的跨类型比较，按不可比处理
+      cmp_result = 0;
+      switch (comp_) {
+        case EQUAL_TO:      result = false; return RC::SUCCESS;
+        case NOT_EQUAL:     result = false; return RC::SUCCESS;
+        case LESS_EQUAL:    result = false; return RC::SUCCESS;
+        case LESS_THAN:     result = false; return RC::SUCCESS;
+        case GREAT_EQUAL:   result = false; return RC::SUCCESS;
+        case GREAT_THAN:    result = false; return RC::SUCCESS;
+        default: break;
+      }
+    }
+  } else {
+    // 相同类型，直接比较
+    cmp_result = left.compare(right);
+  }
   result         = false;
   switch (comp_) {
     case EQUAL_TO: {
@@ -203,9 +338,82 @@ RC ComparisonExpr::try_get_value(Value &cell) const
 
 RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
 {
+  // Handle IN and NOT IN operations specially
+  if (comp_ == IN_OP || comp_ == NOT_IN_OP) {
+    LOG_WARN("IN operation: comp_=%d, right type=%d, left type=%d, right_ptr=%p, left_ptr=%p", 
+             (int)comp_, (int)right_->type(), (int)left_->type(), right_.get(), left_.get());
+    
+    Value left_value;
+    RC rc = left_->get_value(tuple, left_value);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
+      return rc;
+    }
+    LOG_WARN("[IN CHECK] lhs=%s", left_value.to_string().c_str());
+    bool found = false;
+    bool any_equal = false;
+    int sub_count = 0;
+    if (right_->type() != ExprType::SUB_QUERY) {
+      LOG_WARN("IN operation expected SUB_QUERY on right, got type=%d. Treating as not found.", (int)right_->type());
+      value.set_boolean(false);
+      return RC::SUCCESS;
+    }
+    SubqueryExpr* subquery_expr = static_cast<SubqueryExpr*>(right_.get());
+    Tuple *outer_tuple_ptr = const_cast<Tuple*>(&tuple);
+    rc = subquery_expr->open_physical_operator(outer_tuple_ptr);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("IN: failed to open subquery operator. rc=%s", strrc(rc));
+      value.set_boolean(false);
+      return RC::SUCCESS;
+    }
+    while ((rc = subquery_expr->physical_operator()->next()) == RC::SUCCESS) {
+      ++sub_count;
+      auto sub_t = subquery_expr->physical_operator()->current_tuple();
+      LOG_WARN("[IN CHECK] subquery row %d, cell_num=%d", sub_count, sub_t ? sub_t->cell_num() : -1);
+      if (!sub_t || sub_t->cell_num() == 0) continue;
+      Value right_cell;
+      sub_t->cell_at(0, right_cell);
+      LOG_WARN("[IN CHECK]   lhs=%s subval=%s", left_value.to_string().c_str(), right_cell.to_string().c_str());
+      Value aligned_left = left_value;
+      Value aligned_right = right_cell;
+      Value casted;
+      if (right_cell.attr_type() != left_value.attr_type()) {
+        if (Value::cast_to(right_cell, left_value.attr_type(), casted) == RC::SUCCESS) {
+          aligned_right = casted;
+        } else if (Value::cast_to(left_value, right_cell.attr_type(), casted) == RC::SUCCESS) {
+          aligned_left = casted;
+        }
+      }
+      if ((aligned_left.attr_type() == AttrType::INTS || aligned_left.attr_type() == AttrType::FLOATS || aligned_left.attr_type() == AttrType::CHARS) &&
+          (aligned_right.attr_type() == AttrType::INTS || aligned_right.attr_type() == AttrType::FLOATS || aligned_right.attr_type() == AttrType::CHARS)) {
+        if (aligned_left.compare(aligned_right) == 0) {
+          any_equal = true;
+          if (comp_ == IN_OP) {
+            found = true;
+            break;
+          }
+        }
+      }
+    }
+    if (sub_count == 0)
+      LOG_WARN("[IN CHECK] subquery yielded no rows!");
+    RC close_rc = subquery_expr->close_physical_operator();
+    if (close_rc != RC::SUCCESS) {
+      LOG_WARN("IN: failed to close subquery operator. rc=%s", strrc(close_rc));
+    }
+    if (rc != RC::SUCCESS && rc != RC::RECORD_EOF) {
+      LOG_WARN("IN: subquery execution error. rc=%s", strrc(rc));
+    }
+    found = (comp_ == IN_OP) ? any_equal : !any_equal;
+    LOG_WARN("[IN CHECK] lhs=%s final found=%d (any_equal=%d) on sub_count=%d", left_value.to_string().c_str(), found, any_equal, sub_count);
+    value.set_boolean(found);
+    return RC::SUCCESS;
+  }
+  
   Value left_value;
   Value right_value;
 
+  // 比较表达式树 --> 递归
   RC rc = left_->get_value(tuple, left_value);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
@@ -370,7 +578,12 @@ AttrType ArithmeticExpr::value_type() const
 RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value, Value &value) const
 {
   RC rc = RC::SUCCESS;
-
+  if(left_value.is_null() || right_value.is_null()) 
+  {
+    value.set_null(true);
+    return rc;
+  }
+  
   const AttrType target_type = value_type();
   value.set_type(target_type);
 
@@ -613,6 +826,22 @@ unique_ptr<Aggregator> AggregateExpr::create_aggregator() const
   switch (aggregate_type_) {
     case Type::SUM: {
       aggregator = make_unique<SumAggregator>();
+      break;
+    }
+    case Type::COUNT: {
+      aggregator = make_unique<CountAggregator>();
+      break;
+    }
+    case Type::AVG: {
+      aggregator = make_unique<AvgAggregator>();
+      break;
+    }
+    case Type::MAX: {
+      aggregator = make_unique<MaxAggregator>();
+      break;
+    }
+    case Type::MIN: {
+      aggregator = make_unique<MinAggregator>();
       break;
     }
     default: {

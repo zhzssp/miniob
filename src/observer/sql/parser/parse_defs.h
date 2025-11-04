@@ -18,9 +18,11 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/vector.h"
 #include "common/lang/memory.h"
 #include "common/value.h"
-#include "common/lang/utility.h"
 
+// 前向声明
 class Expression;
+#include "common/lang/utility.h"
+class OrderedUnboundFieldExpr;
 
 /**
  * @defgroup SQLParser SQL Parser
@@ -40,6 +42,16 @@ struct RelAttrSqlNode
 };
 
 /**
+ * @brief 描述一个关系（表）引用
+ * @ingroup SQLParser
+ */
+struct RelationSqlNode
+{
+  string name;    ///< 表名
+  string alias;   ///< 表别名
+};
+
+/**
  * @brief 描述比较运算符
  * @ingroup SQLParser
  */
@@ -51,7 +63,11 @@ enum CompOp
   LESS_THAN,    ///< "<"
   GREAT_EQUAL,  ///< ">="
   GREAT_THAN,   ///< ">"
-  NO_OP
+  IN_OP,        ///< "IN"
+  NOT_IN_OP,    ///< "NOT IN"
+  NO_OP,
+  IS_OP,
+  IS_NOT_OP
 };
 
 /**
@@ -70,6 +86,34 @@ struct ConditionSqlNode
   char conjunction_type = 0; // 连接 condition 的类型，0: no conjunction, 1: and, 2: or
 };
 
+
+/**
+ * @brief 描述一个 JOIN 条件
+ * @ingroup SQLParser
+ */
+struct JoinConditionSqlNode
+{
+  int left_is_attr;              ///< TRUE if left-hand side is an attribute
+  RelAttrSqlNode left_attr;      ///< 左表属性 (if left_is_attr = true)
+  Value left_value;              ///< 左表值 (if left_is_attr = false)
+  int right_is_attr;             ///< TRUE if right-hand side is an attribute
+  RelAttrSqlNode right_attr;     ///< 右表属性 (if right_is_attr = true)
+  Value right_value;             ///< 右表值 (if right_is_attr = false)
+  CompOp comp;                   ///< 比较操作符
+};
+
+/**
+ * @brief 描述一个表引用（可能是表名或子查询）
+ * @ingroup SQLParser
+ */
+struct TableReferenceSqlNode
+{
+  string table_name;                    ///< 表名
+  string alias;                         ///< 表别名
+  vector<JoinConditionSqlNode> join_conditions;  ///< JOIN 条件
+  bool is_join;                         ///< 是否为 JOIN 操作
+};
+
 /**
  * @brief 描述一个select语句
  * @ingroup SQLParser
@@ -84,9 +128,12 @@ struct ConditionSqlNode
 struct SelectSqlNode
 {
   vector<unique_ptr<Expression>> expressions;  ///< 查询的表达式
-  vector<string>                 relations;    ///< 查询的表
+  vector<string>                 relations;    ///< 查询的表（保持向后兼容）
+  vector<TableReferenceSqlNode>  table_references;  ///JOIN
   vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件
   vector<unique_ptr<Expression>> group_by;     ///< group by clause
+  vector<RelationSqlNode>        ALIASES;      ///< 别名列表
+  vector<unique_ptr<OrderedUnboundFieldExpr>> order_by;
 };
 
 /**
@@ -141,6 +188,7 @@ struct AttrInfoSqlNode
   AttrType type;    ///< Type of attribute
   string   name;    ///< Attribute name
   size_t   length;  ///< Length of attribute
+  bool nullable = true;
 };
 
 /**

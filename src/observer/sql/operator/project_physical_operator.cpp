@@ -55,16 +55,31 @@ RC ProjectPhysicalOperator::close()
   }
   return RC::SUCCESS;
 }
+
 Tuple *ProjectPhysicalOperator::current_tuple()
 {
-  tuple_.set_tuple(children_[0]->current_tuple());
+  // 从下层算子获取其得到的tuple
+  LOG_INFO("project physical operator's current_tuple");
+  Tuple *new_tuple = children_[0]->current_tuple();
+  if(new_tuple == nullptr) {
+    LOG_WARN("Get null tuple from child[0]");
+    return nullptr;
+  }
+  tuple_.set_tuple(new_tuple);
   return &tuple_;
 }
 
 RC ProjectPhysicalOperator::tuple_schema(TupleSchema &schema) const
 {
+  // expressions_存的是select选中的字段
   for (const unique_ptr<Expression> &expression : expressions_) {
-    schema.append_cell(expression->name());
+    if (expression->has_alias()) {
+      // 如果有别名，使用别名
+      schema.append_cell(expression->alias());
+    } else {
+      // 如果没有别名，使用原始名称
+      schema.append_cell(expression->name());
+    }
   }
   return RC::SUCCESS;
 }
