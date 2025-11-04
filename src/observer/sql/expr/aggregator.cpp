@@ -43,8 +43,6 @@ RC SumAggregator::evaluate(Value& result)
   return RC::SUCCESS;
 }
 
-
-
 RC AvgAggregator::average(const Value &value)
 {
   // AVG 聚合函数：累积值的总和和计数
