@@ -28,6 +28,7 @@ public:
   GroupByPhysicalOperator(vector<Expression *> &&expressions);
   virtual ~GroupByPhysicalOperator() = default;
 
+/* 若要实现group by, 则需要在这里定义next和tuple相关函数 ? --> 存在两个子类，它们可能有定义 */
 protected:
   using AggregatorList = vector<unique_ptr<Aggregator>>;
   /**
@@ -51,6 +52,11 @@ protected:
 
   /// @brief 所有tuple聚合结束后，运算最终结果
   RC evaluate(GroupValueType &group_value);
+
+  // 子类有定义 ？
+  // RC open(Trx *trx) override { return RC::UNIMPLEMENTED; }
+  // RC next(Chunk &chunk) override { return RC::UNIMPLEMENTED; }
+  // RC close() override { return RC::UNIMPLEMENTED; }
 
 protected:
   vector<Expression *> aggregate_expressions_;  /// 聚合表达式

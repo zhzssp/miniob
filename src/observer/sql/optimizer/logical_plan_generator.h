@@ -27,6 +27,8 @@ class DeleteStmt;
 class UpdateStmt;
 class ExplainStmt;
 class LogicalOperator;
+class FilterObj;
+class Expression;
 
 class LogicalPlanGenerator
 {
@@ -46,6 +48,17 @@ private:
   RC create_plan(ExplainStmt *explain_stmt, unique_ptr<LogicalOperator> &logical_operator);
 
   RC create_group_by_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator);
+  RC create_order_by_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator);
 
   int implicit_cast_cost(AttrType from, AttrType to);
+  
+  // 递归处理表达式中的子查询
+  RC process_subquery_in_expression(unique_ptr<Expression> &expr);
+  
+  // 递归检查表达式中是否包含子查询
+  bool expression_has_subquery(unique_ptr<Expression> &expr);
+
+private:
+  // 辅助方法：将 FilterObj 转换为 Expression
+  static unique_ptr<Expression> create_expression_from_filter_obj(const FilterObj &filter_obj);
 };

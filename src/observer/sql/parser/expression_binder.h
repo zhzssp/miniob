@@ -15,6 +15,8 @@ See the Mulan PSL v2 for more details. */
 #pragma once
 
 #include "sql/expr/expression.h"
+#include <unordered_map>
+#include <string>
 
 class BinderContext
 {
@@ -23,6 +25,7 @@ public:
   virtual ~BinderContext() = default;
 
   void add_table(Table *table) { query_tables_.push_back(table); }
+  void add_table_alias(const char *alias, Table *table) { table_aliases_[alias] = table; }
 
   Table *find_table(const char *table_name) const;
 
@@ -30,6 +33,7 @@ public:
 
 private:
   vector<Table *> query_tables_;
+  unordered_map<string, Table *> table_aliases_;
 };
 
 /**
@@ -46,8 +50,10 @@ public:
 
 private:
   RC bind_star_expression(unique_ptr<Expression> &star_expr, vector<unique_ptr<Expression>> &bound_expressions);
+  RC bind_ordered_unbound_field_expression(
+      unique_ptr<Expression> &expr, vector<unique_ptr<Expression>> &bound_expressions);
   RC bind_unbound_field_expression(
-      unique_ptr<Expression> &unbound_field_expr, vector<unique_ptr<Expression>> &bound_expressions);
+          unique_ptr<Expression> &unbound_field_expr, vector<unique_ptr<Expression>> &bound_expressions);
   RC bind_field_expression(unique_ptr<Expression> &field_expr, vector<unique_ptr<Expression>> &bound_expressions);
   RC bind_value_expression(unique_ptr<Expression> &value_expr, vector<unique_ptr<Expression>> &bound_expressions);
   RC bind_cast_expression(unique_ptr<Expression> &cast_expr, vector<unique_ptr<Expression>> &bound_expressions);
@@ -59,6 +65,8 @@ private:
       unique_ptr<Expression> &arithmetic_expr, vector<unique_ptr<Expression>> &bound_expressions);
   RC bind_aggregate_expression(
       unique_ptr<Expression> &aggregate_expr, vector<unique_ptr<Expression>> &bound_expressions);
+  RC bind_subquery_expression(
+      unique_ptr<Expression> &subquery_expr, vector<unique_ptr<Expression>> &bound_expressions);
 
 private:
   BinderContext &context_;

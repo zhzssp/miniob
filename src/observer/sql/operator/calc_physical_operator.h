@@ -63,7 +63,13 @@ public:
   RC tuple_schema(TupleSchema &schema) const override
   {
     for (const unique_ptr<Expression> &expression : expressions_) {
-      schema.append_cell(expression->name());
+      if (expression->has_alias()) {
+        // 如果有别名，使用别名
+        schema.append_cell(expression->alias());
+      } else {
+        // 如果没有别名，使用原始名称
+        schema.append_cell(expression->name());
+      }
     }
     return RC::SUCCESS;
   }

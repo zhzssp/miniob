@@ -49,9 +49,11 @@ enum class PhysicalOperatorType
   DELETE,
   INSERT,
   UPDATE,
-  SCALAR_GROUP_BY,
+  SCALAR_GROUP_BY,  // 两个共同构成了group by
   HASH_GROUP_BY,
+  ORDER_BY,
   GROUP_BY_VEC,
+  ORDER_BY_VEC,
   AGGREGATE_VEC,
   EXPR_VEC,
 };
@@ -91,6 +93,9 @@ public:
 
   vector<unique_ptr<PhysicalOperator>> &children() { return children_; }
 
+  void set_outer_tuple(Tuple *tuple) { outer_tuple = tuple; }
+
 protected:
   vector<unique_ptr<PhysicalOperator>> children_;
+  Tuple *outer_tuple = nullptr;  // 用于嵌套循环连接中的外层元组传递
 };

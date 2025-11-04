@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 RC LsmRecordScanner::open_scan()
 {
+  LOG_TRACE("Open lsm record scanner");
   RC rc = RC::SUCCESS;
   if (lsm_iter_ != nullptr) {
     delete lsm_iter_;
@@ -48,6 +49,7 @@ RC LsmRecordScanner::close_scan()
 
 RC LsmRecordScanner::next(Record &record)
 {
+  LOG_TRACE("Call lsm record scanner next()");
   if (lsm_iter_->valid()) {
     string_view lsm_value = lsm_iter_->value();
     string_view lsm_key = lsm_iter_->key();

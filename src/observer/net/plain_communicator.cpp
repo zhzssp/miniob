@@ -275,9 +275,16 @@ RC PlainCommunicator::write_tuple_result(SqlResult *sql_result)
   RC rc = RC::SUCCESS;
   Tuple *tuple = nullptr;
   while (RC::SUCCESS == (rc = sql_result->next_tuple(tuple))) {
-    assert(tuple != nullptr);
+    // assert(tuple != nullptr);
+    if(tuple == nullptr || tuple->cell_num() <= 0) {
+      LOG_WARN("Get null tuple, viewed as read completion");
+      rc = RC::RECORD_EOF;
+      break;
+    }
+    LOG_INFO("write tuple result * 1");
 
     int cell_num = tuple->cell_num();
+    LOG_INFO("cell_num = %d", cell_num);
     for (int i = 0; i < cell_num; i++) {
       if (i != 0) {
         const char *delim = " | ";
@@ -290,7 +297,10 @@ RC PlainCommunicator::write_tuple_result(SqlResult *sql_result)
         }
       }
 
+      // 获取当前tuple的第i个Value --> to_string：添加null的情况 
       Value value;
+      LOG_INFO("Try to get num %d value of the tuple", i);
+      // 使用ValueListTuple，已经将record转化为vector<Value>
       rc = tuple->cell_at(i, value);
       if (rc != RC::SUCCESS) {
         LOG_WARN("failed to get tuple cell value. rc=%s", strrc(rc));
@@ -299,6 +309,7 @@ RC PlainCommunicator::write_tuple_result(SqlResult *sql_result)
       }
 
       string cell_str = value.to_string();
+      LOG_INFO("Successfully get num %d value, which is %s", i, cell_str.c_str());
 
       rc = writer_->writen(cell_str.data(), cell_str.size());
       if (OB_FAIL(rc)) {
@@ -307,7 +318,8 @@ RC PlainCommunicator::write_tuple_result(SqlResult *sql_result)
         return rc;
       }
     }
-
+    
+    // 换行输出新的元组
     char newline = '\n';
 
     rc = writer_->writen(&newline, 1);

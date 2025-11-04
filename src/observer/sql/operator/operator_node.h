@@ -29,6 +29,7 @@ enum class OpType
   LOGICALGET,
   LOGICALCALCULATE,
   LOGICALGROUPBY,
+  LOGICALORDERBY,
   LOGICALPROJECTION,
   LOGICALFILTER,
   LOGICALINNERJOIN,
@@ -59,7 +60,8 @@ enum class OpType
   HASHGROUPBY,
   ANALYZE,
   FILTER,
-  SCALARGROUPBY
+  SCALARGROUPBY,
+  ORDER_BY
 };
 
 // TODO: OperatorNode is the abstrace class of logical/physical operator

@@ -11,8 +11,13 @@
 #include "sql/parser/yacc_sql.hpp"
 #include "sql/parser/lex_sql.h"
 #include "sql/expr/expression.h"
+#include "sql/expr/subquery_expr.h"
 
 using namespace std;
+
+// 全局变量用于存储 JOIN 条件
+static vector<JoinConditionSqlNode> g_join_conditions;
+static vector<TableReferenceSqlNode> g_table_references;
 
 string token_name(const char *sql_string, YYLTYPE *llocp)
 {
@@ -73,6 +78,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         INDEX
         CALC
         SELECT
+        ORDER  
+        ASC   
         DESC
         SHOW
         SYNC
@@ -106,6 +113,9 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         EXPLAIN
         STORAGE
         FORMAT
+        AS
+        INNER
+        JOIN
         PRIMARY
         KEY
         ANALYZE
@@ -118,6 +128,10 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         LE
         GE
         NE
+        IN
+        NULL_T
+        NOT
+        IS
 
 /** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
 %union {
@@ -126,17 +140,20 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   Value *                                    value;
   enum CompOp                                comp;
   RelAttrSqlNode *                           rel_attr;
+  RelationSqlNode *                          relation_sql_node;
   vector<AttrInfoSqlNode> *                  attr_infos;
   AttrInfoSqlNode *                          attr_info;
   Expression *                               expression;
   vector<unique_ptr<Expression>> *           expression_list;
+  vector<unique_ptr<OrderedUnboundFieldExpr>> *           order_expression_list;
   vector<Value> *                            value_list;
   vector<ConditionSqlNode> *                 condition_list;
   vector<RelAttrSqlNode> *                   rel_attr_list;
   vector<string> *                           relation_list;
   vector<string> *                           key_list;
+  vector<JoinConditionSqlNode> *             join_condition_list;
   char *                                     cstring;
-  int                                        number;
+  int                                        number;  // 进一步用于null的表示
   float                                      floats;
 }
 
@@ -163,7 +180,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <condition>           condition
 %type <value>               value
 %type <number>              number
-%type <cstring>             relation
+%type <number>              null_spec
 %type <comp>                comp_op
 %type <rel_attr>            rel_attr
 %type <attr_infos>          attr_def_list
@@ -175,10 +192,13 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <key_list>            primary_key
 %type <key_list>            attr_list
 %type <relation_list>       rel_list
+%type <relation_sql_node>   relation
 %type <expression>          expression
 %type <expression>          aggregate_expression
 %type <expression_list>     expression_list
 %type <expression_list>     group_by
+%type <order_expression_list>     order_by        // 整个order by子句
+%type <order_expression_list>     order_by_list   // 多个排序项
 %type <cstring>             fields_terminated_by
 %type <cstring>             enclosed_by
 %type <sql_node>            calc_stmt
@@ -206,6 +226,12 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 // commands should be a list but I use a single command instead
 %type <sql_node>            commands
 
+// JOIN 相关类型
+%type <cstring>             table_name
+%type <condition>            join_condition
+%type <join_condition_list>  join_condition_list
+%type <sql_node>             subquery_stmt
+
 %left '+' '-'
 %left '*' '/'
 %nonassoc UMINUS
@@ -215,6 +241,10 @@ commands: command_wrapper opt_semicolon  //commands or sqls. parser starts here.
   {
     unique_ptr<ParsedSqlNode> sql_node = unique_ptr<ParsedSqlNode>($1);
     sql_result->add_sql_node(std::move(sql_node));
+    
+    // 清理全局变量
+    g_join_conditions.clear();
+    g_table_references.clear();
   }
   ;
 
@@ -357,23 +387,27 @@ attr_def_list:
       delete $3;
     }
     ;
-    
+
+// 表字段的定义
 attr_def:
-    ID type LBRACE number RBRACE 
+    ID type LBRACE number RBRACE null_spec
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
       $$->length = $4;
+      $$->nullable = ($6 == 1);
     }
-    | ID type
+    | ID type null_spec
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
       $$->length = 4;
+      $$->nullable = ($3 == 1);
     }
     ;
+
 number:
     NUMBER {$$ = $1;}
     ;
@@ -411,7 +445,24 @@ attr_list:
     }
     ;
 
-insert_stmt:        /*insert   语句的语法解析树*/
+null_spec:
+    /* empty */ 
+    {
+      /* 省略时默认允许 NULL */
+      $$ = 1; /* 1 表示 nullable */
+    }
+    | NULL_T 
+    {
+      $$ = 1; /* 明确写 NULL */
+    }
+    | NOT NULL_T
+    {
+      $$ = 0; /* NOT NULL => 不可空 */
+    }
+    ;
+
+
+insert_stmt:        /* insert 语句的语法解析树 --> 暂时只支持一次性插入一个元组 --> 一个Value代表一个字段的值 */
     INSERT INTO ID VALUES LBRACE value_list RBRACE 
     {
       $$ = new ParsedSqlNode(SCF_INSERT);
@@ -434,6 +485,8 @@ value_list:
       delete $3;
     }
     ;
+
+// 表示插入的元组
 value:
     NUMBER {
       $$ = new Value((int)$1);
@@ -448,12 +501,20 @@ value:
       $$ = new Value((float)$1);
       @$ = @1;
     }
-    |SSS {
+    | SSS {
       char *tmp = common::substr($1,1,strlen($1)-2);
       $$ = new Value(tmp);
       free(tmp);
     }
+    | NULL_T {
+      $$ = new Value(); 
+      /* 其他属性为空 & null = true --> 表示 null  */
+      $$->set_null(true);
+      @$ = @1;
+    }
     ;
+
+
 storage_format:
     /* empty */
     {
@@ -489,7 +550,7 @@ update_stmt:      /*  update 语句的语法解析树*/
       }
     }
     ;
-select_stmt:        /*  select 语句的语法解析树*/
+subquery_stmt: 
     SELECT expression_list FROM rel_list where group_by
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
@@ -512,6 +573,67 @@ select_stmt:        /*  select 语句的语法解析树*/
         $$->selection.group_by.swap(*$6);
         delete $6;
       }
+      
+      // 处理 JOIN 条件
+      if (!g_table_references.empty()) {
+        $$->selection.table_references = g_table_references;
+        // 同时填充 ALIASES 字段
+        for (const auto &ref : g_table_references) {
+          RelationSqlNode alias_node;
+          alias_node.name = ref.table_name;
+          alias_node.alias = ref.alias;
+          $$->selection.ALIASES.push_back(alias_node);
+        }
+      }
+      
+      // 清空 JOIN 条件相关的全局变量
+      g_join_conditions.clear();
+      g_table_references.clear();
+    }
+    ;
+
+select_stmt:        /*  select 语句的语法解析树*/
+    SELECT expression_list FROM rel_list where group_by order_by
+    {
+      $$ = new ParsedSqlNode(SCF_SELECT);
+      if ($2 != nullptr) {
+        $$->selection.expressions.swap(*$2);
+        delete $2;
+      }
+
+      if ($4 != nullptr) {
+        $$->selection.relations.swap(*$4);
+        delete $4;
+      }
+
+      if ($5 != nullptr) {
+        $$->selection.conditions.swap(*$5);
+        delete $5;
+      }
+
+      if ($6 != nullptr) {
+        $$->selection.group_by.swap(*$6);
+        delete $6;
+      }
+
+      // 把解析得到的列表放入SQL Node的order_by属性中存起来
+      if ($7 != nullptr) {
+        $$->selection.order_by.swap(*$7);
+        delete $7;
+      }
+      
+      // 处理 JOIN 条件
+      if (!g_table_references.empty()) {
+        $$->selection.table_references = g_table_references;
+        // 同时填充 ALIASES 字段
+        for (const auto& table_ref : g_table_references) {
+          RelationSqlNode alias_node;
+          alias_node.name = table_ref.table_name;
+          alias_node.alias = table_ref.alias;
+          $$->selection.ALIASES.push_back(alias_node);
+        }
+        // 不要在这里清空 g_table_references，让它在 sql_list 中统一清理
+      }
     }
     ;
 calc_stmt:
@@ -526,15 +648,61 @@ calc_stmt:
 expression_list:
     expression
     {
-      $$ = new vector<unique_ptr<Expression>>;
+      $$ = new std::vector<std::unique_ptr<Expression>>;
       $$->emplace_back($1);
+    }
+    | expression ID{
+      if ($1 != nullptr && $2 != nullptr) {
+        $$ = new std::vector<std::unique_ptr<Expression>>;
+        $1->set_alias(std::string($2));
+        $$->emplace_back($1);
+      } else {
+        $$ = nullptr;
+      }
+    }
+    | expression AS ID{
+      if ($1 != nullptr && $3 != nullptr) {
+        $$ = new std::vector<std::unique_ptr<Expression>>;
+        $1->set_alias(std::string($3));
+        $$->emplace_back($1);
+      } else {
+        $$ = nullptr;
+      }
+    }
+    | expression ID COMMA expression_list
+    {
+      if ($1 != nullptr && $2 != nullptr) {
+        if ($4 != nullptr) {
+          $$ = $4;
+        } else {
+          $$ = new std::vector<std::unique_ptr<Expression>>;
+        }
+        $1->set_alias(std::string($2));
+        $$->emplace($$->begin(), $1);
+      } else {
+        $$ = $4;
+      }
+    }
+    | expression AS ID COMMA expression_list
+    {
+      if ($1 != nullptr && $3 != nullptr) {
+        if ($5 != nullptr) {
+          $$ = $5;
+        } else {
+          $$ = new std::vector<std::unique_ptr<Expression>>;
+        }
+        $1->set_alias(std::string($3));
+        $$->emplace($$->begin(), $1);
+      } else {
+        $$ = $5;
+      }
     }
     | expression COMMA expression_list
     {
       if ($3 != nullptr) {
         $$ = $3;
       } else {
-        $$ = new vector<unique_ptr<Expression>>;
+        $$ = new std::vector<std::unique_ptr<Expression>>;
       }
       $$->emplace($$->begin(), $1);
     }
@@ -567,6 +735,11 @@ expression:
       $$->set_name(token_name(sql_string, &@$));
       delete $1;
     }
+    | ID DOT '*' {
+      // 支持表限定的星号：t2.*
+      $$ = new StarExpr($1);
+      $$->set_name(token_name(sql_string, &@$));
+    }
     | rel_attr {
       RelAttrSqlNode *node = $1;
       $$ = new UnboundFieldExpr(node->relation_name, node->attribute_name);
@@ -575,6 +748,11 @@ expression:
     }
     | aggregate_expression {
       $$ = $1;
+    }
+    | LBRACE select_stmt RBRACE {
+      // 子查询表达式
+      $$ = new SubqueryExpr($2);
+      $$->set_name(token_name(sql_string, &@$));
     }
     ;
 
@@ -598,13 +776,54 @@ rel_attr:
 
 relation:
     ID {
-      $$ = $1;
+      $$ = new RelationSqlNode;
+      $$->name = $1;
+    }
+    | ID AS ID {
+      $$ = new RelationSqlNode;
+      $$->name = $1;
+      $$->alias = $3;
+    }
+    | ID ID {
+      $$ = new RelationSqlNode;
+      $$->name = $1;
+      $$->alias = $2;
     }
     ;
 rel_list:
-    relation {
+    relation INNER JOIN relation ON join_condition_list {
       $$ = new vector<string>();
-      $$->push_back($1);
+      $$->push_back($1->name);
+      $$->push_back($4->name);
+      
+      // 创建表引用并存储 JOIN 条件
+      TableReferenceSqlNode left_table;
+      left_table.table_name = $1->name;
+      left_table.alias = $1->alias;
+      left_table.is_join = false;
+      
+      TableReferenceSqlNode right_table;
+      right_table.table_name = $4->name;
+      right_table.alias = $4->alias;
+      right_table.is_join = true;
+      right_table.join_conditions = *$6;
+      
+      g_table_references.push_back(left_table);
+      g_table_references.push_back(right_table);
+      
+      delete $1;
+      delete $4;
+      delete $6;
+    }
+    | relation {
+      $$ = new vector<string>();
+      $$->push_back($1->name);
+      // 存储表引用信息到全局变量
+      TableReferenceSqlNode table_ref;
+      table_ref.table_name = $1->name;
+      table_ref.alias = $1->alias;
+      g_table_references.push_back(table_ref);
+      delete $1;
     }
     | relation COMMA rel_list {
       if ($3 != nullptr) {
@@ -612,10 +831,130 @@ rel_list:
       } else {
         $$ = new vector<string>;
       }
-
-      $$->insert($$->begin(), $1);
+      $$->insert($$->begin(), $1->name);
+      // 存储表引用信息到全局变量
+      TableReferenceSqlNode table_ref;
+      table_ref.table_name = $1->name;
+      table_ref.alias = $1->alias;
+      g_table_references.push_back(table_ref);
+      delete $1;
+    }
+    | rel_list INNER JOIN relation ON join_condition_list {
+      if ($1 != nullptr) {
+        $$ = $1;
+      } else {
+        $$ = new vector<string>;
+      }
+      $$->push_back($4->name);
+      
+      // 创建表引用并存储 JOIN 条件
+      TableReferenceSqlNode right_table;
+      right_table.table_name = $4->name;
+      right_table.alias = $4->alias;
+      right_table.is_join = true;
+      right_table.join_conditions = *$6;
+      
+      g_table_references.push_back(right_table);
+      
+      delete $4;
+      delete $6;
+    }
+    | rel_list COMMA relation {
+      if ($1 != nullptr) {
+        $$ = $1;
+      } else {
+        $$ = new vector<string>;
+      }
+      $$->push_back($3->name);
+      
+      // 存储表引用信息到全局变量
+      TableReferenceSqlNode table_ref;
+      table_ref.table_name = $3->name;
+      table_ref.alias = $3->alias;
+      g_table_references.push_back(table_ref);
+      delete $3;
     }
     ;
+
+// 添加 JOIN 条件处理规则
+join_condition:
+    rel_attr comp_op rel_attr {
+      $$ = new ConditionSqlNode();
+      $$->left_is_attr = true;
+      $$->left_attr = *$1;
+      $$->right_is_attr = true;
+      $$->right_attr = *$3;
+      $$->comp = $2;
+      delete $1;
+      delete $3;
+    }
+    | rel_attr comp_op value {
+      $$ = new ConditionSqlNode();
+      $$->left_is_attr = true;
+      $$->left_attr = *$1;
+      $$->right_is_attr = false;
+      $$->right_value = *$3;
+      $$->comp = $2;
+      delete $1;
+      delete $3;
+    }
+    | value comp_op rel_attr {
+      $$ = new ConditionSqlNode();
+      $$->left_is_attr = false;
+      $$->left_value = *$1;
+      $$->right_is_attr = true;
+      $$->right_attr = *$3;
+      $$->comp = $2;
+      delete $1;
+      delete $3;
+    }
+    ;
+
+// 添加 JOIN 条件列表处理
+join_condition_list:
+    join_condition {
+      $$ = new vector<JoinConditionSqlNode>();
+      JoinConditionSqlNode join_cond;
+      join_cond.left_is_attr = $1->left_is_attr;
+      join_cond.left_attr = $1->left_attr;
+      join_cond.left_value = $1->left_value;
+      join_cond.right_is_attr = $1->right_is_attr;
+      join_cond.right_attr = $1->right_attr;
+      join_cond.right_value = $1->right_value;
+      join_cond.comp = $1->comp;
+      $$->push_back(join_cond);
+      delete $1;
+    }
+    | join_condition_list AND join_condition {
+      if ($1 != nullptr) {
+        $$ = $1;
+      } else {
+        $$ = new vector<JoinConditionSqlNode>();
+      }
+      JoinConditionSqlNode join_cond;
+      join_cond.left_is_attr = $3->left_is_attr;
+      join_cond.left_attr = $3->left_attr;
+      join_cond.left_value = $3->left_value;
+      join_cond.right_is_attr = $3->right_is_attr;
+      join_cond.right_attr = $3->right_attr;
+      join_cond.right_value = $3->right_value;
+      join_cond.comp = $3->comp;
+      $$->push_back(join_cond);
+      delete $3;
+    }
+    ;
+
+table_name:
+    ID {
+      $$ = $1;
+    }
+    ;
+
+table_references:
+    ID
+    {
+
+    }
 
 where:
     /* empty */
@@ -626,6 +965,7 @@ where:
       $$ = $2;  
     }
     ;
+
 condition_list:
     /* empty */
     {
@@ -644,6 +984,7 @@ condition_list:
       delete $1;
     }
     ;
+
 condition:
     expression comp_op expression
     {
@@ -654,6 +995,7 @@ condition:
     }
     ;
 
+// 枚举运算符token（识别符号得到），is / is not不加入该体系，直接赋值
 comp_op:
       EQ { $$ = EQUAL_TO; }
     | LT { $$ = LESS_THAN; }
@@ -661,6 +1003,8 @@ comp_op:
     | LE { $$ = LESS_EQUAL; }
     | GE { $$ = GREAT_EQUAL; }
     | NE { $$ = NOT_EQUAL; }
+    | IN { $$ = IN_OP; }
+    | NOT IN { $$ = NOT_IN_OP; }
     ;
 
 // your code here
@@ -676,6 +1020,81 @@ group_by:
       $$ = $3;
     }
     ;
+
+order_by:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | ORDER BY order_by_list
+    {
+      // 存在该子句，则返回的语义值直接取order_by_list
+      $$ = $3;
+    }
+    ;
+
+// 解析order_by_list的语义值 --> 使用Expression存储排序字段
+order_by_list:
+    // 只包含一个项 --> rel_attr指的是table.id ???
+    rel_attr
+    {
+      $$ = new vector<unique_ptr<OrderedUnboundFieldExpr>>;  
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(1); // 默认 ASC
+      $$->emplace_back(std::move(expr));
+      // 释放 rel_attr 在解析时分配的内存
+      delete $1;
+    }
+    // 显式定义了ASC或者DESC
+    | rel_attr ASC
+    {
+      $$ = new vector<unique_ptr<OrderedUnboundFieldExpr>>;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(1); // ASC = 1
+      $$->emplace_back(std::move(expr));
+      delete $1;
+    }
+    | rel_attr DESC
+    {
+      $$ = new vector<unique_ptr<OrderedUnboundFieldExpr>>;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(-1); // DESC = -1
+      $$->emplace_back(std::move(expr));
+      delete $1;
+    }
+    | rel_attr ASC COMMA order_by_list
+    {
+      $$ = $4;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(1);
+      // 通过回溯，保证字段在vector中的顺序与排序用的顺序一致
+      $$->insert($$->begin(), std::move(expr));
+      delete $1;
+    }
+    | rel_attr DESC COMMA order_by_list
+    {
+      $$ = $4;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(-1); 
+      $$->insert($$->begin(), std::move(expr));
+      delete $1;
+    }
+    | rel_attr COMMA order_by_list
+    {
+      $$ = $3;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(1);
+      $$->insert($$->begin(), std::move(expr));
+      delete $1;
+    }
+    ;
+
 load_data_stmt:
     LOAD DATA INFILE SSS INTO TABLE ID fields_terminated_by enclosed_by
     {

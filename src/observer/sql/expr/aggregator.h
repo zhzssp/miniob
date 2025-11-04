@@ -22,8 +22,12 @@ class Aggregator
 public:
   virtual ~Aggregator() = default;
 
-  virtual RC accumulate(const Value &value) = 0;
-  virtual RC evaluate(Value &result)        = 0;
+  virtual RC accumulate(const Value &value){return RC::UNIMPLEMENTED;};
+  virtual RC average(const Value &value){return RC::UNIMPLEMENTED;};
+  virtual RC count(const Value &value){return RC::UNIMPLEMENTED;};
+  virtual RC max(const Value &value){return RC::UNIMPLEMENTED;};
+  virtual RC min(const Value &value){return RC::UNIMPLEMENTED;};
+  virtual RC evaluate(Value &result) = 0;
 
 protected:
   Value value_;
@@ -33,5 +37,39 @@ class SumAggregator : public Aggregator
 {
 public:
   RC accumulate(const Value &value) override;
+  RC evaluate(Value &result) override;
+private:
+  int not_null_count_ = 0;
+};
+
+class AvgAggregator : public Aggregator
+{
+public:
+  AvgAggregator() : count_(0) {}
+  RC average(const Value &value) override;
+  RC evaluate(Value &result) override;
+
+private:
+  int count_;  // 记录值的个数，用于计算平均值
+};
+
+class CountAggregator : public Aggregator
+{
+public:
+  RC count(const Value &value) override;
+  RC evaluate(Value &result) override;
+};
+
+class MaxAggregator : public Aggregator
+{
+public:
+  RC max(const Value &value);
+  RC evaluate(Value &result) override;
+};
+
+class MinAggregator : public Aggregator
+{
+public:
+  RC min(const Value &value);
   RC evaluate(Value &result) override;
 };

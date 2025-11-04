@@ -22,6 +22,14 @@ using namespace common;
 
 Table *BinderContext::find_table(const char *table_name) const
 {
+  
+  // 首先尝试通过别名查找
+  auto alias_iter = table_aliases_.find(table_name);
+  if (alias_iter != table_aliases_.end()) {
+    return alias_iter->second;
+  }
+  
+  // 然后尝试通过表名查找
   auto pred = [table_name](Table *table) { return 0 == strcasecmp(table_name, table->name()); };
   auto iter = ranges::find_if(query_tables_, pred);
   if (iter == query_tables_.end()) {
@@ -52,6 +60,10 @@ RC ExpressionBinder::bind_expression(unique_ptr<Expression> &expr, vector<unique
   switch (expr->type()) {
     case ExprType::STAR: {
       return bind_star_expression(expr, bound_expressions);
+    } break;
+
+    case ExprType::ORDERED_UNBOUND_FIELD: {
+      return bind_ordered_unbound_field_expression(expr, bound_expressions); 
     } break;
 
     case ExprType::UNBOUND_FIELD: {
@@ -88,6 +100,10 @@ RC ExpressionBinder::bind_expression(unique_ptr<Expression> &expr, vector<unique
 
     case ExprType::AGGREGATION: {
       ASSERT(false, "shouldn't be here");
+    } break;
+
+    case ExprType::SUB_QUERY: {
+      return bind_subquery_expression(expr, bound_expressions);
     } break;
 
     default: {
@@ -130,6 +146,16 @@ RC ExpressionBinder::bind_star_expression(
   return RC::SUCCESS;
 }
 
+RC ExpressionBinder::bind_ordered_unbound_field_expression(
+    unique_ptr<Expression> &expr, vector<unique_ptr<Expression>> &bound_expressions) {
+  // release释放所有权，同时返回裸指针
+  std::unique_ptr<OrderedUnboundFieldExpr> order_expr;
+  // reset替换原来的指针，获得管理权
+  order_expr.reset(static_cast<OrderedUnboundFieldExpr*>(expr.release()));
+  bound_expressions.emplace_back(std::move(order_expr));
+  return RC::SUCCESS;
+}
+
 RC ExpressionBinder::bind_unbound_field_expression(
     unique_ptr<Expression> &expr, vector<unique_ptr<Expression>> &bound_expressions)
 {
@@ -169,7 +195,15 @@ RC ExpressionBinder::bind_unbound_field_expression(
 
     Field      field(table, field_meta);
     FieldExpr *field_expr = new FieldExpr(field);
-    field_expr->set_name(field_name);
+    
+    // 使用别名（如果有的话），否则使用原始字段名
+    const std::string alias = unbound_field_expr->alias_std_string();
+    if (!alias.empty()) {
+      field_expr->set_name(alias.c_str());
+    } else {
+      field_expr->set_name(field_name);
+    }
+    
     bound_expressions.emplace_back(field_expr);
   }
 
@@ -460,11 +494,28 @@ RC ExpressionBinder::bind_aggregate_expression(
 
   auto aggregate_expr = make_unique<AggregateExpr>(aggregate_type, std::move(child_expr));
   aggregate_expr->set_name(unbound_aggregate_expr->name());
+  // 复制别名（如果有）
+  if (unbound_aggregate_expr->has_alias()) {
+    aggregate_expr->set_alias(unbound_aggregate_expr->alias());
+  }
   rc = check_aggregate_expression(*aggregate_expr);
   if (OB_FAIL(rc)) {
     return rc;
   }
 
   bound_expressions.emplace_back(std::move(aggregate_expr));
+  return RC::SUCCESS;
+}
+
+RC ExpressionBinder::bind_subquery_expression(
+    unique_ptr<Expression> &expr, vector<unique_ptr<Expression>> &bound_expressions)
+{
+  if (nullptr == expr) {
+    return RC::SUCCESS;
+  }
+
+  // 子查询表达式直接添加到结果中，不需要进一步绑定
+  // 子查询的绑定将在 SelectStmt::create 中递归处理
+  bound_expressions.emplace_back(std::move(expr));
   return RC::SUCCESS;
 }
