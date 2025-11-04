@@ -80,65 +80,10 @@ enum CompOp
  */
 struct ConditionSqlNode
 {
-<<<<<<< HEAD
   std::unique_ptr<Expression> left_expr;  // 任意表达式
   std::unique_ptr<Expression> right_expr;   // 任意表达式
   CompOp comp_op;                          // 比较操作符
   char conjunction_type = 0; // 连接 condition 的类型，0: no conjunction, 1: and, 2: or
-=======
-  int left_is_attr;              ///< TRUE if left-hand side is an attribute
-                                 ///< 1时，操作符左边是属性名，0时，是属性值
-  Value          left_value;     ///< left-hand side value if left_is_attr = FALSE
-  RelAttrSqlNode left_attr;      ///< left-hand side attribute
-  Expression*    left_expr;      ///< left-hand side expression (if using expressions)
-  CompOp         comp;           ///< comparison operator
-  int            right_is_attr;  ///< TRUE if right-hand side is an attribute
-                                 ///< 1时，操作符右边是属性名，0时，是属性值
-  RelAttrSqlNode right_attr;     ///< right-hand side attribute if right_is_attr = TRUE 右边的属性
-  Value          right_value;    ///< right-hand side value if right_is_attr = FALSE
-  Expression*    right_expr;     ///< right-hand side expression (if using expressions)
-  
-  // 默认构造函数
-  ConditionSqlNode() : left_expr(nullptr), right_expr(nullptr) {}
-  
-  // 拷贝构造函数 - 禁用以避免浅拷贝 Expression 指针
-  // 使用移动构造代替
-  ConditionSqlNode(const ConditionSqlNode& other) = delete;
-  
-  // 移动构造函数
-  ConditionSqlNode(ConditionSqlNode&& other) noexcept
-    : left_is_attr(other.left_is_attr),
-      left_value(std::move(other.left_value)),
-      left_attr(std::move(other.left_attr)),
-      left_expr(other.left_expr),
-      comp(other.comp),
-      right_is_attr(other.right_is_attr),
-      right_attr(std::move(other.right_attr)),
-      right_value(std::move(other.right_value)),
-      right_expr(other.right_expr)
-  {
-    other.left_expr = nullptr;
-    other.right_expr = nullptr;
-  }
-  
-  // 移动赋值操作符
-  ConditionSqlNode& operator=(ConditionSqlNode&& other) noexcept {
-    if (this != &other) {
-      left_is_attr = other.left_is_attr;
-      left_value = std::move(other.left_value);
-      left_attr = std::move(other.left_attr);
-      left_expr = other.left_expr;
-      comp = other.comp;
-      right_is_attr = other.right_is_attr;
-      right_attr = std::move(other.right_attr);
-      right_value = std::move(other.right_value);
-      right_expr = other.right_expr;
-      
-      other.left_expr = nullptr;
-      other.right_expr = nullptr;
-    }
-    return *this;
-  }
 };
 
 
@@ -167,7 +112,6 @@ struct TableReferenceSqlNode
   string alias;                         ///< 表别名
   vector<JoinConditionSqlNode> join_conditions;  ///< JOIN 条件
   bool is_join;                         ///< 是否为 JOIN 操作
->>>>>>> 95604404b8fce806e3b946ab52f54ebd587d53c9
 };
 
 /**

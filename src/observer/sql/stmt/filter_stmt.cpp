@@ -23,17 +23,18 @@ See the Mulan PSL v2 for more details. */
 
 FilterStmt::~FilterStmt()
 {
-  for (FilterUnit *unit : filter_units_) {
-    // 释放 FilterUnit 中的 Expression* 内存
-    if (unit->left().is_expr && unit->left().expression != nullptr) {
-      delete unit->left().expression;
-    }
-    if (unit->right().is_expr && unit->right().expression != nullptr) {
-      delete unit->right().expression;
-    }
-    delete unit;
-  }
-  filter_units_.clear();
+  // for (FilterUnit *unit : filter_units_) {
+  //   // 释放 FilterUnit 中的 Expression* 内存
+  //   if (unit->left().is_expr && unit->left().expression != nullptr) {
+  //     delete unit->left().expression;
+  //   }
+  //   if (unit->right().is_expr && unit->right().expression != nullptr) {
+  //     delete unit->right().expression;
+  //   }
+  //   delete unit;
+  // }
+  // filter_units_.clear();
+  conditions_.clear();
 }
 
 RC FilterStmt::create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
@@ -43,7 +44,7 @@ RC FilterStmt::create(Db *db, Table *default_table, std::unordered_map<std::stri
   RC rc = RC::SUCCESS;
   stmt  = nullptr;
 
-  // 从 ConditionSqlNode 创建 ComparisonExpr 和 LikeExpr
+  // 从 ConditionSqlNode 创建 ComparisonExpr
   vector<unique_ptr<Expression>> conditions_exprs;
   for (auto &condition : conditions) {
     switch (condition.comp_op) {

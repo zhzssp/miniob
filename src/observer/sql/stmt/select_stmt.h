@@ -17,7 +17,6 @@ See the Mulan PSL v2 for more details. */
 #include "common/sys/rc.h"
 #include "sql/stmt/stmt.h"
 #include "storage/field/field.h"
-#include "sql/parser/parse_defs.h"
 
 class FieldMeta;
 class FilterStmt;
@@ -38,34 +37,17 @@ public:
 
 public:
   static RC create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt);
-  static RC create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
-    std::shared_ptr<std::unordered_map<string, string>> name2alias,
-    std::shared_ptr<std::unordered_map<string, string>> alias2name,
-    std::shared_ptr<std::vector<string>> loaded_relation_names,
-    std::shared_ptr<std::unordered_map<string, string>> field_alias2name);
-  static RC convert_alias_to_name(Expression *expr, 
-  std::shared_ptr<std::unordered_map<string, string>> alias2name,
-  std::shared_ptr<std::unordered_map<string, string>> field_alias2name);
-  static RC convert_rel_attr_alias_to_name(RelAttrSqlNode &rel_attr, 
-  std::shared_ptr<std::unordered_map<string, string>> alias2name);
+
 public:
   const vector<Table *> &tables() const { return tables_; }
   FilterStmt            *filter_stmt() const { return filter_stmt_; }
-  FilterStmt            *join_filter_stmt() const { return join_filter_stmt_; }
-  FilterStmt            *get_table_join_filter(size_t table_index) const { 
-    return (table_index < table_join_filters_.size()) ? table_join_filters_[table_index] : nullptr; 
-  }
 
   vector<unique_ptr<Expression>> &query_expressions() { return query_expressions_; }
   vector<unique_ptr<Expression>> &group_by() { return group_by_; }
-  vector<unique_ptr<OrderedUnboundFieldExpr>> &order_by() { return order_by_; }
 
 private:
   vector<unique_ptr<Expression>> query_expressions_;
   vector<Table *>                tables_;
   FilterStmt                    *filter_stmt_ = nullptr;
-  FilterStmt                    *join_filter_stmt_ = nullptr;  ///< JOIN 条件过滤器
-  vector<FilterStmt*>            table_join_filters_;         ///< 每个表的 JOIN 条件过滤器
   vector<unique_ptr<Expression>> group_by_;
-  vector<unique_ptr<OrderedUnboundFieldExpr>> order_by_;
 };

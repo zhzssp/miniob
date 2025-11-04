@@ -91,7 +91,6 @@ public:
 
 public:
   static RC create_stmt(Db *db, ParsedSqlNode &sql_node, Stmt *&stmt);
-  
-  static RC check_sub_select_legal(Db *db, ParsedSqlNode *sub_select);
+
 private:
 };

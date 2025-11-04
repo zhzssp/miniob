@@ -279,6 +279,11 @@ string Value::to_string() const
 }
 
 int Value::compare(const Value &other) const {
+  if (this->is_null() == true || other.is_null() == true)
+  {
+    LOG_INFO("null类型参与比较,返回");
+    return INT32_MAX;
+  } 
   return DataType::type_instance(this->attr_type_)->compare(*this, other);
 }
 

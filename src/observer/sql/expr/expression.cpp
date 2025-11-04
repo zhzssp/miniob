@@ -152,7 +152,7 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
 {
   RC  rc         = RC::SUCCESS;
   int cmp_result = 0;
-
+  
   // is / is not --> 第二个数只能是null
   if (comp_ == IS_OP) {
     if (!left.is_null() && right.is_null()) {
@@ -185,6 +185,7 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
   LOG_INFO("ComparisonExpr's comp_ is not related to is null / is not null");
 
   // 安全类型对齐：在比较前尽量将不同类型转换为可比较的同一类型
+
   // 规则：
   // - INTS vs FLOATS -> 都转为 FLOATS
   // - CHARS vs numeric -> 若可解析为数字，则都转为 FLOATS；否则按不可比处理（结果为 false）
@@ -577,7 +578,12 @@ AttrType ArithmeticExpr::value_type() const
 RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value, Value &value) const
 {
   RC rc = RC::SUCCESS;
-
+  if(left_value.is_null() || right_value.is_null()) 
+  {
+    value.set_null(true);
+    return rc;
+  }
+  
   const AttrType target_type = value_type();
   value.set_type(target_type);
 

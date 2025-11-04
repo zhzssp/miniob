@@ -91,13 +91,10 @@ DROP                                    RETURN_TOKEN(DROP);
 TABLE                                   RETURN_TOKEN(TABLE);
 TABLES                                  RETURN_TOKEN(TABLES);
 INDEX                                   RETURN_TOKEN(INDEX);
-ON                                     RETURN_TOKEN(ON);
+ON                                      RETURN_TOKEN(ON);
 SHOW                                    RETURN_TOKEN(SHOW);
 SYNC                                    RETURN_TOKEN(SYNC);
 SELECT                                  RETURN_TOKEN(SELECT);
-AS                                      RETURN_TOKEN(AS);
-INNER                                   RETURN_TOKEN(INNER);
-JOIN                                    RETURN_TOKEN(JOIN);
 CALC                                    RETURN_TOKEN(CALC);
 FROM                                    RETURN_TOKEN(FROM);
 WHERE                                   RETURN_TOKEN(WHERE);
@@ -122,13 +119,7 @@ INFILE                                  RETURN_TOKEN(INFILE);
 EXPLAIN                                 RETURN_TOKEN(EXPLAIN);
 GROUP                                   RETURN_TOKEN(GROUP);
 BY                                      RETURN_TOKEN(BY);
-ORDER                                   RETURN_TOKEN(ORDER);
-ASC                                     RETURN_TOKEN(ASC);
-DESC                                    RETURN_TOKEN(DESC); // 如何确保优先匹配降序，而不是desc table
 STORAGE                                 RETURN_TOKEN(STORAGE);
-NULL                                    RETURN_TOKEN(NULL_T); // 避免与C++中的NULL冲突
-NOT                                     RETURN_TOKEN(NOT);    // 确保在ID规则之前，否则会被当做标识符
-IS                                      RETURN_TOKEN(IS);     // where xxx is null / is not null
 FORMAT                                  RETURN_TOKEN(FORMAT);
 PRIMARY                                 RETURN_TOKEN(PRIMARY);
 KEY                                     RETURN_TOKEN(KEY);
@@ -136,8 +127,6 @@ ANALYZE                                 RETURN_TOKEN(ANALYZE);
 FIELDS                                  RETURN_TOKEN(FIELDS);
 TERMINATED                              RETURN_TOKEN(TERMINATED);
 ENCLOSED                                RETURN_TOKEN(ENCLOSED);
-IN                                      RETURN_TOKEN(IN);
-NOT                                     RETURN_TOKEN(NOT);
 {ID}                                    yylval->cstring=strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(ID);
 "("                                     RETURN_TOKEN(LBRACE);
 ")"                                     RETURN_TOKEN(RBRACE);
