@@ -18,6 +18,9 @@ See the Mulan PSL v2 for more details. */
 #include "sql/expr/subquery_expr.h"
 #include "sql/operator/physical_operator.h"
 
+#include <cstdlib>
+#include <cerrno>
+
 using namespace std;
 
 RC FieldExpr::get_value(const Tuple &tuple, Value &value) const
@@ -231,9 +234,9 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
             // 允许部分数字解析，如 '16a' -> 16.0
             out = val;
             ok = true;
-          } else if (s.size() == 1) {
-            // 单字符，按 ASCII 码进行数值比较
-            out = static_cast<unsigned char>(s[0]);
+          } else {
+            // 无法解析为数字（纯字母字符串），转换为 0
+            out = 0.0;
             ok = true;
           }
           return;
