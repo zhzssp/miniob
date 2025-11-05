@@ -152,7 +152,6 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
           
           // 检查条件是否涉及当前 JOIN 的表
           if (filter_unit->left().is_attr && filter_unit->right().is_attr) {
-            // 两边都是属性：检查是否涉及左表和右表
             const Table *left_field_table = filter_unit->left().field.table();
             const Table *right_field_table = filter_unit->right().field.table();
             
@@ -176,34 +175,6 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
               if (left_field_table == right_table || right_field_table == right_table) {
                 is_relevant = true;
               } else {
-              }
-            }
-          } else if (filter_unit->left().is_attr && !filter_unit->right().is_attr) {
-            // 左边是属性，右边是常量：检查属性是否属于当前JOIN涉及的表
-            const Table *left_field_table = filter_unit->left().field.table();
-            if (left_table != nullptr) {
-              // 左表已知，检查属性是否属于左表或右表
-              if (left_field_table == left_table || left_field_table == right_table) {
-                is_relevant = true;
-              }
-            } else {
-              // 左表未知，检查属性是否属于右表
-              if (left_field_table == right_table) {
-                is_relevant = true;
-              }
-            }
-          } else if (!filter_unit->left().is_attr && filter_unit->right().is_attr) {
-            // 左边是常量，右边是属性：检查属性是否属于当前JOIN涉及的表
-            const Table *right_field_table = filter_unit->right().field.table();
-            if (left_table != nullptr) {
-              // 左表已知，检查属性是否属于左表或右表
-              if (right_field_table == left_table || right_field_table == right_table) {
-                is_relevant = true;
-              }
-            } else {
-              // 左表未知，检查属性是否属于右表
-              if (right_field_table == right_table) {
-                is_relevant = true;
               }
             }
           }
