@@ -85,8 +85,9 @@ See the Mulan PSL v2 for more details. */
   DEFINE_RC(INVALID_TOKEN)               \
   DEFINE_RC(UNEXPECTED_END_OF_STRING)    \
   DEFINE_RC(SYNTAX_ERROR)                \
-  DEFINE_RC(UNSUPPORTED)
-
+  DEFINE_RC(UNSUPPORTED)                 \
+  DEFINE_RC(NOT_NULL)                    \
+  DEFINE_RC(INVALID_DATE_FORMAT)         
 enum class RC
 {
 #define DEFINE_RC(name) name,

@@ -38,6 +38,8 @@ class SumAggregator : public Aggregator
 public:
   RC accumulate(const Value &value) override;
   RC evaluate(Value &result) override;
+private:
+  int not_null_count_ = 0;
 };
 
 class AvgAggregator : public Aggregator

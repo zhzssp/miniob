@@ -49,5 +49,6 @@ public:
 
 private:
   vector<unique_ptr<Expression>>          expressions_;
+  // 最终得到的元组列表 ？
   ExpressionTuple<unique_ptr<Expression>> tuple_;
 };

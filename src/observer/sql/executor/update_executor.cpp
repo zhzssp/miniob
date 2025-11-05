@@ -28,6 +28,7 @@ See the Mulan PSL v2 for more details. */
 
 RC UpdateExecutor::execute(SQLStageEvent *sql_event)
 {
+    LOG_TRACE("UpdateExecutor::execute is called");
     Stmt    *stmt    = sql_event->stmt();
     Session *session = sql_event->session_event()->session();
     ASSERT(stmt->type() == StmtType::UPDATE,
@@ -49,15 +50,16 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
       return RC::SCHEMA_FIELD_NOT_EXIST;
     }
 
-    // 准备更新的值
+    // 准备更新为的值
     Value final_value;
-    if (value->attr_type() != field_meta->type()) {
+    if (!value->is_null() && value->attr_type() != field_meta->type()) {
       rc = Value::cast_to(*value, field_meta->type(), final_value);
       if (rc != RC::SUCCESS) {
         LOG_WARN("type mismatch and cannot cast. field=%s.%s, rc=%s", table->name(), attribute_name, strrc(rc));
         return rc;
       }
     } else {
+      LOG_INFO("Value's type is consistent or value is null !");
       final_value = *value;
     }
 
@@ -67,22 +69,25 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
     if (rc != RC::SUCCESS) {
       return rc;
     }
-
+    
+    // 将record给从页面中读取上来 --> 此时不需要对null的情况进行排除，都是旧的数据
     vector<Record> targets;
     Record record;
-    while (OB_SUCC(rc = scanner->next(record))) {
+    while (OB_SUCC(rc = scanner->next(record))) {   // 直接使用record_scanner，此时尚没有将record的vector<bool>重构
       bool selected = true;
       if (filter_stmt != nullptr) {
         const auto &units = filter_stmt->filter_units();
         for (const FilterUnit *unit : units) {
           const FilterObj &lobj = unit->left();
           const FilterObj &robj = unit->right();
-
+          
+          // 将表达式中的字段转化为相应的值，比如age > 0中age替换为record中的具体值
           Value lval;
           if (lobj.is_attr) {
             const FieldMeta *fm = lobj.field.meta();
             lval.set_type(fm->type());
             lval.set_data(record.data() + fm->offset(), fm->len());
+            lval.set_null(record.get_null_information(fm->field_id(), table_meta.fields_record_size()));
           } else {
             lval = lobj.value;
           }
@@ -92,11 +97,14 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
             const FieldMeta *fm = robj.field.meta();
             rval.set_type(fm->type());
             rval.set_data(record.data() + fm->offset(), fm->len());
+            rval.set_null(record.get_null_information(fm->field_id(), table_meta.fields_record_size()));
           } else {
             rval = robj.value;
           }
-
-          if (lval.attr_type() != rval.attr_type()) {
+          
+          // 只有非null的时候进行cast
+          if (!lval.is_null() && !rval.is_null() && lval.attr_type() != rval.attr_type()) {
+            LOG_WARN("Types not match, left attr_type = %d, right attr_type = %d", lval.attr_type(), rval.attr_type());
             Value casted;
             RC crc = Value::cast_to(rval, lval.attr_type(), casted);
             if (crc == RC::SUCCESS) {
@@ -111,10 +119,13 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
               }
             }
           }
-
-          int cmp = lval.compare(rval);
+          
+          // 执行的是where的筛选逻辑 --> 这里如果compare null会出问题
           bool pass = false;
-          switch (unit->comp()) {
+          if(!lval.is_null() && !rval.is_null()) {
+            int cmp = lval.compare(rval);
+
+            switch (unit->comp()) {
             case EQUAL_TO: pass = (cmp == 0); break;
             case NOT_EQUAL: pass = (cmp != 0); break;
             case LESS_THAN: pass = (cmp < 0); break;
@@ -123,6 +134,29 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
             case GREAT_EQUAL: pass = (cmp >= 0); break;
             default: pass = false; break;
           }
+          } else {
+            LOG_INFO("When trying to update, null appears in filter condition");
+            if(unit->comp() == IS_OP && rval.is_null()) {
+              LOG_INFO("When updating, filter's operator is IS, lval is %s", lval.to_string().c_str());
+              if(lval.is_null()) {
+                pass = true;
+              } else {
+                pass = false;
+              }
+            } else if(unit->comp() == IS_NOT_OP && rval.is_null()) {
+              LOG_INFO("When updating, filter's operator is IS NOT, lval is %s", lval.to_string().c_str());
+              if(lval.is_null()) {
+                pass = false;
+              } else {
+                pass = true;
+              }
+            } else {
+              LOG_ERROR("Cannot find matched numerical operator or operand, pass = false defaultly");
+              pass = false;
+            }
+          }
+          
+          LOG_INFO("Pass value is %s", pass ? "true" : "false");
           if (!pass) { selected = false; break; }
         }
       }
@@ -140,15 +174,43 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
       return rc;
     }
 
+    // 将获取到的record进行更新
     Trx *trx = session->current_trx();
     for (Record &old_record : targets) {
+      // 初始化bitmap
+      old_record.init_bitmap(table_meta.field_num());
+
+      for(int i = 0; i < table_meta.field_num(); i++) {
+        bool is_null_info = old_record.get_null_information(i, table_meta.fields_record_size());
+        if(is_null_info) {
+          old_record.set_is_null(i);
+        } else {
+          old_record.set_is_not_null(i);
+        }
+      }
+
       Record new_record;
+      // record的char *data中存储了bitmap
       rc = new_record.copy_data(old_record.data(), table_meta.record_size());
       if (rc != RC::SUCCESS) {
         return rc;
       }
-
-      rc = new_record.set_field(field_meta->offset(), field_meta->len(), (char *)final_value.data());
+      
+      // 只是将要修改的字段的新值给复制过去了 --> null对应的这段内存无用，不用设置都可以
+      if(!final_value.is_null()) {
+        rc = new_record.set_field(field_meta->offset(), field_meta->len(), (char *)final_value.data());
+        // 原本的数据就是null --> 修改记录信息
+        if(old_record.is_null(field_meta->field_id())) {
+          LOG_INFO("Update field %d's null value to be non-null value", field_meta->field_id());
+          new_record.set_bitmap(field_meta->field_id(), table_meta.fields_record_size(), false);
+          new_record.set_is_not_null(field_meta->field_id());
+        }
+      }
+      else {
+        LOG_INFO("Get null final_value, update field %d's is_null_ information", field_meta->field_id());
+        new_record.set_bitmap(field_meta->field_id(), table_meta.fields_record_size(), true);
+        new_record.set_is_null(field_meta->field_id());
+      }
       if (rc != RC::SUCCESS) {
         return rc;
       }

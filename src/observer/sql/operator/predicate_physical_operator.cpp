@@ -47,11 +47,14 @@ RC PredicatePhysicalOperator::next()
     }
 
     Value value;
+    // 将形如age > 18的布尔表达式应用到该元组上 --> 获得bool的Value ?
+    // expression_为ComparisonExpr
     rc = expression_->get_value(*tuple, value);
     if (rc != RC::SUCCESS) {
       return rc;
     }
-
+    
+    // 如果为true，就不继续更改current_tuple的值
     if (value.get_boolean()) {
       return rc;
     }
@@ -61,6 +64,7 @@ RC PredicatePhysicalOperator::next()
 
 RC PredicatePhysicalOperator::close()
 {
+  // 始终会报SUCCESS ???
   children_[0]->close();
   return RC::SUCCESS;
 }

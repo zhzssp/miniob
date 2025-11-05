@@ -31,6 +31,8 @@ string physical_operator_type_name(PhysicalOperatorType type)
     case PhysicalOperatorType::SCALAR_GROUP_BY: return "SCALAR_GROUP_BY";
     case PhysicalOperatorType::AGGREGATE_VEC: return "AGGREGATE_VEC";
     case PhysicalOperatorType::GROUP_BY_VEC: return "GROUP_BY_VEC";
+    case PhysicalOperatorType::ORDER_BY: return "ORDER_BY";
+    case PhysicalOperatorType::ORDER_BY_VEC: return "ORDER_BY_VEC";
     case PhysicalOperatorType::PROJECT_VEC: return "PROJECT_VEC";
     case PhysicalOperatorType::TABLE_SCAN_VEC: return "TABLE_SCAN_VEC";
     case PhysicalOperatorType::EXPR_VEC: return "EXPR_VEC";

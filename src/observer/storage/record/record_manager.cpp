@@ -83,6 +83,7 @@ bool RecordPageIterator::has_next() { return -1 != next_slot_num_; }
 
 RC RecordPageIterator::next(Record &record)
 {
+  // RowRecordPageHandler
   record_page_handler_->get_record(RID(page_num_, next_slot_num_), record);
 
   if (next_slot_num_ >= 0) {
@@ -274,6 +275,7 @@ RC RecordPageHandler::cleanup()
 
 RC RowRecordPageHandler::insert_record(const char *data, RID *rid)
 {
+  LOG_TRACE("RowRecordPageHandler::insert_record is called");
   ASSERT(rw_mode_ != ReadWriteMode::READ_ONLY, 
          "cannot insert record into page while the page is readonly");
 
@@ -392,8 +394,10 @@ RC RowRecordPageHandler::update_record(const RID &rid, const char *data)
   }
 }
 
+/* 此时还未重构vector<bool>，需要在上层进行重构 */
 RC RowRecordPageHandler::get_record(const RID &rid, Record &record)
 {
+  LOG_TRACE("RowRecordPageHandler::get_record is called");
   if (rid.slot_num >= page_header_->record_capacity) {
     LOG_ERROR("Invalid slot_num %d, exceed page's record capacity, frame=%s, page_header=%s",
               rid.slot_num, frame_->to_string().c_str(), page_header_->to_string().c_str());
@@ -405,9 +409,13 @@ RC RowRecordPageHandler::get_record(const RID &rid, Record &record)
     LOG_ERROR("Invalid slot_num:%d, slot is empty, page_num %d.", rid.slot_num, frame_->page_num());
     return RC::RECORD_NOT_EXIST;
   }
-
+  
   record.set_rid(rid);
-  record.set_data(get_record_data(rid.slot_num), page_header_->record_real_size);
+  // data --> [字段值区域 | bool数组区域]
+  char *data = get_record_data(rid.slot_num);
+  int32_t    len = page_header_->record_real_size;
+  record.set_data(data, len);
+
   return RC::SUCCESS;
 }
 
@@ -567,6 +575,7 @@ RC RecordFileHandler::init_free_pages()
 
 RC RecordFileHandler::insert_record(const char *data, int record_size, RID *rid)
 {
+  LOG_TRACE("RecordFileHandler::insert_record() is called");
   RC ret = RC::SUCCESS;
 
   unique_ptr<RecordPageHandler> record_page_handler(RecordPageHandler::create(storage_format_));

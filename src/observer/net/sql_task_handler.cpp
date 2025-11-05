@@ -42,6 +42,7 @@ RC SqlTaskHandler::handle_event(Communicator *communicator)
 
   bool need_disconnect = false;
 
+  // 如果接收到nullptr的tuple *，则rc = UNIMPLEMENTED ? --> 补丁
   rc = communicator->write_result(event, need_disconnect);
   LOG_INFO("write result return %s", strrc(rc));
   event->session()->set_current_request(nullptr);

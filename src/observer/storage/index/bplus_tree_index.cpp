@@ -82,6 +82,7 @@ RC BplusTreeIndex::close()
 
 RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 {
+  // 获取索引字段在record中的位置
   return index_handler_.insert_entry(record + field_meta_.offset(), rid);
 }
 

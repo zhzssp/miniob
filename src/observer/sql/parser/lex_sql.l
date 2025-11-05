@@ -114,6 +114,7 @@ ROLLBACK                                RETURN_TOKEN(TRX_ROLLBACK);
 INT                                     RETURN_TOKEN(INT_T);
 CHAR                                    RETURN_TOKEN(STRING_T);
 FLOAT                                   RETURN_TOKEN(FLOAT_T);
+DATE                                    RETURN_TOKEN(DATE_T);
 VECTOR                                  RETURN_TOKEN(VECTOR_T);
 LOAD                                    RETURN_TOKEN(LOAD);
 DATA                                    RETURN_TOKEN(DATA);
@@ -121,7 +122,13 @@ INFILE                                  RETURN_TOKEN(INFILE);
 EXPLAIN                                 RETURN_TOKEN(EXPLAIN);
 GROUP                                   RETURN_TOKEN(GROUP);
 BY                                      RETURN_TOKEN(BY);
+ORDER                                   RETURN_TOKEN(ORDER);
+ASC                                     RETURN_TOKEN(ASC);
+DESC                                    RETURN_TOKEN(DESC); // 如何确保优先匹配降序，而不是desc table
 STORAGE                                 RETURN_TOKEN(STORAGE);
+NULL                                    RETURN_TOKEN(NULL_T); // 避免与C++中的NULL冲突
+NOT                                     RETURN_TOKEN(NOT);    // 确保在ID规则之前，否则会被当做标识符
+IS                                      RETURN_TOKEN(IS);     // where xxx is null / is not null
 FORMAT                                  RETURN_TOKEN(FORMAT);
 PRIMARY                                 RETURN_TOKEN(PRIMARY);
 KEY                                     RETURN_TOKEN(KEY);

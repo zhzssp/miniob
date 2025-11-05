@@ -20,6 +20,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/trx/trx.h"
 #include "json/json.h"
 
+/* 用于JSON::Value存储的键值 */
 static const Json::StaticString FIELD_TABLE_ID("table_id");
 static const Json::StaticString FIELD_TABLE_NAME("table_name");
 static const Json::StaticString FIELD_STORAGE_FORMAT("storage_format");
@@ -27,15 +28,21 @@ static const Json::StaticString FIELD_STORAGE_ENGINE("storage_engine");
 static const Json::StaticString FIELD_FIELDS("fields");
 static const Json::StaticString FIELD_INDEXES("indexes");
 static const Json::StaticString FIELD_PRIMARY_KEYS("primary_keys");
+static const Json::StaticString FIELD_NULLABLE("nullable");
+static const Json::StaticString FIELD_FIELDS_RECORD_SIZE("fields_record_size");
+static const Json::StaticString FIELD_BITMAP_RECORD_SIZE("bitmap_record_size");
 
 TableMeta::TableMeta(const TableMeta &other)
     : table_id_(other.table_id_),
       name_(other.name_),
       fields_(other.fields_),
+      nullable_(other.nullable_),
       indexes_(other.indexes_),
       storage_format_(other.storage_format_),
       storage_engine_(other.storage_engine_),
-      record_size_(other.record_size_)
+      record_size_(other.record_size_),
+      fields_record_size_(other.fields_record_size_),
+      bitmap_record_size_(other.bitmap_record_size_)
 {}
 
 void TableMeta::swap(TableMeta &other) noexcept
@@ -43,7 +50,10 @@ void TableMeta::swap(TableMeta &other) noexcept
   name_.swap(other.name_);
   fields_.swap(other.fields_);
   indexes_.swap(other.indexes_);
+  nullable_.swap(other.nullable_);
   std::swap(record_size_, other.record_size_);
+  std::swap(fields_record_size_, other.fields_record_size_);
+  std::swap(bitmap_record_size_, other.bitmap_record_size_);
 }
 
 RC TableMeta::init(int32_t table_id, const char *name, const vector<FieldMeta> *trx_fields,
@@ -94,12 +104,24 @@ RC TableMeta::init(int32_t table_id, const char *name, const vector<FieldMeta> *
   }
 
   primary_keys_ = primary_keys;
-  record_size_ = field_offset;
+  // 字段总长度 + bitmap长度
+  LOG_INFO("Remain %d size of bool for bitmap to manage null value", fields_.size());
+  fields_record_size_ = field_offset;
+  bitmap_record_size_ = sizeof(bool) * fields_.size();
+  record_size_ = fields_record_size_ + bitmap_record_size_;
 
   table_id_ = table_id;
   name_     = name;
   storage_format_ = storage_format;
   storage_engine_ = storage_engine;
+
+  // table_meta_中保存字段可否为null的信息
+  LOG_INFO("Begin to record fields' nullable information");
+  nullable_.reserve(attributes.size());
+  for(auto attr: attributes) {
+    nullable_.emplace_back(attr.nullable);
+  }
+
   LOG_INFO("Sussessfully initialized table meta. table id=%d, name=%s", table_id, name);
   return RC::SUCCESS;
 }
@@ -171,6 +193,8 @@ const IndexMeta *TableMeta::index(int i) const { return &indexes_[i]; }
 int TableMeta::index_num() const { return indexes_.size(); }
 
 int TableMeta::record_size() const { return record_size_; }
+int TableMeta::fields_record_size() const { return fields_record_size_; }
+int TableMeta::bitmap_record_size() const { return bitmap_record_size_; }
 
 int TableMeta::serialize(ostream &ss) const
 {
@@ -179,6 +203,9 @@ int TableMeta::serialize(ostream &ss) const
   table_value[FIELD_TABLE_NAME] = name_;
   table_value[FIELD_STORAGE_FORMAT] = static_cast<int>(storage_format_);
   table_value[FIELD_STORAGE_ENGINE] = static_cast<int>(storage_engine_);
+
+  table_value[FIELD_FIELDS_RECORD_SIZE] = fields_record_size_;
+  table_value[FIELD_BITMAP_RECORD_SIZE] = bitmap_record_size_;
 
   Json::Value fields_value;
   for (const FieldMeta &field : fields_) {
@@ -202,6 +229,15 @@ int TableMeta::serialize(ostream &ss) const
     primary_keys_value.append(field);
   }
   table_value[FIELD_PRIMARY_KEYS] = std::move(primary_keys_value);
+
+  /* 新增字段nullable信息 */
+  Json::Value nullable_value;
+  for (bool can_null : nullable_) {
+    // 基本类型不用自己定义to_json
+    nullable_value.append(can_null);
+  }
+  // 转移所有权 --> table meta被清空
+  table_value[FIELD_NULLABLE] = std::move(nullable_value);
 
   Json::StreamWriterBuilder builder;
   Json::StreamWriter       *writer = builder.newStreamWriter();
@@ -287,7 +323,18 @@ int TableMeta::deserialize(istream &is)
   storage_engine_ = static_cast<StorageEngine>(storage_engine);
   name_.swap(table_name);
   fields_.swap(fields);
-  record_size_ = fields_.back().offset() + fields_.back().len() - fields_.begin()->offset();
+
+  // record_size_ = fields_.back().offset() + fields_.back().len() - fields_.begin()->offset();
+  const Json::Value &fields_record_size_value = table_value[FIELD_FIELDS_RECORD_SIZE];
+  const Json::Value &bitmap_record_size_value = table_value[FIELD_BITMAP_RECORD_SIZE];
+
+  if (fields_record_size_value.isInt()) {
+    fields_record_size_ = fields_record_size_value.asInt();
+  }
+
+  if (bitmap_record_size_value.isInt()) {
+    bitmap_record_size_ = bitmap_record_size_value.asInt();
+  }
 
   for (const FieldMeta &field_meta : fields_) {
     if (!field_meta.visible()) {
@@ -295,6 +342,9 @@ int TableMeta::deserialize(istream &is)
     }
   }
 
+  record_size_ = fields_record_size_ + bitmap_record_size_;
+
+  /* 从JSON中获取indexes数据 */
   const Json::Value &indexes_value = table_value[FIELD_INDEXES];
   if (!indexes_value.empty()) {
     if (!indexes_value.isArray()) {
@@ -316,6 +366,7 @@ int TableMeta::deserialize(istream &is)
     indexes_.swap(indexes);
   }
 
+  /* 从JSON中获取primary keys数据 */
   const Json::Value &primary_keys_value = table_value[FIELD_PRIMARY_KEYS];
   if (!primary_keys_value.empty()) {
     if (!primary_keys_value.isArray()) {
@@ -335,6 +386,22 @@ int TableMeta::deserialize(istream &is)
       primary_keys.push_back(field_name);
     }
     primary_keys_.swap(primary_keys);
+  }
+
+  /* 从JSON中获取nullable数据 */
+  const Json::Value &nullable_value = table_value[FIELD_NULLABLE];
+  nullable_.clear();
+  nullable_.reserve(fields_.size());
+
+  if (nullable_value.isArray() && nullable_value.size() == (int)fields_.size()) {
+    for (int i = 0; i < nullable_value.size(); i++) {
+      nullable_.push_back(nullable_value[i].asBool());  // 转化回bool --> 应当不需要使用swap，直接拷贝即可
+    }
+  } else {
+    // 兼容旧版本的元数据（若旧版本没有NULL功能，则全部设为不可空）
+    for (int i = 0; i < (int)fields_.size(); i++) {
+      nullable_.push_back(false);
+    }
   }
 
   return (int)(is.tellg() - old_pos);

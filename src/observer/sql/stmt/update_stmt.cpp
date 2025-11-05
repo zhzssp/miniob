@@ -42,14 +42,20 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt)
   const AttrType value_type = update_sql.value.attr_type();
   
   Value final_value = update_sql.value;
-  if (field_type != value_type) {
-    // 尝试类型转换
-    RC cast_rc = Value::cast_to(update_sql.value, field_type, final_value);
-    if (cast_rc != RC::SUCCESS) {
-      LOG_WARN("type mismatch and cannot cast. field=%s.%s.%s, field_type=%d, value_type=%d",
-               db->name(), table->name(), update_sql.attribute_name.c_str(), field_type, value_type);
-      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+  // null值不进行类型转换
+  if(!final_value.is_null()) {
+    LOG_INFO("Get value used to set is not null");
+    if (field_type != value_type) {
+      // 尝试类型转换
+      RC cast_rc = Value::cast_to(update_sql.value, field_type, final_value);
+      if (cast_rc != RC::SUCCESS) {
+        LOG_WARN("type mismatch and cannot cast. field=%s.%s.%s, field_type=%d, value_type=%d",
+                db->name(), table->name(), update_sql.attribute_name.c_str(), field_type, value_type);
+        return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+      }
     }
+  } else {
+    LOG_INFO("Value used to set is null");
   }
 
   // 解析WHERE条件

@@ -31,6 +31,7 @@ RC LsmTableEngine::insert_record(Record &record)
 
 RC LsmTableEngine::get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWriteMode mode)
 {
+  LOG_TRACE("Get record scanner from engine");
   scanner = new LsmRecordScanner(table_, db_->lsm(), trx);
   RC rc = scanner->open_scan();
   if (rc != RC::SUCCESS) {

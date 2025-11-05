@@ -146,6 +146,37 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
   RC  rc         = RC::SUCCESS;
   int cmp_result = 0;
 
+  // is / is not --> 第二个数只能是null
+  if (comp_ == IS_OP) {
+    if (!left.is_null() && right.is_null()) {
+      result = false;
+      return rc;
+    } else if (left.is_null() && right.is_null()) {
+      result = true;
+      return rc;
+    }
+    else {
+      return RC::INVALID_DATE_FORMAT;
+    }
+  } else if(comp_ == IS_NOT_OP) {
+    if (!left.is_null() && right.is_null()) {
+      result = true;
+      return rc;
+    } else if (left.is_null() && right.is_null()) {
+      result = false;
+      return rc;
+    } else {
+      return RC::INVALID_DATE_FORMAT;
+    }
+  } else {
+    // 其余全部当作传统运算符对待
+    if(left.is_null() || right.is_null()) {
+      result = false;
+      return rc;
+    }
+  }
+  LOG_INFO("ComparisonExpr's comp_ is not related to is null / is not null");
+
   // 安全类型对齐：在比较前尽量将不同类型转换为可比较的同一类型
   // 规则：
   // - INTS vs FLOATS -> 都转为 FLOATS
@@ -374,6 +405,7 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
   Value left_value;
   Value right_value;
 
+  // 比较表达式树 --> 递归
   RC rc = left_->get_value(tuple, left_value);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
@@ -534,6 +566,10 @@ AttrType ArithmeticExpr::value_type() const
 RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value, Value &value) const
 {
   RC rc = RC::SUCCESS;
+  if(left_value.is_null() || right_value.is_null()) {
+    value.set_null(true);
+    return rc;
+  }
 
   const AttrType target_type = value_type();
   value.set_type(target_type);
