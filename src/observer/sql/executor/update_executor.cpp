@@ -87,7 +87,7 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
             const FieldMeta *fm = lobj.field.meta();
             lval.set_type(fm->type());
             lval.set_data(record.data() + fm->offset(), fm->len());
-            lval.set_null(record.get_null_information(fm->field_id(), table_meta.fields_record_size()));
+            // lval.set_null(record.get_null_information(fm->field_id(), table_meta.fields_record_size()));
           } else {
             lval = lobj.value;
           }
@@ -97,7 +97,7 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
             const FieldMeta *fm = robj.field.meta();
             rval.set_type(fm->type());
             rval.set_data(record.data() + fm->offset(), fm->len());
-            rval.set_null(record.get_null_information(fm->field_id(), table_meta.fields_record_size()));
+            // rval.set_null(record.get_null_information(fm->field_id(), table_meta.fields_record_size()));
           } else {
             rval = robj.value;
           }
