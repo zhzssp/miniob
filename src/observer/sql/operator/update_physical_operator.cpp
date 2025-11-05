@@ -107,6 +107,10 @@ RC UpdatePhysicalOperator::create_updated_record(const Record &old_record, Recor
   // 将值写入到对应字段偏移
   if(!casted_value.is_null()) {
     rc = new_record.set_field(field_meta->offset(), field_meta->len(), (char *)casted_value.data());
+  } else {
+    LOG_INFO("Casted_value is null when creating updated record");
+    new_record.set_bitmap(field_meta->field_id(), table_meta.fields_record_size(), true);
+    new_record.set_is_null(field_meta->field_id());
   }
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to set field value: %s", strrc(rc));

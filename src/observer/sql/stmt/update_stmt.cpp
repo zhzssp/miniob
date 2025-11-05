@@ -55,7 +55,7 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt)
       }
     }
   } else {
-    LOG_INFO("Get value used to set is null");
+    LOG_INFO("Value used to set is null");
   }
 
   // 解析WHERE条件

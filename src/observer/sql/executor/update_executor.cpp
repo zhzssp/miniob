@@ -122,7 +122,7 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
           
           // 执行的是where的筛选逻辑 --> 这里如果compare null会出问题
           bool pass = false;
-          if(!lval.is_null() && !rval.is_null()) {
+          // if(!lval.is_null() && !rval.is_null()) {
             int cmp = lval.compare(rval);
 
             switch (unit->comp()) {
@@ -133,28 +133,28 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
             case GREAT_THAN: pass = (cmp > 0); break;
             case GREAT_EQUAL: pass = (cmp >= 0); break;
             default: pass = false; break;
-          }
-          } else {
-            LOG_INFO("When trying to update, null appears in filter condition");
-            if(unit->comp() == IS_OP && rval.is_null()) {
-              LOG_INFO("When updating, filter's operator is IS, lval is %s", lval.to_string().c_str());
-              if(lval.is_null()) {
-                pass = true;
-              } else {
-                pass = false;
-              }
-            } else if(unit->comp() == IS_NOT_OP && rval.is_null()) {
-              LOG_INFO("When updating, filter's operator is IS NOT, lval is %s", lval.to_string().c_str());
-              if(lval.is_null()) {
-                pass = false;
-              } else {
-                pass = true;
-              }
-            } else {
-              LOG_ERROR("Cannot find matched numerical operator or operand, pass = false defaultly");
-              pass = false;
-            }
-          }
+          // }
+          // } else {
+          //   LOG_INFO("When trying to update, null appears in filter condition");
+          //   if(unit->comp() == IS_OP && rval.is_null()) {
+          //     LOG_INFO("When updating, filter's operator is IS, lval is %s", lval.to_string().c_str());
+          //     if(lval.is_null()) {
+          //       pass = true;
+          //     } else {
+          //       pass = false;
+          //     }
+          //   } else if(unit->comp() == IS_NOT_OP && rval.is_null()) {
+          //     LOG_INFO("When updating, filter's operator is IS NOT, lval is %s", lval.to_string().c_str());
+          //     if(lval.is_null()) {
+          //       pass = false;
+          //     } else {
+          //       pass = true;
+          //     }
+          //   } else {
+          //     LOG_ERROR("Cannot find matched numerical operator or operand, pass = false defaultly");
+          //     pass = false;
+          //   }
+          // }
           // 出现无法满足的条件 --> 直接跳过，查看下一个元组
           LOG_INFO("Pass value is %s", pass ? "true" : "false");
           if (!pass) { selected = false; break; }
