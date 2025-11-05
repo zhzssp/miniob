@@ -133,7 +133,7 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
             case GREAT_THAN: pass = (cmp > 0); break;
             case GREAT_EQUAL: pass = (cmp >= 0); break;
             default: pass = false; break;
-          // }
+          }
           // } else {
           //   LOG_INFO("When trying to update, null appears in filter condition");
           //   if(unit->comp() == IS_OP && rval.is_null()) {
