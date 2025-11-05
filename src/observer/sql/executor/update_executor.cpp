@@ -87,7 +87,8 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
             const FieldMeta *fm = lobj.field.meta();
             lval.set_type(fm->type());
             lval.set_data(record.data() + fm->offset(), fm->len());
-            // lval.set_null(record.get_null_information(fm->field_id(), table_meta.fields_record_size()));
+            lval.set_null(record.get_null_information(fm->field_id(), table_meta.fields_record_size()));
+            LOG_INFO("field %d, lval's null info is %s", fm->field_id(), record.get_null_information(fm->field_id(), table_meta.fields_record_size()) ? "true" : "false");
           } else {
             lval = lobj.value;
           }
@@ -97,7 +98,8 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
             const FieldMeta *fm = robj.field.meta();
             rval.set_type(fm->type());
             rval.set_data(record.data() + fm->offset(), fm->len());
-            // rval.set_null(record.get_null_information(fm->field_id(), table_meta.fields_record_size()));
+            rval.set_null(record.get_null_information(fm->field_id(), table_meta.fields_record_size()));
+            LOG_INFO("field %d, rval's null info is %s", fm->field_id(), record.get_null_information(fm->field_id(), table_meta.fields_record_size()) ? "true" : "false");
           } else {
             rval = robj.value;
           }
@@ -122,7 +124,7 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
           
           // 执行的是where的筛选逻辑 --> 这里如果compare null会出问题
           bool pass = false;
-          // if(!lval.is_null() && !rval.is_null()) {
+          if(!lval.is_null() && !rval.is_null()) {
             int cmp = lval.compare(rval);
 
             switch (unit->comp()) {
@@ -134,27 +136,27 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
             case GREAT_EQUAL: pass = (cmp >= 0); break;
             default: pass = false; break;
           }
-          // } else {
-          //   LOG_INFO("When trying to update, null appears in filter condition");
-          //   if(unit->comp() == IS_OP && rval.is_null()) {
-          //     LOG_INFO("When updating, filter's operator is IS, lval is %s", lval.to_string().c_str());
-          //     if(lval.is_null()) {
-          //       pass = true;
-          //     } else {
-          //       pass = false;
-          //     }
-          //   } else if(unit->comp() == IS_NOT_OP && rval.is_null()) {
-          //     LOG_INFO("When updating, filter's operator is IS NOT, lval is %s", lval.to_string().c_str());
-          //     if(lval.is_null()) {
-          //       pass = false;
-          //     } else {
-          //       pass = true;
-          //     }
-          //   } else {
-          //     LOG_ERROR("Cannot find matched numerical operator or operand, pass = false defaultly");
-          //     pass = false;
-          //   }
-          // }
+          } else {
+            LOG_INFO("When trying to update, null appears in filter condition");
+            if(unit->comp() == IS_OP && rval.is_null()) {
+              LOG_INFO("When updating, filter's operator is IS, lval is %s", lval.to_string().c_str());
+              if(lval.is_null()) {
+                pass = true;
+              } else {
+                pass = false;
+              }
+            } else if(unit->comp() == IS_NOT_OP && rval.is_null()) {
+              LOG_INFO("When updating, filter's operator is IS NOT, lval is %s", lval.to_string().c_str());
+              if(lval.is_null()) {
+                pass = false; 
+              } else {
+                pass = true;
+              }
+            } else {
+              LOG_ERROR("Cannot find matched numerical operator or operand, pass = false defaultly");
+              pass = false;
+            }
+          }
           // 出现无法满足的条件 --> 直接跳过，查看下一个元组
           LOG_INFO("Pass value is %s", pass ? "true" : "false");
           if (!pass) { selected = false; break; }
@@ -177,29 +179,33 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
     // 将获取到的record进行更新
     Trx *trx = session->current_trx();
     for (Record &old_record : targets) {
-      // 初始化bitmap
+      Record new_record;
+      // record的char *data中存储了bitmap --> 这里只将char *data复制过去了 !!!
+      rc = new_record.copy_data(old_record.data(), table_meta.record_size());
+      if (rc != RC::SUCCESS) {
+        return rc;
+      }
+
+      // 初始化bitmap --> 需要手动设置
       old_record.init_bitmap(table_meta.field_num());
+      new_record.init_bitmap(table_meta.field_num());
 
       for(int i = 0; i < table_meta.field_num(); i++) {
         bool is_null_info = old_record.get_null_information(i, table_meta.fields_record_size());
         if(is_null_info) {
           old_record.set_is_null(i);
+          new_record.set_is_null(i);
         } else {
           old_record.set_is_not_null(i);
+          new_record.set_is_not_null(i);
         }
       }
-
-      Record new_record;
-      // record的char *data中存储了bitmap
-      rc = new_record.copy_data(old_record.data(), table_meta.record_size());
-      if (rc != RC::SUCCESS) {
-        return rc;
-      }
       
-      // 只是将要修改的字段的新值给复制过去了 --> null对应的这段内存无用，不用设置都可以
+      // 只是将要修改的字段的新值给复制过去 --> null对应的这段内存无用，全部置为0
       if(!final_value.is_null()) {
         rc = new_record.set_field(field_meta->offset(), field_meta->len(), (char *)final_value.data());
-        // 原本的数据就是null --> 修改记录信息
+
+        // 原本的数据是null --> 修改信息
         if(old_record.is_null(field_meta->field_id())) {
           LOG_INFO("Update field %d's null value to be non-null value", field_meta->field_id());
           new_record.set_bitmap(field_meta->field_id(), table_meta.fields_record_size(), false);
@@ -208,12 +214,18 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
       }
       else {
         LOG_INFO("Get null final_value, update field %d's is_null_ information", field_meta->field_id());
+
+        // 清空对应字段原本的值
+        vector<char> zero(field_meta->len(), 0);
+        rc = new_record.set_field(field_meta->offset(), field_meta->len(), zero.data());
+
         new_record.set_bitmap(field_meta->field_id(), table_meta.fields_record_size(), true);
         new_record.set_is_null(field_meta->field_id());
       }
       if (rc != RC::SUCCESS) {
         return rc;
       }
+
       new_record.set_rid(old_record.rid());
 
       rc = trx->update_record(table, old_record, new_record);
