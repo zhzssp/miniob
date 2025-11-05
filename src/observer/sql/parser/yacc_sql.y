@@ -78,6 +78,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         INDEX
         CALC
         SELECT
+        ORDER  
+        ASC   
         DESC
         SHOW
         SYNC
@@ -93,7 +95,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         INT_T
         STRING_T
         FLOAT_T
-        // DATE_T
+        DATE_T
         VECTOR_T
         HELP
         EXIT
@@ -127,7 +129,9 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         GE
         NE
         IN
+        NULL_T
         NOT
+        IS
 
 /** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
 %union {
@@ -141,6 +145,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   AttrInfoSqlNode *                          attr_info;
   Expression *                               expression;
   vector<unique_ptr<Expression>> *           expression_list;
+  vector<unique_ptr<OrderedUnboundFieldExpr>> *           order_expression_list;
   vector<Value> *                            value_list;
   vector<ConditionSqlNode> *                 condition_list;
   vector<RelAttrSqlNode> *                   rel_attr_list;
@@ -148,7 +153,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   vector<string> *                           key_list;
   vector<JoinConditionSqlNode> *             join_condition_list;
   char *                                     cstring;
-  int                                        number;
+  int                                        number;  // 进一步用于null的表示
   float                                      floats;
 }
 
@@ -175,6 +180,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <condition>           condition
 %type <value>               value
 %type <number>              number
+%type <number>              null_spec
 %type <comp>                comp_op
 %type <rel_attr>            rel_attr
 %type <attr_infos>          attr_def_list
@@ -191,6 +197,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <expression>          aggregate_expression
 %type <expression_list>     expression_list
 %type <expression_list>     group_by
+%type <order_expression_list>     order_by        // 整个order by子句
+%type <order_expression_list>     order_by_list   // 多个排序项
 %type <cstring>             fields_terminated_by
 %type <cstring>             enclosed_by
 %type <sql_node>            calc_stmt
@@ -379,23 +387,27 @@ attr_def_list:
       delete $3;
     }
     ;
-    
+
+// 表字段的定义
 attr_def:
-    ID type LBRACE number RBRACE 
+    ID type LBRACE number RBRACE null_spec
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
       $$->length = $4;
+      $$->nullable = ($6 == 1);
     }
-    | ID type
+    | ID type null_spec
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
       $$->length = 4;
+      $$->nullable = ($3 == 1);
     }
     ;
+
 number:
     NUMBER {$$ = $1;}
     ;
@@ -403,6 +415,7 @@ type:
     INT_T      { $$ = static_cast<int>(AttrType::INTS); }
     | STRING_T { $$ = static_cast<int>(AttrType::CHARS); }
     | FLOAT_T  { $$ = static_cast<int>(AttrType::FLOATS); }
+    | DATE_T   { $$ = static_cast<int>(AttrType::DATES); } 
     | VECTOR_T { $$ = static_cast<int>(AttrType::VECTORS); }
     ;
 primary_key:
@@ -432,7 +445,24 @@ attr_list:
     }
     ;
 
-insert_stmt:        /*insert   语句的语法解析树*/
+null_spec:
+    /* empty */ 
+    {
+      /* 省略时默认允许 NULL */
+      $$ = 1; /* 1 表示 nullable */
+    }
+    | NULL_T 
+    {
+      $$ = 1; /* 明确写 NULL */
+    }
+    | NOT NULL_T
+    {
+      $$ = 0; /* NOT NULL => 不可空 */
+    }
+    ;
+
+
+insert_stmt:        /* insert 语句的语法解析树 --> 暂时只支持一次性插入一个元组 --> 一个Value代表一个字段的值 */
     INSERT INTO ID VALUES LBRACE value_list RBRACE 
     {
       $$ = new ParsedSqlNode(SCF_INSERT);
@@ -455,21 +485,31 @@ value_list:
       delete $3;
     }
     ;
+
+// 表示插入的元组
 value:
     NUMBER {
       $$ = new Value((int)$1);
       @$ = @1;
     }
-    |FLOAT {
+    | FLOAT {
       $$ = new Value((float)$1);
       @$ = @1;
     }
-    |SSS {
+    | SSS {
       char *tmp = common::substr($1,1,strlen($1)-2);
       $$ = new Value(tmp);
       free(tmp);
     }
+    | NULL_T {
+      $$ = new Value(); 
+      /* 其他属性为空 & null = true --> 表示 null  */
+      $$->set_null(true);
+      @$ = @1;
+    }
     ;
+
+
 storage_format:
     /* empty */
     {
@@ -548,7 +588,7 @@ subquery_stmt:
     ;
 
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list where group_by
+    SELECT expression_list FROM rel_list where group_by order_by
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -569,6 +609,12 @@ select_stmt:        /*  select 语句的语法解析树*/
       if ($6 != nullptr) {
         $$->selection.group_by.swap(*$6);
         delete $6;
+      }
+
+      // 把解析得到的列表放入SQL Node的order_by属性中存起来
+      if ($7 != nullptr) {
+        $$->selection.order_by.swap(*$7);
+        delete $7;
       }
       
       // 处理 JOIN 条件
@@ -914,6 +960,7 @@ where:
       $$ = $2;  
     }
     ;
+
 condition_list:
     /* empty */
     {
@@ -930,7 +977,9 @@ condition_list:
       delete $1;
     }
     ;
+
 condition:
+    // 按照比较的不同表达形式进行分类
     rel_attr comp_op value
     {
       $$ = new ConditionSqlNode;
@@ -1018,8 +1067,65 @@ condition:
       $$->right_expr->set_name(token_name(sql_string, &@$));
       $$->comp = NOT_IN_OP;
     }
+    | rel_attr IS NULL_T
+    {
+        $$ = new ConditionSqlNode;
+        $$->left_is_attr = 1;
+        $$->left_attr = *$1;
+
+        $$->right_is_attr = 0;
+        $$->right_value = Value(); // 空值
+        $$->right_value.set_null(true);
+        
+        // 需要在 CompOp 中定义
+        $$->comp = IS_OP;   
+        delete $1;
+    }
+    | rel_attr IS NOT NULL_T
+    {
+        $$ = new ConditionSqlNode;
+        $$->left_is_attr = 1;
+        $$->left_attr = *$1;
+         
+        $$->right_is_attr = 0;
+        $$->right_value = Value();
+        $$->right_value.set_null(true);
+
+        // 需要在 CompOp 中定义
+        $$->comp = IS_NOT_OP; 
+        // 此时NULL_T为纯标识符，没有需要delete的对象
+        delete $1;
+    }
+    // 支持直接使用const is null / const is not null的形式 --> 直接判断即可
+    | value IS NULL_T
+    {
+        $$ = new ConditionSqlNode;
+        $$->left_is_attr = 0;
+        $$->left_value = *$1;
+        
+        $$->right_is_attr = 0;
+        $$->right_value = Value();
+        $$->right_value.set_null(true);
+
+        $$->comp = IS_OP;   
+        delete $1;
+    }
+    | value IS NOT NULL_T
+    {
+        $$ = new ConditionSqlNode;
+        $$->left_is_attr = 0;
+        $$->left_value = *$1;
+
+        $$->right_is_attr = 0;
+        $$->right_value = Value();
+        $$->right_value.set_null(true);
+
+        $$->comp = IS_NOT_OP;  
+        delete $1;
+    }
     ;
 
+// 枚举运算符token（识别符号得到），is / is not不加入该体系，直接赋值
 comp_op:
       EQ { $$ = EQUAL_TO; }
     | LT { $$ = LESS_THAN; }
@@ -1044,6 +1150,81 @@ group_by:
       $$ = $3;
     }
     ;
+
+order_by:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | ORDER BY order_by_list
+    {
+      // 存在该子句，则返回的语义值直接取order_by_list
+      $$ = $3;
+    }
+    ;
+
+// 解析order_by_list的语义值 --> 使用Expression存储排序字段
+order_by_list:
+    // 只包含一个项 --> rel_attr指的是table.id ???
+    rel_attr
+    {
+      $$ = new vector<unique_ptr<OrderedUnboundFieldExpr>>;  
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(1); // 默认 ASC
+      $$->emplace_back(std::move(expr));
+      // 释放 rel_attr 在解析时分配的内存
+      delete $1;
+    }
+    // 显式定义了ASC或者DESC
+    | rel_attr ASC
+    {
+      $$ = new vector<unique_ptr<OrderedUnboundFieldExpr>>;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(1); // ASC = 1
+      $$->emplace_back(std::move(expr));
+      delete $1;
+    }
+    | rel_attr DESC
+    {
+      $$ = new vector<unique_ptr<OrderedUnboundFieldExpr>>;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(-1); // DESC = -1
+      $$->emplace_back(std::move(expr));
+      delete $1;
+    }
+    | rel_attr ASC COMMA order_by_list
+    {
+      $$ = $4;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(1);
+      // 通过回溯，保证字段在vector中的顺序与排序用的顺序一致
+      $$->insert($$->begin(), std::move(expr));
+      delete $1;
+    }
+    | rel_attr DESC COMMA order_by_list
+    {
+      $$ = $4;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(-1); 
+      $$->insert($$->begin(), std::move(expr));
+      delete $1;
+    }
+    | rel_attr COMMA order_by_list
+    {
+      $$ = $3;
+      auto expr = make_unique<OrderedUnboundFieldExpr>($1->relation_name, $1->attribute_name);
+      expr->set_name($1->attribute_name);
+      expr->set_order(1);
+      $$->insert($$->begin(), std::move(expr));
+      delete $1;
+    }
+    ;
+
 load_data_stmt:
     LOAD DATA INFILE SSS INTO TABLE ID fields_terminated_by enclosed_by
     {

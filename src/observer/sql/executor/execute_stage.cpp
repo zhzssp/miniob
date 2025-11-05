@@ -29,13 +29,14 @@ RC ExecuteStage::handle_request(SQLStageEvent *sql_event)
 {
   RC rc = RC::SUCCESS;
 
+  // 对应会设置physical operator的类型 --> select等
   const unique_ptr<PhysicalOperator> &physical_operator = sql_event->physical_operator();
   if (physical_operator != nullptr) {
     return handle_request_with_physical_operator(sql_event);
   }
 
   SessionEvent *session_event = sql_event->session_event();
-
+  // 对应直接执行executor的类型 --> create, drop等
   Stmt *stmt = sql_event->stmt();
   if (stmt != nullptr) {
     CommandExecutor command_executor;
@@ -51,9 +52,11 @@ RC ExecuteStage::handle_request_with_physical_operator(SQLStageEvent *sql_event)
 {
   RC rc = RC::SUCCESS;
 
+  // 获取得到的Project Physical Operator算子
   unique_ptr<PhysicalOperator> &physical_operator = sql_event->physical_operator();
   ASSERT(physical_operator != nullptr, "physical operator should not be null");
 
+  /* sql_result不是存储元组列表, 而是通过next_tuple从operator中逐个获取 */
   SqlResult *sql_result = sql_event->session_event()->sql_result();
   sql_result->set_operator(std::move(physical_operator));
   return rc;

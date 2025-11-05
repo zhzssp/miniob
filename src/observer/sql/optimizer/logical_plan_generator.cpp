@@ -26,6 +26,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/project_logical_operator.h"
 #include "sql/operator/table_get_logical_operator.h"
 #include "sql/operator/group_by_logical_operator.h"
+#include "sql/operator/order_by_logical_operator.h"
 
 #include "sql/expr/expression.h"
 #include "sql/expr/subquery_expr.h"
@@ -91,9 +92,12 @@ RC LogicalPlanGenerator::create_plan(CalcStmt *calc_stmt, unique_ptr<LogicalOper
 
 RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
+  LOG_TRACE("Begin to create a plan for basic select");
   unique_ptr<LogicalOperator> *last_oper = nullptr;
 
   unique_ptr<LogicalOperator> table_oper(nullptr);
+  // 最下层
+  LOG_TRACE("Table is the first level logical operator");
   last_oper = &table_oper;
   unique_ptr<LogicalOperator> predicate_oper;
 
@@ -107,12 +111,17 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   
   for (size_t i = 0; i < tables.size(); i++) {
     Table *table = tables[i];
+    // 这里设置READ_ONLY --> 
     unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_ONLY));
     
+    // 只在单表查询
     if (table_oper == nullptr) {
+      LOG_TRACE("Move table_get_oper to table_oper directly");
       table_oper = std::move(table_get_oper);
     } else {
+      // 什么时候table_oper不是nullptr ??? --> 存在多表联查
       JoinLogicalOperator *join_oper = new JoinLogicalOperator;
+      LOG_TRACE("Join logical operator adds table %d's logical operator and its table_get logical operator to child_", i);
       join_oper->add_child(std::move(table_oper));
       join_oper->add_child(std::move(table_get_oper));
       
@@ -143,6 +152,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
           
           // 检查条件是否涉及当前 JOIN 的表
           if (filter_unit->left().is_attr && filter_unit->right().is_attr) {
+            // 两边都是属性：检查是否涉及左表和右表
             const Table *left_field_table = filter_unit->left().field.table();
             const Table *right_field_table = filter_unit->right().field.table();
             
@@ -166,6 +176,34 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
               if (left_field_table == right_table || right_field_table == right_table) {
                 is_relevant = true;
               } else {
+              }
+            }
+          } else if (filter_unit->left().is_attr && !filter_unit->right().is_attr) {
+            // 左边是属性，右边是常量：检查属性是否属于当前JOIN涉及的表
+            const Table *left_field_table = filter_unit->left().field.table();
+            if (left_table != nullptr) {
+              // 左表已知，检查属性是否属于左表或右表
+              if (left_field_table == left_table || left_field_table == right_table) {
+                is_relevant = true;
+              }
+            } else {
+              // 左表未知，检查属性是否属于右表
+              if (left_field_table == right_table) {
+                is_relevant = true;
+              }
+            }
+          } else if (!filter_unit->left().is_attr && filter_unit->right().is_attr) {
+            // 左边是常量，右边是属性：检查属性是否属于当前JOIN涉及的表
+            const Table *right_field_table = filter_unit->right().field.table();
+            if (left_table != nullptr) {
+              // 左表已知，检查属性是否属于左表或右表
+              if (right_field_table == left_table || right_field_table == right_table) {
+                is_relevant = true;
+              }
+            } else {
+              // 左表未知，检查属性是否属于右表
+              if (right_field_table == right_table) {
+                is_relevant = true;
               }
             }
           }
@@ -202,6 +240,8 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
         }
       }
       
+      // 第二层
+      LOG_TRACE("Set join %d as the second level logical operator", i);
       table_oper = unique_ptr<LogicalOperator>(join_oper);
       
       
@@ -213,7 +253,9 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   }
 
 
+  // 第三层
   if (predicate_oper) {
+    LOG_TRACE("Set predicate(filter) as the third level logical operator");
     if (*last_oper) {
       predicate_oper->add_child(std::move(*last_oper));
     }
@@ -221,6 +263,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     last_oper = &predicate_oper;
   }
 
+  // 第三层
   unique_ptr<LogicalOperator> group_by_oper;
   rc = create_group_by_plan(select_stmt, group_by_oper);
   if (OB_FAIL(rc)) {
@@ -229,6 +272,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   }
 
   if (group_by_oper) {
+    LOG_TRACE("Set group by as the forth level logical operator");
     if (*last_oper) {
       group_by_oper->add_child(std::move(*last_oper));
     }
@@ -236,8 +280,27 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     last_oper = &group_by_oper;
   }
 
+  // 最上层
+  unique_ptr<LogicalOperator> order_by_oper;
+  rc = create_order_by_plan(select_stmt, order_by_oper);
+  if (OB_FAIL(rc)) {
+    LOG_WARN("failed to create order by logical plan. rc=%s", strrc(rc));
+    return rc;
+  }
+
+  if (order_by_oper) {
+    LOG_TRACE("Set order by as the fifth level logical operator");
+    if (*last_oper) {
+      order_by_oper->add_child(std::move(*last_oper));
+    }
+
+    last_oper = &order_by_oper;
+  }
+
   unique_ptr<LogicalOperator> project_oper = make_unique<ProjectLogicalOperator>(std::move(select_stmt->query_expressions()));
   if (*last_oper) {
+    // 最后的根节点
+    LOG_TRACE("Project logical operator is the root of logical operator tree");
     project_oper->add_child(std::move(*last_oper));
   }
 
@@ -249,10 +312,12 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
 
 RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
+  LOG_TRACE("Begin to create filter logical operator");
   RC                                  rc = RC::SUCCESS;
   vector<unique_ptr<Expression>> cmp_exprs;
   const vector<FilterUnit *>    &filter_units = filter_stmt->filter_units();
   
+  // 将所有的filter_units全部转化为ComparisonExpr
   for (const FilterUnit *filter_unit : filter_units) {
     const FilterObj &filter_obj_left  = filter_unit->left();
     const FilterObj &filter_obj_right = filter_unit->right();
@@ -290,7 +355,18 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
     } else {
       right = make_unique<ValueExpr>(filter_obj_right.value);
     }
-    
+
+    CompOp comp = filter_unit->comp();
+    if (comp == IS_OP || comp == IS_NOT_OP) {
+      // is null判断 --> 避免进入cast部分
+      if (filter_obj_left.is_null() || filter_obj_right.is_null()) {
+        LOG_INFO("Null appears, cannot implicitly cast value.");
+        ComparisonExpr *cmp_expr = new ComparisonExpr(filter_unit->comp(), std::move(left), std::move(right));
+        cmp_exprs.emplace_back(cmp_expr);
+        continue;
+      }
+    }
+
     // 跳过子查询表达式的类型检查
     // 如果 right 的 value_type 是 UNDEFINED，很可能包含子查询
     bool has_subquery = (right->value_type() == AttrType::UNDEFINED) || 
@@ -305,7 +381,7 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
       LOG_WARN("Found subquery in filter, skipping type check. left_type=%d, right_type=%d", 
                 (int)left->type(), (int)right->type());
     }
-    
+
     if (!has_subquery && left->value_type() != right->value_type()) {
       auto left_to_right_cost = implicit_cast_cost(left->value_type(), right->value_type());
       auto right_to_left_cost = implicit_cast_cost(right->value_type(), left->value_type());
@@ -351,6 +427,7 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
 
   unique_ptr<PredicateLogicalOperator> predicate_oper;
   if (!cmp_exprs.empty()) {
+    // AND OR连接条件
     unique_ptr<ConjunctionExpr> conjunction_expr(new ConjunctionExpr(ConjunctionExpr::Type::AND, cmp_exprs));
     predicate_oper = unique_ptr<PredicateLogicalOperator>(new PredicateLogicalOperator(std::move(conjunction_expr)));
   }
@@ -546,9 +623,11 @@ bool LogicalPlanGenerator::expression_has_subquery(unique_ptr<Expression> &expr)
 
 RC LogicalPlanGenerator::create_plan(InsertStmt *insert_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
+  LOG_INFO("Create a logical plan for InsertStmt");
   Table        *table = insert_stmt->table();
   vector<Value> values(insert_stmt->values(), insert_stmt->values() + insert_stmt->value_amount());
 
+  LOG_TRACE("Initializing insert logical operator");
   InsertLogicalOperator *insert_operator = new InsertLogicalOperator(table, values);
   logical_operator.reset(insert_operator);
   return RC::SUCCESS;
@@ -557,7 +636,7 @@ RC LogicalPlanGenerator::create_plan(InsertStmt *insert_stmt, unique_ptr<Logical
 RC LogicalPlanGenerator::create_plan(DeleteStmt *delete_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
   Table                      *table       = delete_stmt->table();
-  FilterStmt                 *filter_stmt = delete_stmt->filter_stmt();
+  FilterStmt                 *filter_stmt = delete_stmt->filter_stmt();   // where过滤器 --> 包含所有的filter_units_，可以表达所有的条件
   unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_WRITE));
 
   unique_ptr<LogicalOperator> predicate_oper;
@@ -599,12 +678,16 @@ RC LogicalPlanGenerator::create_plan(ExplainStmt *explain_stmt, unique_ptr<Logic
 
 RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
+  LOG_TRACE("Begin to create group by logical operator");
+  // 分组的元素列表
   vector<unique_ptr<Expression>> &group_by_expressions = select_stmt->group_by();
   vector<Expression *> aggregate_expressions;
+  // 查询的字段列表
   vector<unique_ptr<Expression>> &query_expressions = select_stmt->query_expressions();
   function<RC(unique_ptr<Expression>&)> collector = [&](unique_ptr<Expression> &expr) -> RC {
     RC rc = RC::SUCCESS;
     if (expr->type() == ExprType::AGGREGATION) {
+      // 表达式在下层算子中返回的chunk的位置
       expr->set_pos(aggregate_expressions.size() + group_by_expressions.size());
       aggregate_expressions.push_back(expr.get());
     }
@@ -612,6 +695,7 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
     return rc;
   };
 
+  // lambda函数
   function<RC(unique_ptr<Expression>&)> bind_group_by_expr = [&](unique_ptr<Expression> &expr) -> RC {
     RC rc = RC::SUCCESS;
     for (size_t i = 0; i < group_by_expressions.size(); i++) {
@@ -673,6 +757,37 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
                                                            std::move(aggregate_expressions));
   logical_operator = std::move(group_by_oper);
   return RC::SUCCESS;
+}
+
+RC LogicalPlanGenerator::create_order_by_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator) 
+{
+  LOG_TRACE("Begin to create order by logical operator");
+  RC rc = RC::SUCCESS;
+
+  // 检查是否存在 ORDER BY 子句
+  vector<unique_ptr<OrderedUnboundFieldExpr>> &order_by_expressions = select_stmt->order_by();
+  if (order_by_expressions.empty()) {
+    return rc;  // 无 ORDER BY，直接返回
+  } else {
+    for(auto &expr: order_by_expressions) {
+      if(expr == nullptr) {
+        LOG_ERROR("Get null order_by_expression when initializing order by logical operator");
+        return RC::INVALID_ARGUMENT;
+      }
+    }
+  }
+
+  // 构造 ORDER BY LogicalOperator
+  unique_ptr<OrderByLogicalOperator> order_by_logical_op = std::make_unique<OrderByLogicalOperator>(std::move(order_by_expressions));
+  if(order_by_logical_op == nullptr) {
+    LOG_ERROR("Construct order by logical operator fails, get nullptr !!!");
+    return RC::EMPTY;
+  }
+
+  // 将左值转化为右值，进行资源转移 --> 不需要delete
+  logical_operator = std::move(order_by_logical_op);
+
+  return rc;
 }
 
 unique_ptr<Expression> LogicalPlanGenerator::create_expression_from_filter_obj(const FilterObj &filter_obj)
