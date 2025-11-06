@@ -107,6 +107,9 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     return rc;
   }
 
+  // 存储所有 JOIN 的 predicate_oper，确保它们的生命周期与逻辑计划一样长
+  vector<unique_ptr<PredicateLogicalOperator>> join_predicate_ops;
+
   const vector<Table *> &tables = select_stmt->tables();
   
   for (size_t i = 0; i < tables.size(); i++) {
@@ -124,6 +127,9 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       LOG_TRACE("Join logical operator adds table %d's logical operator and its table_get logical operator to child_", i);
       join_oper->add_child(std::move(table_oper));
       join_oper->add_child(std::move(table_get_oper));
+      
+      // 为每个 JOIN 创建独立的 predicate_oper
+      unique_ptr<PredicateLogicalOperator> join_predicate_oper = nullptr;
       
       // 精确条件分配：只处理与当前 JOIN 相关的条件
       if (select_stmt->join_filter_stmt() != nullptr) {
@@ -151,7 +157,9 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
           }
           
           // 检查条件是否涉及当前 JOIN 的表
+          // 处理两种情况：1) 两个属性之间的比较（跨表条件） 2) 属性与常量的比较（单表过滤条件）
           if (filter_unit->left().is_attr && filter_unit->right().is_attr) {
+            // 两个属性之间的比较
             const Table *left_field_table = filter_unit->left().field.table();
             const Table *right_field_table = filter_unit->right().field.table();
             
@@ -177,6 +185,20 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
               } else {
               }
             }
+          } else if (filter_unit->left().is_attr) {
+            // 左边是属性，右边是常量值（单表过滤条件）
+            const Table *left_field_table = filter_unit->left().field.table();
+            // 检查条件是否涉及右表（当前 JOIN 的右表）
+            if (left_field_table == right_table) {
+              is_relevant = true;
+            }
+          } else if (filter_unit->right().is_attr) {
+            // 右边是属性，左边是常量值（单表过滤条件）
+            const Table *right_field_table = filter_unit->right().field.table();
+            // 检查条件是否涉及右表（当前 JOIN 的右表）
+            if (right_field_table == right_table) {
+              is_relevant = true;
+            }
           }
           
           if (is_relevant) {
@@ -190,20 +212,20 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
               if (filter_unit->comp() == CompOp::EQUAL_TO) {
                 join_oper->add_join_predicate(std::move(comp_expr));
               } else {
-                // 非等值条件添加到 predicate_oper 中
-                if (predicate_oper == nullptr) {
-                  predicate_oper = make_unique<PredicateLogicalOperator>(std::move(comp_expr));
+                // 非等值条件添加到 join_predicate_oper 中
+                if (join_predicate_oper == nullptr) {
+                  join_predicate_oper = make_unique<PredicateLogicalOperator>(std::move(comp_expr));
                 } else {
-                  // 如果已经有 predicate_oper，需要创建 ConjunctionExpr 来组合条件
-                  auto existing_expr = std::move(predicate_oper->expressions()[0]);
-                  predicate_oper->expressions().clear();
+                  // 如果已经有 join_predicate_oper，需要创建 ConjunctionExpr 来组合条件
+                  auto existing_expr = std::move(join_predicate_oper->expressions()[0]);
+                  join_predicate_oper->expressions().clear();
                   
                   vector<unique_ptr<Expression>> conjunction_children;
                   conjunction_children.push_back(std::move(existing_expr));
                   conjunction_children.push_back(std::move(comp_expr));
                   
                   auto conjunction_expr = make_unique<ConjunctionExpr>(ConjunctionExpr::Type::AND, conjunction_children);
-                  predicate_oper = make_unique<PredicateLogicalOperator>(std::move(conjunction_expr));
+                  join_predicate_oper = make_unique<PredicateLogicalOperator>(std::move(conjunction_expr));
                 }
               }
             }
@@ -217,8 +239,12 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       
       
       // 如果有过滤条件，将其设置到 JoinLogicalOperator 中
-      if (predicate_oper) {
-        join_oper->add_predicate_op(predicate_oper.get());
+      // 将 join_predicate_oper 存储到容器中，确保生命周期
+      if (join_predicate_oper) {
+        // 将 join_predicate_oper 移动到容器中，保持所有权
+        join_predicate_ops.push_back(std::move(join_predicate_oper));
+        // 然后将指针传递给 join_oper
+        join_oper->add_predicate_op(join_predicate_ops.back().get());
       }
     }
   }
@@ -276,6 +302,12 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   }
 
   last_oper = &project_oper;
+
+  // 将 join_predicate_ops 移动到 project_oper 的隐藏子节点中，确保生命周期
+  // 注意：这些子节点不会被实际使用，只是为了确保 predicate_oper 的生命周期
+  for (auto &pred_op : join_predicate_ops) {
+    project_oper->add_child(std::move(pred_op));
+  }
 
   logical_operator = std::move(*last_oper);
   return RC::SUCCESS;

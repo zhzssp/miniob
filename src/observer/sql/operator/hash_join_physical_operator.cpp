@@ -114,52 +114,65 @@ RC HashJoinPhysicalOperator::next()
   }
 
   // 正常的 Hash Join 行为
-  // 如果当前没有匹配的记录，尝试获取下一个左表记录
-  if (current_matches_ == nullptr || current_match_index_ >= current_matches_->size()) {
-    RC rc = probe_hash_table();
-    if (rc != RC::SUCCESS) {
-      if (rc == RC::RECORD_EOF) {
-        left_exhausted_ = true;
-        return RC::RECORD_EOF;
+  // 使用循环来查找满足过滤条件的匹配
+  while (true) {
+    // 如果当前没有匹配的记录，尝试获取下一个左表记录
+    if (current_matches_ == nullptr || current_match_index_ >= current_matches_->size()) {
+      RC rc = probe_hash_table();
+      if (rc != RC::SUCCESS) {
+        if (rc == RC::RECORD_EOF) {
+          left_exhausted_ = true;
+          return RC::RECORD_EOF;
+        }
+        return rc;
       }
+      
+      // 如果仍然没有匹配，继续下一个左表记录
+      if (current_matches_ == nullptr || current_matches_->empty()) {
+        // 使用循环而不是递归调用，避免无限循环
+        while (current_matches_ == nullptr || current_matches_->empty()) {
+          rc = probe_hash_table();
+          if (rc != RC::SUCCESS) {
+            if (rc == RC::RECORD_EOF) {
+              left_exhausted_ = true;
+              return RC::RECORD_EOF;
+            }
+            return rc;
+          }
+          // 如果找到了匹配，退出循环
+          if (current_matches_ != nullptr && !current_matches_->empty()) {
+            break;
+          }
+        }
+      }
+    }
+
+    // 检查是否还有更多匹配
+    if (current_matches_ == nullptr || current_match_index_ >= current_matches_->size()) {
+      // 没有更多匹配，继续循环获取下一个左表记录
+      continue;
+    }
+
+    // 获取下一个匹配的右表记录
+    RC rc = get_next_match();
+    if (rc != RC::SUCCESS) {
       return rc;
     }
-    
-    // 如果仍然没有匹配，继续下一个左表记录
-    if (current_matches_ == nullptr || current_matches_->empty()) {
-      // 使用循环而不是递归调用，避免无限循环
-      while (current_matches_ == nullptr || current_matches_->empty()) {
-        rc = probe_hash_table();
-        if (rc != RC::SUCCESS) {
-          if (rc == RC::RECORD_EOF) {
-            left_exhausted_ = true;
-            return RC::RECORD_EOF;
-          }
-          return rc;
-        }
-        // 如果找到了匹配，退出循环
-        if (current_matches_ != nullptr && !current_matches_->empty()) {
-          break;
-        }
+
+    // 应用过滤条件
+    if (!filter_expressions_.empty()) {
+      LOG_DEBUG("Evaluating %zu filter conditions for joined tuple", filter_expressions_.size());
+      if (!evaluate_filter_conditions()) {
+        // 当前记录不满足过滤条件，继续下一个匹配（循环继续）
+        LOG_DEBUG("Record filtered out by filter conditions, continuing to next match");
+        continue;
       }
+      LOG_DEBUG("Record passed filter conditions");
     }
-  }
 
-  // 获取下一个匹配的右表记录
-  RC rc = get_next_match();
-  if (rc != RC::SUCCESS) {
-    return rc;
+    // 找到满足条件的匹配，返回成功
+    return RC::SUCCESS;
   }
-
-  // 应用过滤条件
-  if (!filter_expressions_.empty()) {
-    if (!evaluate_filter_conditions()) {
-      // 当前记录不满足过滤条件，继续下一个匹配
-      return next();
-    }
-  }
-
-  return RC::SUCCESS;
 }
 
 RC HashJoinPhysicalOperator::close()
@@ -200,10 +213,11 @@ void HashJoinPhysicalOperator::set_join_fields(FieldExpr *left_field, FieldExpr 
 void HashJoinPhysicalOperator::set_filter_expressions(const vector<unique_ptr<Expression>> &expressions)
 {
   // 复制过滤条件
+  filter_expressions_.clear();
   for (const auto &expr : expressions) {
     filter_expressions_.push_back(expr->copy());
   }
-  //LOG_INFO("HashJoinPhysicalOperator: Set %zu filter expressions", filter_expressions_.size());
+  LOG_DEBUG("HashJoinPhysicalOperator: Set %zu filter expressions", filter_expressions_.size());
 }
 
 unique_ptr<ValueListTuple> HashJoinPhysicalOperator::materialize_tuple(Tuple *tuple)
@@ -276,7 +290,9 @@ bool HashJoinPhysicalOperator::evaluate_filter_conditions()
     }
     
     // 检查结果是否为真
-    if (result.attr_type() == AttrType::UNDEFINED || !result.get_boolean()) {
+    bool is_true = result.get_boolean();
+    if (result.attr_type() == AttrType::UNDEFINED || !is_true) {
+      LOG_DEBUG("Filter condition evaluated to false, skipping record");
       return false;
     }
   }

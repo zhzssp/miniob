@@ -194,22 +194,12 @@ public:
   void init_bitmap(int len) { 
     is_null_ = vector<bool>(len, false);
   }
-
   void set_is_null(int index) {
     if (index < 0 || index >= is_null_.size()) {
-      LOG_WARN("Record::set_is_null() out of range, return directly, index = %d !", index);
+      LOG_WARN("Record::set_is_null() out of range, return directly !");
       return;
     }
     is_null_[index] = true; 
-  }
-
-  void set_is_not_null(int index)
-  {
-    if (index < 0 || index >= is_null_.size()) {
-      LOG_WARN("Record::set_is_not_null() out of range, return directly, index = %d !", index);
-      return;
-    }
-    is_null_[index] = false;
   }
 
   RC copy_data(const char *data, int len)
@@ -286,7 +276,7 @@ public:
 
   bool is_null(int index) const {
     if (index < 0 || index >= is_null_.size()) {
-      LOG_WARN("Record::is_null() out of range, index = %d !", index);
+      LOG_WARN("Record::is_null() out of range !");
       return false;
     }
     return is_null_[index]; 
@@ -296,13 +286,6 @@ public:
     bool *bitmap = reinterpret_cast<bool *>(data_ + fields_record_size);
     bitmap[field_id] = n;
     LOG_INFO("Set num %d field's bitmap information");
-  }
-
-  bool get_null_information(int field_id, int fields_record_size)
-  {
-    const bool *bitmap     = reinterpret_cast<const bool *>(data_ + fields_record_size);
-    LOG_INFO("Get num %d field's bitmap information");
-    return bitmap[field_id];
   }
 
 private:
