@@ -479,9 +479,10 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
     LOG_WARN("join operator should have 2 children, but have %d", child_opers.size());
     return RC::INTERNAL;
   }
-  //LOG_INFO("Session hash_join_on: %s", session->hash_join_on() ? "true" : "false");
+  LOG_DEBUG("Session hash_join_on: %s", session->hash_join_on() ? "true" : "false");
+  LOG_DEBUG("can_use_hash_join: %s", can_use_hash_join(join_oper) ? "true" : "false");
   if (session->hash_join_on() && can_use_hash_join(join_oper)) {
-    //LOG_INFO("Using Hash Join for this query");
+    LOG_INFO("Using Hash Join for this query");
     // 创建哈希连接操作符
     unique_ptr<HashJoinPhysicalOperator> hash_join_oper(new HashJoinPhysicalOperator());
     
@@ -540,11 +541,16 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
     
     // 设置过滤条件 - 从 JoinLogicalOperator 的 predicate_op_ 中获取
     auto *predicate_op = join_oper.get_predicate_op();
+    LOG_DEBUG("HashJoin: predicate_op is %s", predicate_op != nullptr ? "not null" : "null");
     if (predicate_op != nullptr) {
       auto *predicate_oper = dynamic_cast<PredicateLogicalOperator*>(predicate_op);
+      LOG_DEBUG("HashJoin: predicate_oper is %s", predicate_oper != nullptr ? "not null" : "null");
       if (predicate_oper != nullptr) {
+        LOG_DEBUG("HashJoin: Setting %zu filter expressions", predicate_oper->expressions().size());
         hash_join_oper->set_filter_expressions(predicate_oper->expressions());
       }
+    } else {
+      LOG_DEBUG("HashJoin: predicate_op is null, no filter expressions to set");
     }
     
     for (auto &child_oper : child_opers) {
