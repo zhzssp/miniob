@@ -27,11 +27,11 @@ RC OrderByPhysicalOperator::open(Trx *trx) {
     ValueListTuple *value_list_tuple = new ValueListTuple(); 
     rc = ValueListTuple::make(*tuple, *value_list_tuple);
     if(rc != RC::SUCCESS) {
+      delete value_list_tuple;  // 清理分配的内存
+      LOG_WARN("Failed to make ValueListTuple from tuple: %s", strrc(rc));
       return rc;
     }
-    if(value_list_tuple != nullptr) {
-      tuples_buffer.emplace_back(value_list_tuple);
-    }
+    tuples_buffer.emplace_back(value_list_tuple);
     LOG_INFO("pushed tuple ptr=%p, tuples_buffer.size=%zu", value_list_tuple, tuples_buffer.size());
   }
 
@@ -56,6 +56,12 @@ RC OrderByPhysicalOperator::close()
 {
   LOG_INFO("Execute order by physical operator's close method");
   RC rc = RC::SUCCESS;
+  // 清理所有分配的内存
+  for (auto *ptr : tuples_buffer) {
+    if (ptr != nullptr) {
+      delete ptr;
+    }
+  }
   tuples_buffer.clear();
   rc = children_[0]->close();
   return rc;
@@ -74,7 +80,21 @@ Tuple *OrderByPhysicalOperator::current_tuple() {
 RC OrderByPhysicalOperator::tuple_schema(TupleSchema &schema) const { return children_[0]->tuple_schema(schema); }
 
 RC OrderByPhysicalOperator::sort_buffer() {
+  // 检查是否有无效指针
+  for (auto *ptr : tuples_buffer) {
+    if (ptr == nullptr) {
+      LOG_WARN("Found null pointer in tuples_buffer, cannot sort");
+      return RC::INTERNAL;
+    }
+  }
+
   std::sort(tuples_buffer.begin(), tuples_buffer.end(), [this](ValueListTuple *a, ValueListTuple *b) {
+      // 添加空指针检查
+      if (a == nullptr || b == nullptr) {
+        LOG_ERROR("Null pointer in sort comparator: a=%p, b=%p", a, b);
+        return false;  // 空指针应该排在后面
+      }
+
       // 遍历 expressions，根据每个排序字段进行排序 --> order_by_expressions生命周期管理存在问题
       for (const auto &expr : order_by_expressions_) {
         if(expr == nullptr) {
