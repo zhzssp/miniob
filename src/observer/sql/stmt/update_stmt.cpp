@@ -44,7 +44,6 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt)
   Value final_value = update_sql.value;
   // null值不进行类型转换
   if(!final_value.is_null()) {
-    LOG_INFO("Get value used to set is not null");
     if (field_type != value_type) {
       // 尝试类型转换
       RC cast_rc = Value::cast_to(update_sql.value, field_type, final_value);
@@ -54,8 +53,6 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt)
         return RC::SCHEMA_FIELD_TYPE_MISMATCH;
       }
     }
-  } else {
-    LOG_INFO("Value used to set is null");
   }
 
   // 解析WHERE条件

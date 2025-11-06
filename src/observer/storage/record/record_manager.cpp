@@ -394,7 +394,6 @@ RC RowRecordPageHandler::update_record(const RID &rid, const char *data)
   }
 }
 
-/* 此时还未重构vector<bool>，需要在上层进行重构 */
 RC RowRecordPageHandler::get_record(const RID &rid, Record &record)
 {
   LOG_TRACE("RowRecordPageHandler::get_record is called");
@@ -409,7 +408,7 @@ RC RowRecordPageHandler::get_record(const RID &rid, Record &record)
     LOG_ERROR("Invalid slot_num:%d, slot is empty, page_num %d.", rid.slot_num, frame_->page_num());
     return RC::RECORD_NOT_EXIST;
   }
-  
+
   record.set_rid(rid);
   // data --> [字段值区域 | bool数组区域]
   char *data = get_record_data(rid.slot_num);

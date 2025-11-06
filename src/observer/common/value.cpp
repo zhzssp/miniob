@@ -14,9 +14,6 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/value.h"
 
-#include <cstdlib>
-#include <cerrno>
-
 #include "common/lang/comparator.h"
 #include "common/lang/exception.h"
 #include "common/lang/sstream.h"
@@ -268,8 +265,8 @@ char *Value::data() const
 string Value::to_string() const
 {
   if(this->is_null()) {
-    LOG_INFO("Get null value, return string(NULL)");
-    return string("NULL");
+    LOG_INFO("Get null value, return string(null)");
+    return string("null");
   }
 
   string res;
@@ -289,14 +286,10 @@ int Value::get_int() const
 {
   switch (attr_type_) {
     case AttrType::CHARS: {
-      char *endptr = nullptr;
-      errno = 0;
-      long val = strtol(value_.pointer_value_, &endptr, 10);
-      if (errno == 0 && endptr != value_.pointer_value_) {
-        // 成功解析了至少一个字符，如 '16a' -> 16
-        return (int)val;
-      } else {
-        // 无法解析为数字（纯字母字符串），转换为 0
+      try {
+        return (int)(stol(value_.pointer_value_));
+      } catch (exception const &ex) {
+        LOG_TRACE("failed to convert string to number. s=%s, ex=%s", value_.pointer_value_, ex.what());
         return 0;
       }
     }
@@ -324,14 +317,10 @@ float Value::get_float() const
 {
   switch (attr_type_) {
     case AttrType::CHARS: {
-      char *endptr = nullptr;
-      errno = 0;
-      float val = strtof(value_.pointer_value_, &endptr);
-      if (errno == 0 && endptr != value_.pointer_value_) {
-        // 成功解析了至少一个字符，如 '16a' -> 16.0
-        return val;
-      } else {
-        // 无法解析为数字（纯字母字符串），转换为 0.0
+      try {
+        return stof(value_.pointer_value_);
+      } catch (exception const &ex) {
+        LOG_TRACE("failed to convert string to float. s=%s, ex=%s", value_.pointer_value_, ex.what());
         return 0.0;
       }
     } break;
