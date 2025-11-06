@@ -266,7 +266,7 @@ string Value::to_string() const
 {
   if(this->is_null()) {
     LOG_INFO("Get null value, return string(NULL)");
-    return string("null");
+    return string("NULL");
   }
 
   string res;
