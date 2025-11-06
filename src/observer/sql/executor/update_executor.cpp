@@ -50,6 +50,11 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
       return RC::SCHEMA_FIELD_NOT_EXIST;
     }
 
+    if(!table_meta.field_nullable(field_meta->field_id()) && value->is_null()) {
+      LOG_INFO("Try to set not nullable field to be null, return failure");
+      return RC::NOT_NULL;
+    }
+
     // 准备更新为的值
     Value final_value;
     if (!value->is_null() && value->attr_type() != field_meta->type()) {
