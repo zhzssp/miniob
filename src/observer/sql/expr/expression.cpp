@@ -244,12 +244,24 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
       bool ok_l = false, ok_r = false;
       parse_to_double(left, dl, ok_l);
       parse_to_double(right, dr, ok_r);
+      
+      // 如果字符串无法解析为数字，转换为0
+      if (lt == AttrType::CHARS && !ok_l) {
+        dl = 0.0;
+        ok_l = true;
+      }
+      if (rt == AttrType::CHARS && !ok_r) {
+        dr = 0.0;
+        ok_r = true;
+      }
+      
+      // 现在两者都应该可以按数字比较
       if (ok_l && ok_r) {
         Value l2; l2.set_float(static_cast<float>(dl));
         Value r2; r2.set_float(static_cast<float>(dr));
         cmp_result = l2.compare(r2);
       } else {
-        // 无法比较的异类型，返回 false 结果
+        // 如果仍然无法比较，返回 false 结果
         cmp_result = 0;
         switch (comp_) {
           case EQUAL_TO:      result = false; return RC::SUCCESS;
