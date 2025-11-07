@@ -269,6 +269,7 @@ RC DiskBufferPool::open_file(const char *file_name)
     return rc;
   }
 
+  // create的时候是直接将对象的指针复制到pdata上了
   file_header_ = (BPFileHeader *)hdr_frame_->data();
 
   LOG_INFO("Successfully open %s. file_desc=%d, hdr_frame=%p, file header=%s",

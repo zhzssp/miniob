@@ -126,19 +126,19 @@ RC HeapTableEngine::get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadW
   return rc;
 }
 
-RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name)
+RC HeapTableEngine::create_index(Trx *trx, vector<const FieldMeta *> field_metas, const char *index_name)
 {
-  if (common::is_blank(index_name) || nullptr == field_meta) {
+  if (common::is_blank(index_name) || field_metas.size() == 0) {
     LOG_INFO("Invalid input arguments, table name is %s, index_name is blank or attribute_name is blank", table_meta_->name());
     return RC::INVALID_ARGUMENT;
   }
 
   IndexMeta new_index_meta;
 
-  RC rc = new_index_meta.init(index_name, *field_meta);
+  RC rc = new_index_meta.init(index_name, field_metas);
   if (rc != RC::SUCCESS) {
-    LOG_INFO("Failed to init IndexMeta in table:%s, index_name:%s, field_name:%s", 
-             table_meta_->name(), index_name, field_meta->name());
+    LOG_INFO("Failed to init IndexMeta in table:%s, index_name:%s", 
+             table_meta_->name(), index_name);
     return rc;
   }
 
@@ -146,7 +146,7 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
   BplusTreeIndex *index      = new BplusTreeIndex();
   string          index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_name);
 
-  rc = index->create(table_, index_file.c_str(), new_index_meta, *field_meta);
+  rc = index->create(table_, index_file.c_str(), new_index_meta, field_metas);
   if (rc != RC::SUCCESS) {
     delete index;
     LOG_ERROR("Failed to create bplus tree index. file name=%s, rc=%d:%s", index_file.c_str(), rc, strrc(rc));
@@ -164,7 +164,7 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
 
   Record record;
   while (OB_SUCC(rc = scanner->next(record))) {
-    rc = index->insert_entry(record.data(), &record.rid());
+    rc = index->insert_entry(record, &record.rid());
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to insert record into index while creating index. table=%s, index=%s, rc=%s",
                table_meta_->name(), index_name, strrc(rc));
@@ -219,6 +219,7 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
     return RC::IOERR_WRITE;
   }
 
+  /* 可能造成潜在问题，需要重点注意！ */
   table_meta_->swap(new_table_meta);
 
   LOG_INFO("Successfully added a new index (%s) on the table (%s)", index_name, table_meta_->name());
@@ -321,12 +322,21 @@ RC HeapTableEngine::open()
   RC rc = RC::SUCCESS;
   init();
   const int index_num = table_meta_->index_num();
+
   for (int i = 0; i < index_num; i++) {
     const IndexMeta *index_meta = table_meta_->index(i);
-    const FieldMeta *field_meta = table_meta_->field(index_meta->field());
-    if (field_meta == nullptr) {
-      LOG_ERROR("Found invalid index meta info which has a non-exists field. table=%s, index=%s, field=%s",
-                table_meta_->name(), index_meta->name(), index_meta->field());
+    vector<const FieldMeta *> field_metas;
+    field_metas.reserve(index_meta_->field_num()); 
+
+    for (int i = 0; i < index_meta_->field_num(); i++)
+    {
+      const FieldMeta *field_meta = table_meta_->field(index_meta->field(i));
+      field_metas.emplace_back(field_meta);
+    }
+
+    if (field_metas.size() == 0) {
+      LOG_ERROR("Found invalid index meta info which has a non-exists field. table=%s, index=%s",
+                table_meta_->name(), index_meta->name());
       // skip cleanup
       //  do all cleanup action in destructive Table function
       return RC::INTERNAL;
@@ -335,7 +345,7 @@ RC HeapTableEngine::open()
     BplusTreeIndex *index      = new BplusTreeIndex();
     string          index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_meta->name());
 
-    rc = index->open(table_, index_file.c_str(), *index_meta, *field_meta);
+    rc = index->open(table_, index_file.c_str(), *index_meta, field_metas);
     if (rc != RC::SUCCESS) {
       delete index;
       LOG_ERROR("Failed to open index. table=%s, index=%s, file=%s, rc=%s",

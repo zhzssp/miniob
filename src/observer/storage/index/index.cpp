@@ -14,9 +14,13 @@ See the Mulan PSL v2 for more details. */
 
 #include "storage/index/index.h"
 
-RC Index::init(const IndexMeta &index_meta, const FieldMeta &field_meta)
+RC Index::init(const IndexMeta &index_meta, vector<const FieldMeta *> field_metas)
 {
   index_meta_ = index_meta;
-  field_meta_ = field_meta;
+  field_metas_.reserve(field_metas.size());
+  for(const FieldMeta *field_meta: field_metas) {
+    // 将副本存进去
+    field_metas_.emplace_back(*field_meta);
+  }
   return RC::SUCCESS;
 }

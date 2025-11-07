@@ -17,6 +17,8 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#define MAX_INDEX_FIELDS 8
+
 #include <string.h>
 
 #include "common/lang/comparator.h"
@@ -64,15 +66,27 @@ public:
 
   int attr_length() const { return attr_length_; }
 
-  int operator()(const char *v1, const char *v2) const
+  /* 比较单个字段上的值 */
+  int operator()(const char *v1, const char *v2, bool left_is_null, bool right_is_null) const
   {
+    if(left_is_null && right_is_null) {
+      return 0;
+    } else if(!left_is_null && right_is_null) {
+      return 1;
+    } else if(left_is_null && !right_is_null) {
+      return -1;
+    } else {
+      LOG_INFO("When comparing keys, enter numerical comparison");
+    }
     // TODO: optimized the comparison
     Value left;
     left.set_type(attr_type_);
     left.set_data(v1, attr_length_);
+
     Value right;
     right.set_type(attr_type_);
     right.set_data(v2, attr_length_);
+
     return DataType::type_instance(attr_type_)->compare(left, right);
   }
 
@@ -89,24 +103,50 @@ private:
 class KeyComparator
 {
 public:
-  void init(AttrType type, int length) { attr_comparator_.init(type, length); }
-
-  const AttrComparator &attr_comparator() const { return attr_comparator_; }
-
-  int operator()(const char *v1, const char *v2) const
-  {
-    int result = attr_comparator_(v1, v2);
-    if (result != 0) {
-      return result;
+  void init(AttrType types[MAX_INDEX_FIELDS], int32_t lengths[MAX_INDEX_FIELDS], int attr_num) { 
+    attr_num_ = attr_num;
+    for (int i = 0; i < attr_num; i++) {
+      attr_comparators_[i].init(types[i], lengths[i]);
+      attr_lengths_[i] = lengths[i];
     }
 
-    const RID *rid1 = (const RID *)(v1 + attr_comparator_.attr_length());
-    const RID *rid2 = (const RID *)(v2 + attr_comparator_.attr_length());
+    // 计算复合键所有字段总长度
+    total_attr_length_ = 0;
+    for (int i = 0; i < attr_num; i++) {
+      total_attr_length_ += attr_lengths_[i];
+    }
+  }
+
+  const AttrComparator *attr_comparators() const { return attr_comparators_; }
+
+  /* 比较多个字段的值，包含bitmap */
+  int operator()(const char *v1, const char *v2) const
+  {
+    int offset = 0;
+    // 逐字段比较
+    for (int i = 0; i < attr_num_; i++) {
+      bool left_is_null = reinterpret_cast<const bool *>(v1 + total_attr_length_ + sizeof(RID))[i];
+      bool right_is_null = reinterpret_cast<const bool *>(v2 + total_attr_length_ + sizeof(RID))[i];
+
+      int cmp_result = attr_comparators_[i](v1 + offset, v2 + offset, left_is_null, right_is_null);
+      // 出现不相等的字段即返回
+      if (cmp_result != 0) {
+        return cmp_result;
+      }
+      offset += attr_lengths_[i];
+    }
+
+    // key的各个字段值全部相等，比较RID
+    const RID *rid1 = (const RID *)(v1 + total_attr_length_);
+    const RID *rid2 = (const RID *)(v2 + total_attr_length_);
     return RID::compare(rid1, rid2);
   }
 
 private:
-  AttrComparator attr_comparator_;
+  int attr_num_;                    ///< 字段数
+  int attr_lengths_[MAX_INDEX_FIELDS];  ///< 每个字段的长度
+  int total_attr_length_;           ///< 所有字段长度之和
+  AttrComparator attr_comparators_[MAX_INDEX_FIELDS];
 };
 
 /**
@@ -142,22 +182,43 @@ private:
 class KeyPrinter
 {
 public:
-  void init(AttrType type, int length) { attr_printer_.init(type, length); }
+  void init(AttrType types[MAX_INDEX_FIELDS], int32_t lengths[MAX_INDEX_FIELDS], int attr_num) { 
+    attr_num_ = attr_num;
+    total_attr_length_ = 0;
+    for (int i = 0; i < attr_num_; i++) {
+      attr_printers_[i].init(types[i], lengths[i]);
+      attr_lengths_[i] = lengths[i];
+      total_attr_length_ += lengths[i];
+    }
+  }
 
-  const AttrPrinter &attr_printer() const { return attr_printer_; }
+  const AttrPrinter *attr_printers() const { return attr_printers_; }
 
   string operator()(const char *v) const
   {
     stringstream ss;
-    ss << "{key:" << attr_printer_(v) << ",";
+    ss << "{ key:[";
 
-    const RID *rid = (const RID *)(v + attr_printer_.attr_length());
-    ss << "rid:{" << rid->to_string() << "}}";
+    int offset = 0;
+    for (int i = 0; i < attr_num_; i++) {
+      ss << attr_printers_[i](v + offset);
+      // 不是最后一个字段
+      if (i < attr_num_ - 1) {
+        ss << ", ";
+      }
+      offset += attr_lengths_[i];
+    }
+
+    const RID *rid = reinterpret_cast<const RID *>(v + total_attr_length_);
+    ss << "], rid:{" << rid->to_string() << "} }";
     return ss.str();
   }
 
 private:
-  AttrPrinter attr_printer_;
+  int attr_num_;
+  int total_attr_length_;
+  int attr_lengths_[MAX_INDEX_FIELDS];
+  AttrPrinter attr_printers_[MAX_INDEX_FIELDS];
 };
 
 /**
@@ -173,24 +234,28 @@ struct IndexFileHeader
     memset(this, 0, sizeof(IndexFileHeader));
     root_page = BP_INVALID_PAGE_NUM;
   }
+  // int
   PageNum  root_page;          ///< 根节点在磁盘中的页号
   int32_t  internal_max_size;  ///< 内部节点最大的键值对数
   int32_t  leaf_max_size;      ///< 叶子节点最大的键值对数
-  int32_t  attr_length;        ///< 键值的长度
-  int32_t  key_length;         ///< attr length + sizeof(RID)
-  AttrType attr_type;          ///< 键值的类型
+
+  int32_t  attr_num;
+  int32_t  attr_lengths_[MAX_INDEX_FIELDS];        ///< 键值的长度
+  AttrType attr_types_[MAX_INDEX_FIELDS];          ///< 键值的类型
+  int32_t  key_length;         ///< attr lengths + sizeof(RID) + bitmap
+  int32_t  total_attr_length;
 
   const string to_string() const
   {
     stringstream ss;
-
-    ss << "attr_length:" << attr_length << ","
-       << "key_length:" << key_length << ","
-       << "attr_type:" << attr_type_to_string(attr_type) << ","
+    ss << "attr_num:" << attr_num << ",";
+    for (int i = 0; i < attr_num; i++) {
+      ss << "attr[" << i << "] len=" << attr_lengths_[i] << ", type=" << attr_type_to_string(attr_types_[i]) << "; ";
+    }
+    ss << "key_length:" << key_length << ","
        << "root_page:" << root_page << ","
        << "internal_max_size:" << internal_max_size << ","
-       << "leaf_max_size:" << leaf_max_size << ";";
-
+       << "leaf_max_size:" << leaf_max_size;
     return ss.str();
   }
 };
@@ -459,9 +524,9 @@ public:
    * @param internal_max_size 内部节点最大大小
    * @param leaf_max_size 叶子节点最大大小
    */
-  RC create(LogHandler &log_handler, BufferPoolManager &bpm, const char *file_name, AttrType attr_type, int attr_length,
+  RC create(LogHandler &log_handler, BufferPoolManager &bpm, const char *file_name, vector<AttrType> attr_types, vector<int> attr_lengths,
       int internal_max_size = -1, int leaf_max_size = -1);
-  RC create(LogHandler &log_handler, DiskBufferPool &buffer_pool, AttrType attr_type, int attr_length,
+  RC create(LogHandler &log_handler, DiskBufferPool &buffer_pool, vector<AttrType> attr_types, vector<int> attr_lengths,
       int internal_max_size = -1, int leaf_max_size = -1);
 
   /**
@@ -484,7 +549,7 @@ public:
    * 即向索引中插入一个值为（user_key，rid）的键值对
    * @note 这里假设user_key的内存大小与attr_length 一致
    */
-  RC insert_entry(const char *user_key, const RID *rid);
+  RC insert_entry(const char *user_key, int user_key_len, const RID *rid);
 
   /**
    * @brief 从IndexHandle句柄对应的索引中删除一个值为（user_key，rid）的索引项
@@ -633,13 +698,14 @@ protected:
   RC adjust_root(BplusTreeMiniTransaction &mtr, Frame *root_frame);
 
 private:
-  common::MemPoolItem::item_unique_ptr make_key(const char *user_key, const RID &rid);
+  common::MemPoolItem::item_unique_ptr make_key(const char *user_key, int user_key_len);
 
 protected:
   LogHandler     *log_handler_      = nullptr;  /// 日志处理器
   DiskBufferPool *disk_buffer_pool_ = nullptr;  /// 磁盘缓冲池
   bool            header_dirty_     = false;    /// 是否需要更新头页面
   IndexFileHeader file_header_;
+  int user_key_len_ = 0;
 
   // 在调整根节点时，需要加上这个锁。
   // 这个锁可以使用递归读写锁，但是这里偷懒先不改
