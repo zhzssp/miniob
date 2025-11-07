@@ -1067,6 +1067,48 @@ condition:
       $$->right_expr->set_name(token_name(sql_string, &@$));
       $$->comp = NOT_IN_OP;
     }
+    | rel_attr IN LBRACE value_list RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 1;
+      $$->left_attr = *$1;
+      $$->right_is_attr = 0;
+      $$->right_expr = new ValueListExpr($4);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = IN_OP;
+      delete $1;
+    }
+    | rel_attr NOT IN LBRACE value_list RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 1;
+      $$->left_attr = *$1;
+      $$->right_is_attr = 0;
+      $$->right_expr = new ValueListExpr($5);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = NOT_IN_OP;
+      delete $1;
+    }
+    | expression IN LBRACE value_list RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 0;
+      $$->left_expr = $1;
+      $$->right_is_attr = 0;
+      $$->right_expr = new ValueListExpr($4);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = IN_OP;
+    }
+    | expression NOT IN LBRACE value_list RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 0;
+      $$->left_expr = $1;
+      $$->right_is_attr = 0;
+      $$->right_expr = new ValueListExpr($5);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = NOT_IN_OP;
+    }
     | rel_attr IS NULL_T
     {
         $$ = new ConditionSqlNode;
