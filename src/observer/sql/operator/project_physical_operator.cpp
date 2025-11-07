@@ -31,6 +31,10 @@ RC ProjectPhysicalOperator::open(Trx *trx)
   }
 
   PhysicalOperator *child = children_[0].get();
+  // 递归传递 outer_tuple 给子算子（用于相关子查询）
+  if (outer_tuple != nullptr) {
+    child->set_outer_tuple(outer_tuple);
+  }
   RC                rc    = child->open(trx);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to open child operator: %s", strrc(rc));
