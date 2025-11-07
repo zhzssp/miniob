@@ -569,9 +569,6 @@ subquery_stmt:
         delete $6;
       }
       
-      // 保存外层查询的 table_references 状态
-      vector<TableReferenceSqlNode> outer_table_references = g_table_references;
-      
       // 只使用子查询自己的表引用（从 rel_list 解析时添加到 g_table_references 的表）
       // 计算子查询自己的表引用数量（基于 relations 的数量）
       size_t subquery_table_count = $$->selection.relations.size();
@@ -594,10 +591,13 @@ subquery_stmt:
           alias_node.alias = ref.alias;
           $$->selection.ALIASES.push_back(alias_node);
         }
+        
+        // 从 g_table_references 中移除子查询的表引用，恢复外层查询的状态
+        g_table_references.erase(
+          g_table_references.end() - subquery_table_count,
+          g_table_references.end()
+        );
       }
-      
-      // 恢复外层查询的 table_references 状态
-      g_table_references = outer_table_references;
       
       // 清空 JOIN 条件相关的全局变量（只清空 join_conditions，table_references 已恢复）
       g_join_conditions.clear();
@@ -634,21 +634,49 @@ select_stmt:        /*  select 语句的语法解析树*/
         delete $7;
       }
       
-      // 保存外层查询的 table_references 状态（在 rel_list 解析之前）
-      // 注意：由于 yacc 是递归下降解析，当执行到这里时，rel_list 已经解析完成
-      // 所以 g_table_references 已经包含了当前查询的表引用
-      // 我们需要计算当前查询的表引用数量（基于 relations 的数量）
-      size_t current_query_table_count = $$->selection.relations.size();
+      // 注意：由于 yacc 是递归下降解析，当执行到这里时：
+      // 1. rel_list 已经解析完成，把当前查询的表添加到 g_table_references
+      // 2. where 子句也已经解析完成，如果包含子查询，子查询的表引用已经被添加到 g_table_references 然后又被移除
+      // 所以，g_table_references 现在应该只包含当前查询的表引用
+      // 但是，为了安全起见，我们只使用 relations 中的表来构建 table_references
+      // 因为 relations 是直接从 FROM 子句解析而来的，不会被子查询污染
       
-      // 只使用当前查询自己的表引用（从 g_table_references 的末尾提取）
-      if (current_query_table_count > 0 && g_table_references.size() >= current_query_table_count) {
-        // 提取最后 current_query_table_count 个表引用（这些是当前查询自己的表）
+      // 基于 relations 构建 table_references 和 ALIASES
+      // 这样可以避免 g_table_references 被子查询污染的问题
+      if (!$$->selection.relations.empty()) {
+        // 从 g_table_references 中查找与 relations 匹配的表引用
+        // 注意：我们需要从 g_table_references 的末尾向前查找，因为当前查询的表应该在末尾
+        size_t current_query_table_count = $$->selection.relations.size();
+        size_t start_pos = (g_table_references.size() >= current_query_table_count) 
+                          ? (g_table_references.size() - current_query_table_count) 
+                          : 0;
+        
+        // 构建一个 relations 的集合，用于快速查找
+        unordered_set<string> relations_set($$->selection.relations.begin(), $$->selection.relations.end());
+        
+        // 从 g_table_references 的末尾向前查找匹配的表引用
         vector<TableReferenceSqlNode> current_query_table_refs;
-        current_query_table_refs.insert(
-          current_query_table_refs.end(),
-          g_table_references.end() - current_query_table_count,
-          g_table_references.end()
-        );
+        for (size_t i = g_table_references.size(); i > start_pos && current_query_table_refs.size() < current_query_table_count; ) {
+          --i;
+          const auto &ref = g_table_references[i];
+          if (relations_set.count(ref.table_name)) {
+            current_query_table_refs.insert(current_query_table_refs.begin(), ref);
+          }
+        }
+        
+        // 如果从 g_table_references 中找到的表引用数量不够，说明可能被污染了
+        // 这种情况下，我们直接基于 relations 构建 table_references（不包含别名信息）
+        if (current_query_table_refs.size() < current_query_table_count) {
+          // 清空并重新构建
+          current_query_table_refs.clear();
+          for (const auto &rel_name : $$->selection.relations) {
+            TableReferenceSqlNode ref;
+            ref.table_name = rel_name;
+            ref.alias = "";  // 别名信息可能丢失，但至少表名是正确的
+            current_query_table_refs.push_back(ref);
+          }
+        }
+        
         $$->selection.table_references = current_query_table_refs;
         
         // 同时填充 ALIASES 字段
@@ -660,10 +688,15 @@ select_stmt:        /*  select 语句的语法解析树*/
         }
         
         // 从 g_table_references 中移除当前查询的表引用，恢复外层查询的状态
-        g_table_references.erase(
-          g_table_references.end() - current_query_table_count,
-          g_table_references.end()
-        );
+        // 注意：我们需要移除与 relations 匹配的表引用，而不是简单地移除末尾的表引用
+        // 因为 g_table_references 可能已经被子查询污染
+        for (auto it = g_table_references.begin(); it != g_table_references.end(); ) {
+          if (relations_set.count(it->table_name)) {
+            it = g_table_references.erase(it);
+          } else {
+            ++it;
+          }
+        }
       }
       // 如果 relations 为空，说明可能是子查询或其他情况，不清空 g_table_references
     }

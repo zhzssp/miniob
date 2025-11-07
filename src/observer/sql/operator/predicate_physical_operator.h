@@ -43,4 +43,5 @@ public:
 
 private:
   unique_ptr<Expression> expression_;
+  JoinedTuple joined_tuple_;  // 用于组合外层查询和子查询的 tuple（相关子查询）
 };
