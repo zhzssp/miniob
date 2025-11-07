@@ -49,6 +49,7 @@ enum class ExprType
   ARITHMETIC,   ///< 算术运算
   AGGREGATION,  ///< 聚合运算
   SUB_QUERY,    ///< 子查询表达式
+  VALUE_LIST,   ///< 值列表表达式，用于 IN (value_list) 语法
 };
 
 /**
@@ -578,3 +579,35 @@ private:
 class SelectStmt;
 class ParsedSqlNode;
 class SubqueryExpr;
+
+/**
+ * @brief 值列表表达式
+ * @ingroup Expression
+ * 用于表示 IN (value_list) 中的值列表
+ */
+class ValueListExpr : public Expression
+{
+public:
+  ValueListExpr(vector<Value> *values);
+  virtual ~ValueListExpr() = default;
+
+  unique_ptr<Expression> copy() const override
+  {
+    auto expr = make_unique<ValueListExpr>(new vector<Value>(values_));
+    return expr;
+  }
+
+  ExprType type() const override { return ExprType::VALUE_LIST; }
+  AttrType value_type() const override { return AttrType::UNDEFINED; }
+
+  RC get_value(const Tuple &tuple, Value &value) const override
+  {
+    // ValueListExpr 不直接作为标量值返回
+    return RC::UNIMPLEMENTED;
+  }
+
+  const vector<Value> &values() const { return values_; }
+
+private:
+  vector<Value> values_;
+};
