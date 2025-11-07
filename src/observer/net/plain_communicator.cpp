@@ -274,16 +274,20 @@ RC PlainCommunicator::write_tuple_result(SqlResult *sql_result)
 {
   RC rc = RC::SUCCESS;
   Tuple *tuple = nullptr;
+  
+  // 使用 tuple_schema 的列数，而不是 tuple->cell_num()，以确保只返回主查询的列
+  const TupleSchema &schema = sql_result->tuple_schema();
+  const int cell_num = schema.cell_num();
+  
   while (RC::SUCCESS == (rc = sql_result->next_tuple(tuple))) {
     // assert(tuple != nullptr);
-    if(tuple == nullptr || tuple->cell_num() <= 0) {
+    if(tuple == nullptr) {
       LOG_WARN("Get null tuple, viewed as read completion");
       rc = RC::RECORD_EOF;
       break;
     }
     LOG_INFO("write tuple result * 1");
 
-    int cell_num = tuple->cell_num();
     LOG_INFO("cell_num = %d", cell_num);
     for (int i = 0; i < cell_num; i++) {
       if (i != 0) {

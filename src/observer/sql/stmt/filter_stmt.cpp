@@ -63,7 +63,28 @@ RC get_table_and_field(Db *db, Table *default_table, unordered_map<string, Table
 {
   
   if (common::is_blank(attr.relation_name.c_str())) {
-    table = default_table;
+    // 如果没有表名前缀，先尝试使用 default_table
+    if (default_table != nullptr) {
+      table = default_table;
+    } else if (nullptr != tables && tables->size() == 1) {
+      // 如果 default_table 为空，但 tables 中只有一个表，使用该表
+      table = tables->begin()->second;
+    } else if (nullptr != tables && tables->size() > 1) {
+      // 如果有多个表，尝试在所有表中查找该字段
+      for (const auto &pair : *tables) {
+        const FieldMeta *test_field = pair.second->table_meta().field(attr.attribute_name.c_str());
+        if (test_field != nullptr) {
+          table = pair.second;
+          break;
+        }
+      }
+      if (table == nullptr) {
+        LOG_WARN("No such field %s in any table", attr.attribute_name.c_str());
+        return RC::SCHEMA_FIELD_NOT_EXIST;
+      }
+    } else {
+      table = nullptr;
+    }
   } else if (nullptr != tables) {
     auto iter = tables->find(attr.relation_name);
     if (iter != tables->end()) {
@@ -120,7 +141,34 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
   } else if (condition.left_expr != nullptr) {
     FilterObj filter_obj;
     LOG_WARN("[FilterStmt] Creating left filter_obj from expression, expr=%p, expr_type=%d", condition.left_expr, (int)condition.left_expr->type());
-    filter_obj.init_expression(condition.left_expr->copy().release());
+    
+    // 如果表达式是 UnboundFieldExpr，需要解析为 FieldExpr
+    if (condition.left_expr->type() == ExprType::UNBOUND_FIELD) {
+      UnboundFieldExpr *unbound_expr = static_cast<UnboundFieldExpr *>(condition.left_expr);
+      Table *table = nullptr;
+      const FieldMeta *field = nullptr;
+      
+      // 构建 RelAttrSqlNode 用于解析
+      RelAttrSqlNode attr_node;
+      if (unbound_expr->table_name() != nullptr && strlen(unbound_expr->table_name()) > 0) {
+        attr_node.relation_name = unbound_expr->table_name();
+      }
+      attr_node.attribute_name = unbound_expr->field_name();
+      
+      rc = get_table_and_field(db, default_table, tables, attr_node, table, field);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("cannot resolve UnboundFieldExpr to FieldExpr. rc=%s", strrc(rc));
+        delete filter_unit;
+        return rc;
+      }
+      
+      // 创建 FieldExpr 并放入 FilterObj
+      FieldExpr *field_expr = new FieldExpr(Field(table, field));
+      filter_obj.init_expression(field_expr);
+      LOG_WARN("[FilterStmt] Resolved UnboundFieldExpr to FieldExpr: table=%s, field=%s", table->name(), field->name());
+    } else {
+      filter_obj.init_expression(condition.left_expr->copy().release());
+    }
     filter_unit->set_left(filter_obj);
   } else {
     FilterObj filter_obj;
@@ -144,7 +192,34 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
   } else if (condition.right_expr != nullptr) {
     FilterObj filter_obj;
     LOG_WARN("[FilterStmt] Creating right filter_obj from expression, expr=%p, expr_type=%d", condition.right_expr, (int)condition.right_expr->type());
-    filter_obj.init_expression(condition.right_expr->copy().release());
+    
+    // 如果表达式是 UnboundFieldExpr，需要解析为 FieldExpr
+    if (condition.right_expr->type() == ExprType::UNBOUND_FIELD) {
+      UnboundFieldExpr *unbound_expr = static_cast<UnboundFieldExpr *>(condition.right_expr);
+      Table *table = nullptr;
+      const FieldMeta *field = nullptr;
+      
+      // 构建 RelAttrSqlNode 用于解析
+      RelAttrSqlNode attr_node;
+      if (unbound_expr->table_name() != nullptr && strlen(unbound_expr->table_name()) > 0) {
+        attr_node.relation_name = unbound_expr->table_name();
+      }
+      attr_node.attribute_name = unbound_expr->field_name();
+      
+      rc = get_table_and_field(db, default_table, tables, attr_node, table, field);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("cannot resolve UnboundFieldExpr to FieldExpr. rc=%s", strrc(rc));
+        delete filter_unit;
+        return rc;
+      }
+      
+      // 创建 FieldExpr 并放入 FilterObj
+      FieldExpr *field_expr = new FieldExpr(Field(table, field));
+      filter_obj.init_expression(field_expr);
+      LOG_WARN("[FilterStmt] Resolved UnboundFieldExpr to FieldExpr: table=%s, field=%s", table->name(), field->name());
+    } else {
+      filter_obj.init_expression(condition.right_expr->copy().release());
+    }
     filter_unit->set_right(filter_obj);
   } else {
     LOG_WARN("Creating FilterObj from condition.right_value");

@@ -569,11 +569,26 @@ subquery_stmt:
         delete $6;
       }
       
-      // 处理 JOIN 条件
-      if (!g_table_references.empty()) {
-        $$->selection.table_references = g_table_references;
+      // 保存外层查询的 table_references 状态
+      vector<TableReferenceSqlNode> outer_table_references = g_table_references;
+      
+      // 只使用子查询自己的表引用（从 rel_list 解析时添加到 g_table_references 的表）
+      // 计算子查询自己的表引用数量（基于 relations 的数量）
+      size_t subquery_table_count = $$->selection.relations.size();
+      
+      // 从 g_table_references 的末尾提取子查询自己的表引用
+      if (subquery_table_count > 0 && g_table_references.size() >= subquery_table_count) {
+        // 提取最后 subquery_table_count 个表引用（这些是子查询自己的表）
+        vector<TableReferenceSqlNode> subquery_table_refs;
+        subquery_table_refs.insert(
+          subquery_table_refs.end(),
+          g_table_references.end() - subquery_table_count,
+          g_table_references.end()
+        );
+        $$->selection.table_references = subquery_table_refs;
+        
         // 同时填充 ALIASES 字段
-        for (const auto &ref : g_table_references) {
+        for (const auto &ref : subquery_table_refs) {
           RelationSqlNode alias_node;
           alias_node.name = ref.table_name;
           alias_node.alias = ref.alias;
@@ -581,9 +596,11 @@ subquery_stmt:
         }
       }
       
-      // 清空 JOIN 条件相关的全局变量
+      // 恢复外层查询的 table_references 状态
+      g_table_references = outer_table_references;
+      
+      // 清空 JOIN 条件相关的全局变量（只清空 join_conditions，table_references 已恢复）
       g_join_conditions.clear();
-      g_table_references.clear();
     }
     ;
 
@@ -617,18 +634,38 @@ select_stmt:        /*  select 语句的语法解析树*/
         delete $7;
       }
       
-      // 处理 JOIN 条件
-      if (!g_table_references.empty()) {
-        $$->selection.table_references = g_table_references;
+      // 保存外层查询的 table_references 状态（在 rel_list 解析之前）
+      // 注意：由于 yacc 是递归下降解析，当执行到这里时，rel_list 已经解析完成
+      // 所以 g_table_references 已经包含了当前查询的表引用
+      // 我们需要计算当前查询的表引用数量（基于 relations 的数量）
+      size_t current_query_table_count = $$->selection.relations.size();
+      
+      // 只使用当前查询自己的表引用（从 g_table_references 的末尾提取）
+      if (current_query_table_count > 0 && g_table_references.size() >= current_query_table_count) {
+        // 提取最后 current_query_table_count 个表引用（这些是当前查询自己的表）
+        vector<TableReferenceSqlNode> current_query_table_refs;
+        current_query_table_refs.insert(
+          current_query_table_refs.end(),
+          g_table_references.end() - current_query_table_count,
+          g_table_references.end()
+        );
+        $$->selection.table_references = current_query_table_refs;
+        
         // 同时填充 ALIASES 字段
-        for (const auto& table_ref : g_table_references) {
+        for (const auto& table_ref : current_query_table_refs) {
           RelationSqlNode alias_node;
           alias_node.name = table_ref.table_name;
           alias_node.alias = table_ref.alias;
           $$->selection.ALIASES.push_back(alias_node);
         }
-        // 不要在这里清空 g_table_references，让它在 sql_list 中统一清理
+        
+        // 从 g_table_references 中移除当前查询的表引用，恢复外层查询的状态
+        g_table_references.erase(
+          g_table_references.end() - current_query_table_count,
+          g_table_references.end()
+        );
       }
+      // 如果 relations 为空，说明可能是子查询或其他情况，不清空 g_table_references
     }
     ;
 calc_stmt:
