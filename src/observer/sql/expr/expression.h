@@ -575,11 +575,6 @@ private:
   unique_ptr<Expression> child_;
 };
 
-// 前向声明
-class SelectStmt;
-class ParsedSqlNode;
-class SubqueryExpr;
-
 /**
  * @brief 值列表表达式
  * @ingroup Expression
@@ -611,3 +606,8 @@ public:
 private:
   vector<Value> values_;
 };
+
+// 前向声明
+class SelectStmt;
+class ParsedSqlNode;
+class SubqueryExpr;

@@ -441,14 +441,20 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
   Value right_value;
 
   // 比较表达式树 --> 递归
+  LOG_WARN("ComparisonExpr::get_value: this=%p, left_type=%d, right_type=%d, comp=%d", 
+           this, (int)left_->type(), (int)right_->type(), (int)comp_);
   RC rc = left_->get_value(tuple, left_value);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
     return rc;
   }
+  
+  LOG_WARN("ComparisonExpr::get_value: calling right_->get_value, this=%p, right_type=%d, right_ptr=%p", 
+           this, (int)right_->type(), right_.get());
   rc = right_->get_value(tuple, right_value);
   if (rc != RC::SUCCESS) {
-    LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
+    LOG_WARN("failed to get value of right expression. rc=%s, this=%p, right_type=%d, right_ptr=%p", 
+             strrc(rc), this, (int)right_->type(), right_.get());
     return rc;
   }
 

@@ -242,3 +242,4 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
 
     return RC::SUCCESS;
 }
+
