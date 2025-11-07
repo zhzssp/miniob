@@ -329,9 +329,9 @@ TEST(test_bplus_tree, test_leaf_index_node_handle)
   index_file_header.root_page         = BP_INVALID_PAGE_NUM;
   index_file_header.internal_max_size = 5;
   index_file_header.leaf_max_size     = 5;
-  index_file_header.attr_lengths      = {4};
+  index_file_header.attr_lengths_[0]  = 4;
   index_file_header.key_length        = 4 + sizeof(RID) + sizeof(bool);
-  index_file_header.attr_types        = {AttrType::INTS};
+  index_file_header.attr_types_[0]    = AttrType::INTS;
   index_file_header.attr_num          = 1;
 
   VacuousLogHandler log_handler;
@@ -343,11 +343,13 @@ TEST(test_bplus_tree, test_leaf_index_node_handle)
   ASSERT_EQ(RC::SUCCESS, bpm.open_file(log_handler, buffer_pool_file.c_str(), buffer_pool));
 
   BplusTreeHandler tree_handler;
+  vector<AttrType> attr_types(index_file_header.attr_types_, index_file_header.attr_types_ + MAX_INDEX_FIELDS);
+  vector<int> attr_lengths(index_file_header.attr_lengths_, index_file_header.attr_lengths_ + MAX_INDEX_FIELDS);
   ASSERT_EQ(RC::SUCCESS,
       tree_handler.create(log_handler,
           *buffer_pool,
-          index_file_header.attr_types,
-          index_file_header.attr_lengths,
+          attr_types,
+          attr_lengths,
           index_file_header.internal_max_size,
           index_file_header.leaf_max_size));
   BplusTreeMiniTransaction mtr(tree_handler);
@@ -357,7 +359,7 @@ TEST(test_bplus_tree, test_leaf_index_node_handle)
   KeyComparator key_comparator;
   AttrType types[MAX_INDEX_FIELDS] = {AttrType::INTS};
   int32_t lengths[MAX_INDEX_FIELDS] = {4};
-  key_comparator.init(types, lengths);
+  key_comparator.init(types, lengths, 1);
 
   LeafIndexNodeHandler leaf_node(mtr, index_file_header, &frame);
   leaf_node.init_empty();
@@ -414,9 +416,9 @@ TEST(test_bplus_tree, test_internal_index_node_handle)
   index_file_header.root_page         = BP_INVALID_PAGE_NUM;
   index_file_header.internal_max_size = 5;
   index_file_header.leaf_max_size     = 5;
-  index_file_header.attr_lengths      = {4};
+  index_file_header.attr_lengths_[0]  = 4;
   index_file_header.key_length        = 4 + sizeof(RID) + sizeof(bool);
-  index_file_header.attr_types        = {AttrType::INTS};
+  index_file_header.attr_types_[0]    = AttrType::INTS;
   index_file_header.attr_num          = 1;
 
   VacuousLogHandler log_handler;
@@ -429,11 +431,13 @@ TEST(test_bplus_tree, test_internal_index_node_handle)
   ASSERT_NE(nullptr, buffer_pool);
 
   BplusTreeHandler tree_handler;
+  vector<AttrType> attr_types(index_file_header.attr_types_, index_file_header.attr_types_ + MAX_INDEX_FIELDS);
+  vector<int> attr_lengths(index_file_header.attr_lengths_, index_file_header.attr_lengths_ + MAX_INDEX_FIELDS);
   ASSERT_EQ(RC::SUCCESS,
       tree_handler.create(log_handler,
           *buffer_pool,
-          index_file_header.attr_types,
-          index_file_header.attr_lengths,
+          attr_types,
+          attr_lengths,
           index_file_header.internal_max_size,
           index_file_header.leaf_max_size));
   BplusTreeMiniTransaction mtr(tree_handler);
@@ -443,7 +447,7 @@ TEST(test_bplus_tree, test_internal_index_node_handle)
   KeyComparator key_comparator;
   AttrType types[MAX_INDEX_FIELDS] = {AttrType::INTS};
   int32_t lengths[MAX_INDEX_FIELDS] = {4};
-  key_comparator.init(types, lengths);
+  key_comparator.init(types, lengths, 1);
 
   InternalIndexNodeHandler internal_node(mtr, index_file_header, &frame);
   internal_node.init_empty();
@@ -546,7 +550,7 @@ TEST(test_bplus_tree, test_chars)
   ASSERT_NE(nullptr, buffer_pool);
 
   BplusTreeHandler handler;
-  ASSERT_EQ(RC::SUCCESS, handler.create(log_handler, *buffer_pool, AttrType::CHARS, 8, ORDER, ORDER));
+  ASSERT_EQ(RC::SUCCESS, handler.create(log_handler, *buffer_pool, vector<AttrType>{AttrType::CHARS}, vector<int>{8}, ORDER, ORDER));
 
   char keys[][9] = {"abcdefg", "12345678", "12345678", "abcdefg", "abcdefga"};
 
@@ -596,7 +600,7 @@ TEST(test_bplus_tree, test_scanner)
   ASSERT_NE(nullptr, buffer_pool);
 
   BplusTreeHandler handler;
-  ASSERT_EQ(RC::SUCCESS, handler.create(log_handler, *buffer_pool, AttrType::INTS, sizeof(int), ORDER, ORDER));
+  ASSERT_EQ(RC::SUCCESS, handler.create(log_handler, *buffer_pool, vector<AttrType>{AttrType::INTS}, vector<int>{sizeof(int)}, ORDER, ORDER));
 
   int count = 0;
   RC  rc    = RC::SUCCESS;
@@ -821,7 +825,7 @@ TEST(test_bplus_tree, test_bplus_tree_insert)
   ASSERT_NE(nullptr, buffer_pool);
 
   BplusTreeHandler *handler = new BplusTreeHandler();
-  ASSERT_EQ(RC::SUCCESS, handler->create(log_handler, *buffer_pool, AttrType::INTS, sizeof(int), ORDER, ORDER));
+  ASSERT_EQ(RC::SUCCESS, handler->create(log_handler, *buffer_pool, vector<AttrType>{AttrType::INTS}, vector<int>{sizeof(int)}, ORDER, ORDER));
 
   test_insert(handler);
 

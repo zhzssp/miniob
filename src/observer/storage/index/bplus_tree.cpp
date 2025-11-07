@@ -1513,7 +1513,7 @@ RC BplusTreeHandler::create_new_tree(BplusTreeMiniTransaction &mtr, const char *
 MemPoolItem::item_unique_ptr BplusTreeHandler::make_key(const char *user_key, const RID *rid)
 {
   MemPoolItem::item_unique_ptr key = mem_pool_item_->alloc_unique_ptr();
-  if (key == nullptr) {
+  if (key == nullptr || rid == nullptr) {
     LOG_WARN("Failed to alloc memory for key.");
     return nullptr;
   }
@@ -1525,7 +1525,7 @@ MemPoolItem::item_unique_ptr BplusTreeHandler::make_key(const char *user_key, co
 
 RC BplusTreeHandler::insert_entry(const char *user_key, const RID *rid)
 {
-  if (user_key == nullptr || user_key_len <= 0) {
+  if (user_key == nullptr || rid == nullptr) {
     LOG_WARN("Invalid arguments, key is empty");
     return RC::INVALID_ARGUMENT;
   }
@@ -1900,25 +1900,25 @@ RC BplusTreeScanner::open(const char *left_user_key, int left_len, bool left_inc
   } else {
     // 将不定长字段转化为定长字段
     char *fixed_left_key = const_cast<char *>(left_user_key);
-    if (tree_handler_.file_header_.attr_type == AttrType::CHARS) {
-      bool should_inclusive_after_fix = false;
-      rc = fix_user_key(left_user_key, left_len, true /*greater*/, &fixed_left_key, &should_inclusive_after_fix);
-      if (OB_FAIL(rc)) {
-        LOG_WARN("failed to fix left user key. rc=%s", strrc(rc));
-        return rc;
-      }
+    // if (tree_handler_.file_header_.attr_type == AttrType::CHARS) {
+    //   bool should_inclusive_after_fix = false;
+    //   rc = fix_user_key(left_user_key, left_len, true /*greater*/, &fixed_left_key, &should_inclusive_after_fix);
+    //   if (OB_FAIL(rc)) {
+    //     LOG_WARN("failed to fix left user key. rc=%s", strrc(rc));
+    //     return rc;
+    //   }
 
-      // 扫描时是否包含边界本身
-      if (should_inclusive_after_fix) {
-        left_inclusive = true;
-      }
-    }
+    //   // 扫描时是否包含边界本身
+    //   if (should_inclusive_after_fix) {
+    //     left_inclusive = true;
+    //   }
+    // }
 
     MemPoolItem::item_unique_ptr left_pkey;
     if (left_inclusive) {
-      left_pkey = tree_handler_.make_key(fixed_left_key, *RID::min());
+      left_pkey = tree_handler_.make_key(fixed_left_key, RID::min());
     } else {
-      left_pkey = tree_handler_.make_key(fixed_left_key, *RID::max());
+      left_pkey = tree_handler_.make_key(fixed_left_key, RID::max());
     }
 
     const char *left_key = (const char *)left_pkey.get();
@@ -1967,22 +1967,22 @@ RC BplusTreeScanner::open(const char *left_user_key, int left_len, bool left_inc
   } else {
 
     char *fixed_right_key          = const_cast<char *>(right_user_key);
-    bool  should_include_after_fix = false;
-    if (tree_handler_.file_header_.attr_type == AttrType::CHARS) {
-      rc = fix_user_key(right_user_key, right_len, false /*want_greater*/, &fixed_right_key, &should_include_after_fix);
-      if (OB_FAIL(rc)) {
-        LOG_WARN("failed to fix right user key. rc=%s", strrc(rc));
-        return rc;
-      }
+    // bool  should_include_after_fix = false;
+    // if (tree_handler_.file_header_.attr_type == AttrType::CHARS) {
+    //   rc = fix_user_key(right_user_key, right_len, false /*want_greater*/, &fixed_right_key, &should_include_after_fix);
+    //   if (OB_FAIL(rc)) {
+    //     LOG_WARN("failed to fix right user key. rc=%s", strrc(rc));
+    //     return rc;
+    //   }
 
-      if (should_include_after_fix) {
-        right_inclusive = true;
-      }
-    }
+    //   if (should_include_after_fix) {
+    //     right_inclusive = true;
+    //   }
+    // }
     if (right_inclusive) {
-      right_key_ = tree_handler_.make_key(fixed_right_key, *RID::max());
+      right_key_ = tree_handler_.make_key(fixed_right_key, RID::max());
     } else {
-      right_key_ = tree_handler_.make_key(fixed_right_key, *RID::min());
+      right_key_ = tree_handler_.make_key(fixed_right_key, RID::min());
     }
 
     if (fixed_right_key != right_user_key) {

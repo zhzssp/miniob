@@ -28,9 +28,10 @@ TEST(BplusTreeLogEntry, init_header_page_log_entry)
   file_header.root_page         = -1;
   file_header.internal_max_size = 100;
   file_header.leaf_max_size     = 200;
-  file_header.attr_length       = 20;
-  file_header.key_length        = 30;
-  file_header.attr_type         = AttrType::INTS;
+  file_header.attr_lengths_[0]  = 20;
+  file_header.key_length        = 30 + sizeof(bool);
+  file_header.attr_types_[0]    = AttrType::INTS;
+  file_header.attr_num          = 1;
 
   Frame frame;
   frame.set_page_num(100);
@@ -50,9 +51,9 @@ TEST(BplusTreeLogEntry, init_header_page_log_entry)
   ASSERT_EQ(file_header.root_page, file_header2.root_page);
   ASSERT_EQ(file_header.internal_max_size, file_header2.internal_max_size);
   ASSERT_EQ(file_header.leaf_max_size, file_header2.leaf_max_size);
-  ASSERT_EQ(file_header.attr_length, file_header2.attr_length);
+  ASSERT_EQ(file_header.attr_lengths_, file_header2.attr_lengths_);
   ASSERT_EQ(file_header.key_length, file_header2.key_length);
-  ASSERT_EQ(file_header.attr_type, file_header2.attr_type);
+  ASSERT_EQ(file_header.attr_types_, file_header2.attr_types_);
 }
 
 TEST(BplusTreeLogEntry, update_root_page_log_entry)

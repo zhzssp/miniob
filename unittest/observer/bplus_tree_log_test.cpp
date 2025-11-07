@@ -74,7 +74,7 @@ TEST(BplusTreeLog, base)
   ASSERT_EQ(RC::SUCCESS, log_handler->start());
 
   auto bplus_tree = make_unique<BplusTreeHandler>();
-  ASSERT_EQ(RC::SUCCESS, bplus_tree->create(*log_handler, *buffer_pool, AttrType::INTS, 4));
+  ASSERT_EQ(RC::SUCCESS, bplus_tree->create(*log_handler, *buffer_pool, vector<AttrType>{AttrType::INTS}, vector<int>{4}));
 
   // 2. insert some key-value pairs into the bplus tree
   const int   insert_num = 10000;
@@ -90,6 +90,9 @@ TEST(BplusTreeLog, base)
   for (int i : keys) {
     RID rid(i, i);
     int key = i;
+    // 随便创建一个对象用于测试功能
+    // Record record;
+    // record.set_data(, sizeof(int));
     ASSERT_EQ(RC::SUCCESS, bplus_tree->insert_entry(reinterpret_cast<const char *>(&key), &rid));
   }
 
@@ -192,7 +195,7 @@ TEST(BplusTreeLog, concurrency)
   vector<unique_ptr<BplusTreeHandler>> bplus_trees;
   for (DiskBufferPool *buffer_pool : buffer_pools) {
     auto bplus_tree = make_unique<BplusTreeHandler>();
-    ASSERT_EQ(RC::SUCCESS, bplus_tree->create(*log_handler, *buffer_pool, AttrType::INTS, 4));
+    ASSERT_EQ(RC::SUCCESS, bplus_tree->create(*log_handler, *buffer_pool, vector<AttrType>{AttrType::INTS}, vector<int>{4}));
     bplus_trees.push_back(std::move(bplus_tree));
   }
 
@@ -216,6 +219,8 @@ TEST(BplusTreeLog, concurrency)
     executor.execute([&bplus_trees, &tree_index_generator, i]() {
       RID rid(i, i);
       int tree_index = tree_index_generator.next();
+      // Record record;
+      // record.set_data(, sizeof(int));
       ASSERT_EQ(RC::SUCCESS, bplus_trees[tree_index]->insert_entry(reinterpret_cast<const char *>(&i), &rid));
     });
   }

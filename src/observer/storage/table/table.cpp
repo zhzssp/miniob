@@ -375,9 +375,9 @@ Index *Table::find_index(const char *index_name) const
 {
   return engine_->find_index(index_name);
 }
-Index *Table::find_index_by_field(const char *field_name) const
+Index *Table::find_index_by_field(vector<string> field_names) const
 {
-  return engine_->find_index_by_field(field_name);
+  return engine_->find_index_by_field(field_names);
 }
 
 RC Table::sync()

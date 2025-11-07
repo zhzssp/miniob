@@ -22,8 +22,8 @@ BplusTreeIndex::~BplusTreeIndex() noexcept { close(); }
 RC BplusTreeIndex::create(Table *table, const char *file_name, const IndexMeta &index_meta, vector<const FieldMeta *> field_metas)
 {
   if (inited_) {
-    LOG_WARN("Failed to create index due to the index has been created before. file_name:%s, index:%s, field:%s",
-        file_name, index_meta.name(), index_meta.field());
+    LOG_WARN("Failed to create index due to the index has been created before. file_name:%s, index:%s",
+        file_name, index_meta.name());
     return RC::RECORD_OPENNED;
   }
 
@@ -52,8 +52,8 @@ RC BplusTreeIndex::create(Table *table, const char *file_name, const IndexMeta &
   /* 完成其余信息的初始化 */
   inited_ = true;
   table_  = table;
-  LOG_INFO("Successfully create index, file_name:%s, index:%s, field:%s",
-    file_name, index_meta.name(), index_meta.field());
+  LOG_INFO("Successfully create index, file_name:%s, index:%s",
+    file_name, index_meta.name());
   return RC::SUCCESS;
 }
 
@@ -101,10 +101,11 @@ RC BplusTreeIndex::insert_entry(const Record &record, const RID *rid)
 
   int total_attr_length = 0;
   for(int i = 0; i < field_metas_.size(); i++) {
-    const FieldMeta *field_meta = field_metas_[i];
+    FieldMeta field_meta = field_metas_[i];
     // 应当是以字节为单位
-    total_attr_length += field_meta->len();
-    is_null[i] = record.get_null_information(field_meta->field_id());
+    total_attr_length += field_meta.len();
+    // 这里的应当是构建好bitmap的record !!!
+    is_null[i] = record.is_null(field_meta.field_id());
   }
 
   // 构建user_key向下传递 --> 下层全部使用memcpy，可以先开一个栈上的数组
@@ -115,11 +116,11 @@ RC BplusTreeIndex::insert_entry(const Record &record, const RID *rid)
   int  offset = 0;
   // fields不一定是连续的字段，只能说整体上是有序的
   for (int i = 0; i < field_metas_.size(); i++) {
-    const FieldMeta *field_meta = field_metas_[i];
-    const char      *field_data = record.data() + field_meta->offset();
+    FieldMeta field_meta = field_metas_[i];
+    const char      *field_data = record.data() + field_meta.offset();
 
-    memcpy(key_buf + offset, field_data, field_meta->len());
-    offset += field_meta->len();
+    memcpy(key_buf + offset, field_data, field_meta.len());
+    offset += field_meta.len();
   }
 
   // rid在后面进行复制
@@ -128,9 +129,38 @@ RC BplusTreeIndex::insert_entry(const Record &record, const RID *rid)
   return index_handler_.insert_entry(key_buf, rid);
 }
 
-RC BplusTreeIndex::delete_entry(const char *record, const RID *rid)
+RC BplusTreeIndex::delete_entry(const Record &record, const RID *rid)
 {
-  return index_handler_.delete_entry(record + field_meta_.offset(), rid);
+  bool is_null[field_metas_.size()];
+  int bitmap_length = sizeof(bool) * field_metas_.size();
+
+  int total_attr_length = 0;
+  for(int i = 0; i < field_metas_.size(); i++) {
+    FieldMeta field_meta = field_metas_[i];
+    // 应当是以字节为单位
+    total_attr_length += field_meta.len();
+    is_null[i] = record.is_null(field_meta.field_id());
+  }
+
+  // 构建user_key向下传递 --> 下层全部使用memcpy，可以先开一个栈上的数组
+  int  key_buf_len = total_attr_length + bitmap_length + sizeof(RID);
+  char key_buf[key_buf_len];
+  memset(key_buf, 0, key_buf_len);
+  
+  int  offset = 0;
+  // fields不一定是连续的字段，只能说整体上是有序的
+  for (int i = 0; i < field_metas_.size(); i++) {
+    FieldMeta field_meta = field_metas_[i];
+    const char      *field_data = record.data() + field_meta.offset();
+
+    memcpy(key_buf + offset, field_data, field_meta.len());
+    offset += field_meta.len();
+  }
+
+  // rid在后面进行复制
+  memcpy(key_buf + offset, is_null, sizeof(is_null));
+
+  return index_handler_.delete_entry(key_buf, rid);
 }
 
 IndexScanner *BplusTreeIndex::create_scanner(

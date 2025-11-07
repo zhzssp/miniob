@@ -36,10 +36,13 @@ public:
   IndexMeta() = default;
 
   RC init(const char *name, vector<const FieldMeta *> field_metas);
+  RC init(const char *name, vector<string> fields);
+  IndexMeta &operator=(const IndexMeta &other);
 
 public:
   const char *name() const;
   const char *field(int index) const;
+  vector<string> fields() const { return fields_; }
   int field_num() const;
 
   void desc(ostream &os) const;

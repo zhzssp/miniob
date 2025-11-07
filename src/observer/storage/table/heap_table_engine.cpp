@@ -49,9 +49,9 @@ RC HeapTableEngine::insert_record(Record &record)
     return rc;
   }
 
-  rc = insert_entry_of_indexes(record.data(), record.rid());
+  rc = insert_entry_of_indexes(record, record.rid());
   if (rc != RC::SUCCESS) {  // 可能出现了键值重复
-    RC rc2 = delete_entry_of_indexes(record.data(), record.rid(), false /*error_on_not_exists*/);
+    RC rc2 = delete_entry_of_indexes(record, record.rid(), false /*error_on_not_exists*/);
     if (rc2 != RC::SUCCESS) {
       LOG_ERROR("Failed to rollback index data when insert index entries failed. table name=%s, rc=%d:%s",
                 table_meta_->name(), rc2, strrc(rc2));
@@ -98,7 +98,7 @@ RC HeapTableEngine::delete_record(const Record &record)
 {
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
-    rc = index->delete_entry(record.data(), &record.rid());
+    rc = index->delete_entry(record, &record.rid());
     ASSERT(RC::SUCCESS == rc, 
            "failed to delete entry from index. table name=%s, index name=%s, rid=%s, rc=%s",
            table_meta_->name(), index->index_meta().name(), record.rid().to_string().c_str(), strrc(rc));
@@ -226,7 +226,7 @@ RC HeapTableEngine::create_index(Trx *trx, vector<const FieldMeta *> field_metas
   return rc;
 }
 
-RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid)
+RC HeapTableEngine::insert_entry_of_indexes(const Record &record, const RID &rid)
 {
   LOG_TRACE("HeapTableEngine::insert_entry_of_indexes() is called");
   RC rc = RC::SUCCESS;
@@ -240,7 +240,7 @@ RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid)
   return rc;
 }
 
-RC HeapTableEngine::delete_entry_of_indexes(const char *record, const RID &rid, bool error_on_not_exists)
+RC HeapTableEngine::delete_entry_of_indexes(const Record &record, const RID &rid, bool error_on_not_exists)
 {
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
@@ -283,9 +283,9 @@ Index *HeapTableEngine::find_index(const char *index_name) const
   }
   return nullptr;
 }
-Index *HeapTableEngine::find_index_by_field(const char *field_name) const
+Index *HeapTableEngine::find_index_by_field(vector<string> field_names) const
 {
-  const IndexMeta *index_meta = table_meta_->find_index_by_field(field_name);
+  const IndexMeta *index_meta = table_meta_->find_index_by_field(field_names);
   if (index_meta != nullptr) {
     return this->find_index(index_meta->name());
   }
@@ -326,9 +326,9 @@ RC HeapTableEngine::open()
   for (int i = 0; i < index_num; i++) {
     const IndexMeta *index_meta = table_meta_->index(i);
     vector<const FieldMeta *> field_metas;
-    field_metas.reserve(index_meta_->field_num()); 
+    field_metas.reserve(index_meta->field_num()); 
 
-    for (int i = 0; i < index_meta_->field_num(); i++)
+    for (int i = 0; i < index_meta->field_num(); i++)
     {
       const FieldMeta *field_meta = table_meta_->field(index_meta->field(i));
       field_metas.emplace_back(field_meta);
@@ -365,7 +365,7 @@ RC HeapTableEngine::update_record_with_trx(const Record &old_record, const Recor
   
   // 1. 更新索引：先删除旧记录，再插入新记录
   for (Index *index : indexes_) {
-    rc = index->delete_entry(old_record.data(), &old_record.rid());
+    rc = index->delete_entry(old_record, &old_record.rid());
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to delete entry from index. table=%s, index=%s, rid=%s, rc=%s",
                table_meta_->name(), index->index_meta().name(), 
@@ -373,7 +373,7 @@ RC HeapTableEngine::update_record_with_trx(const Record &old_record, const Recor
       return rc;
     }
     
-    rc = index->insert_entry(new_record.data(), &new_record.rid());
+    rc = index->insert_entry(new_record, &new_record.rid());
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to insert entry to index. table=%s, index=%s, rid=%s, rc=%s",
                table_meta_->name(), index->index_meta().name(), 
