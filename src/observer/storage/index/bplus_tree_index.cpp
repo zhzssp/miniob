@@ -93,21 +93,22 @@ RC BplusTreeIndex::close()
   return RC::SUCCESS;
 }
 
+/* 仅拼接字段信息 */
 RC BplusTreeIndex::insert_entry(const Record &record, const RID *rid)
 {
   bool is_null[field_metas_.size()];
   int bitmap_length = sizeof(bool) * field_metas_.size();
 
-  int total_key_length = 0;
+  int total_attr_length = 0;
   for(int i = 0; i < field_metas_.size(); i++) {
     const FieldMeta *field_meta = field_metas_[i];
     // 应当是以字节为单位
-    total_key_length += field_meta->len();
+    total_attr_length += field_meta->len();
     is_null[i] = record.get_null_information(field_meta->field_id());
   }
 
   // 构建user_key向下传递 --> 下层全部使用memcpy，可以先开一个栈上的数组
-  int key_buf_len = total_key_length + sizeof(RID) + bitmap_length; 
+  int  key_buf_len = total_attr_length + bitmap_length + sizeof(RID);
   char key_buf[key_buf_len];
   memset(key_buf, 0, key_buf_len);
   
@@ -120,14 +121,11 @@ RC BplusTreeIndex::insert_entry(const Record &record, const RID *rid)
     memcpy(key_buf + offset, field_data, field_meta->len());
     offset += field_meta->len();
   }
-  // 在各个字段的末尾拼上 RID（用于区分相同键）
-  memcpy(key_buf + offset, rid, sizeof(RID));
 
-  offset += sizeof(RID);
-
+  // rid在后面进行复制
   memcpy(key_buf + offset, is_null, sizeof(is_null));
 
-  return index_handler_.insert_entry(key_buf, key_buf_len, rid);
+  return index_handler_.insert_entry(key_buf, rid);
 }
 
 RC BplusTreeIndex::delete_entry(const char *record, const RID *rid)

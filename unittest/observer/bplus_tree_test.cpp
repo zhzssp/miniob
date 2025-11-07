@@ -154,6 +154,7 @@ void test_get(BplusTreeHandler *handler)
     }
 
     rids.clear();
+    // 随便放个临时变量来测试能否跑通
     RC rc = handler->get_entry((const char *)&i, 4, rids);
 
     ASSERT_EQ(RC::SUCCESS, rc);
@@ -413,9 +414,10 @@ TEST(test_bplus_tree, test_internal_index_node_handle)
   index_file_header.root_page         = BP_INVALID_PAGE_NUM;
   index_file_header.internal_max_size = 5;
   index_file_header.leaf_max_size     = 5;
-  index_file_header.attr_lengths       = {4};
+  index_file_header.attr_lengths      = {4};
   index_file_header.key_length        = 4 + sizeof(RID) + sizeof(bool);
-  index_file_header.attr_types         = {AttrType::INTS};
+  index_file_header.attr_types        = {AttrType::INTS};
+  index_file_header.attr_num          = 1;
 
   VacuousLogHandler log_handler;
   BufferPoolManager bpm;
@@ -430,8 +432,8 @@ TEST(test_bplus_tree, test_internal_index_node_handle)
   ASSERT_EQ(RC::SUCCESS,
       tree_handler.create(log_handler,
           *buffer_pool,
-          index_file_header.attr_type,
-          index_file_header.attr_length,
+          index_file_header.attr_types,
+          index_file_header.attr_lengths,
           index_file_header.internal_max_size,
           index_file_header.leaf_max_size));
   BplusTreeMiniTransaction mtr(tree_handler);

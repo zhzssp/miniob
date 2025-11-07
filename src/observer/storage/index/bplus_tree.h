@@ -125,8 +125,8 @@ public:
     int offset = 0;
     // 逐字段比较
     for (int i = 0; i < attr_num_; i++) {
-      bool left_is_null = reinterpret_cast<const bool *>(v1 + total_attr_length_ + sizeof(RID))[i];
-      bool right_is_null = reinterpret_cast<const bool *>(v2 + total_attr_length_ + sizeof(RID))[i];
+      bool left_is_null = reinterpret_cast<const bool *>(v1 + total_attr_length_)[i];
+      bool right_is_null = reinterpret_cast<const bool *>(v2 + total_attr_length_)[i];
 
       int cmp_result = attr_comparators_[i](v1 + offset, v2 + offset, left_is_null, right_is_null);
       // 出现不相等的字段即返回
@@ -137,8 +137,8 @@ public:
     }
 
     // key的各个字段值全部相等，比较RID
-    const RID *rid1 = (const RID *)(v1 + total_attr_length_);
-    const RID *rid2 = (const RID *)(v2 + total_attr_length_);
+    const RID *rid1 = (const RID *)(v1 + total_attr_length_ + sizeof(bool) * attr_num_);
+    const RID *rid2 = (const RID *)(v2 + total_attr_length_ + sizeof(bool) * attr_num_);
     return RID::compare(rid1, rid2);
   }
 
@@ -549,7 +549,7 @@ public:
    * 即向索引中插入一个值为（user_key，rid）的键值对
    * @note 这里假设user_key的内存大小与attr_length 一致
    */
-  RC insert_entry(const char *user_key, int user_key_len, const RID *rid);
+  RC insert_entry(const char *user_key, const RID *rid);
 
   /**
    * @brief 从IndexHandle句柄对应的索引中删除一个值为（user_key，rid）的索引项
@@ -698,7 +698,7 @@ protected:
   RC adjust_root(BplusTreeMiniTransaction &mtr, Frame *root_frame);
 
 private:
-  common::MemPoolItem::item_unique_ptr make_key(const char *user_key, int user_key_len);
+  common::MemPoolItem::item_unique_ptr make_key(const char *user_key, const RID *rid);
 
 protected:
   LogHandler     *log_handler_      = nullptr;  /// 日志处理器

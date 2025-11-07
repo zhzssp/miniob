@@ -1510,30 +1510,29 @@ RC BplusTreeHandler::create_new_tree(BplusTreeMiniTransaction &mtr, const char *
   return rc;
 }
 
-MemPoolItem::item_unique_ptr BplusTreeHandler::make_key(const char *user_key, int user_key_len)
+MemPoolItem::item_unique_ptr BplusTreeHandler::make_key(const char *user_key, const RID *rid)
 {
   MemPoolItem::item_unique_ptr key = mem_pool_item_->alloc_unique_ptr();
   if (key == nullptr) {
     LOG_WARN("Failed to alloc memory for key.");
     return nullptr;
   }
-  memcpy(static_cast<char *>(key.get()), user_key, user_key_len);
+  int length_except_rid = file_header_.total_attr_length + file_header_.attr_num * sizeof(bool);
+  memcpy(static_cast<char *>(key.get()), user_key, length_except_rid);
+  memcpy(static_cast<char *>(key.get()) + length_except_rid, rid, sizeof(RID));
   return key;
 }
 
-RC BplusTreeHandler::insert_entry(const char *user_key, int user_key_len, const RID *rid)
+RC BplusTreeHandler::insert_entry(const char *user_key, const RID *rid)
 {
   if (user_key == nullptr || user_key_len <= 0) {
     LOG_WARN("Invalid arguments, key is empty");
     return RC::INVALID_ARGUMENT;
   }
 
-  // to do: optimize 
-  user_key_len_ = user_key_len;
-
   /* 分配内存来存储key */
-  /* [字段][RID][bitmap] */
-  MemPoolItem::item_unique_ptr pkey = make_key(user_key, user_key_len);
+  /* [字段][bitmap][RID] */
+  MemPoolItem::item_unique_ptr pkey = make_key(user_key, rid);
   if (pkey == nullptr) {
     LOG_WARN("Failed to alloc memory for key.");
     return RC::NOMEM;
@@ -1576,6 +1575,7 @@ RC BplusTreeHandler::insert_entry(const char *user_key, int user_key_len, const 
 RC BplusTreeHandler::get_entry(const char *user_key, int key_len, list<RID> &rids)
 {
   BplusTreeScanner scanner(*this);
+  /* 点查询，找到所有key = user_key的记录（rid可以不同） */
   RC rc = scanner.open(user_key, key_len, true /*left_inclusive*/, user_key, key_len, true /*right_inclusive*/);
   if (OB_FAIL(rc)) {
     LOG_WARN("failed to open scanner. rc=%s", strrc(rc));
@@ -1857,6 +1857,7 @@ BplusTreeScanner::BplusTreeScanner(BplusTreeHandler &tree_handler)
 
 BplusTreeScanner::~BplusTreeScanner() { close(); }
 
+/* 扫描左边界到右边界之间的所有记录，此时的Key不包含RID */
 RC BplusTreeScanner::open(const char *left_user_key, int left_len, bool left_inclusive, const char *right_user_key,
     int right_len, bool right_inclusive)
 {
@@ -1881,7 +1882,8 @@ RC BplusTreeScanner::open(const char *left_user_key, int left_len, bool left_inc
       return RC::INVALID_ARGUMENT;
     }
   }
-
+  
+  // 左边界为空，则从最左端开始
   if (nullptr == left_user_key) {
     rc = tree_handler_.left_most_page(mtr_, current_frame_);
     if (OB_FAIL(rc)) {
@@ -1896,7 +1898,7 @@ RC BplusTreeScanner::open(const char *left_user_key, int left_len, bool left_inc
 
     iter_index_ = 0;
   } else {
-
+    // 将不定长字段转化为定长字段
     char *fixed_left_key = const_cast<char *>(left_user_key);
     if (tree_handler_.file_header_.attr_type == AttrType::CHARS) {
       bool should_inclusive_after_fix = false;
@@ -1906,6 +1908,7 @@ RC BplusTreeScanner::open(const char *left_user_key, int left_len, bool left_inc
         return rc;
       }
 
+      // 扫描时是否包含边界本身
       if (should_inclusive_after_fix) {
         left_inclusive = true;
       }
@@ -2075,6 +2078,7 @@ RC BplusTreeScanner::close()
   return RC::SUCCESS;
 }
 
+/* 将变长字符串变为定长字符串 */
 RC BplusTreeScanner::fix_user_key(
     const char *user_key, int key_len, bool want_greater, char **fixed_key, bool *should_inclusive)
 {
