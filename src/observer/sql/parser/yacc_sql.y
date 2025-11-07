@@ -1095,6 +1095,28 @@ condition:
       $$->right_expr = $3;
       $$->comp = $2;
     }
+    | rel_attr comp_op LBRACE subquery_stmt RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 1;
+      $$->left_attr = *$1;
+      $$->right_is_attr = 0;
+      $$->right_expr = new SubqueryExpr($4);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = $2;
+      delete $1;
+    }
+    | LBRACE subquery_stmt RBRACE comp_op rel_attr
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 0;
+      $$->left_expr = new SubqueryExpr($2);
+      $$->left_expr->set_name(token_name(sql_string, &@$));
+      $$->right_is_attr = 1;
+      $$->right_attr = *$5;
+      $$->comp = $4;
+      delete $5;
+    }
     | rel_attr IN LBRACE subquery_stmt RBRACE
     {
       $$ = new ConditionSqlNode;
