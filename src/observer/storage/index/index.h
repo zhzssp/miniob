@@ -76,6 +76,18 @@ public:
   virtual RC delete_entry(const char *record, const RID *rid) = 0;
 
   /**
+   * @brief 获取指定键值对应的所有RID
+   *
+   * @param user_key 键值
+   * @param key_len 键值长度
+   * @param rids 输出的RID列表
+   */
+  virtual RC get_entry(const char *user_key, int key_len, list<RID> &rids)
+  {
+    return RC::UNSUPPORTED;
+  }
+
+  /**
    * @brief 创建一个索引数据的扫描器
    *
    * @param left_key 要扫描的左边界
