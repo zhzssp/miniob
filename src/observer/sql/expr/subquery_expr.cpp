@@ -108,10 +108,14 @@ RC SubqueryExpr::get_value(const Tuple &tuple, Value &value) const
   LOG_WARN("SubqueryExpr::get_value: successfully got value=%s", value.to_string().c_str());
 
   // 检查是否有多行（标量子查询应该只返回一行）
-  // 注意：在检查多行之前，我们已经获取了值，所以即使有多行也不影响结果
   RC next_rc = physical_operator_->next();
   if (next_rc == RC::SUCCESS) {
-    LOG_WARN("SubqueryExpr::get_value: subquery returned more than one row, using first row");
+    LOG_WARN("SubqueryExpr::get_value: subquery returned more than one row, scalar subquery must return at most one row");
+    RC close_rc = close_physical_operator();
+    if (close_rc != RC::SUCCESS) {
+      LOG_WARN("SubqueryExpr::get_value: failed to close physical operator. rc=%s", strrc(close_rc));
+    }
+    return RC::SUBQUERY_MULTIPLE_ROWS;
   }
 
   // 关闭物理算子（注意：不要在这里关闭，因为可能会影响后续的调用）
