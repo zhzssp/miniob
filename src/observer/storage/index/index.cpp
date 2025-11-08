@@ -18,5 +18,17 @@ RC Index::init(const IndexMeta &index_meta, const FieldMeta &field_meta)
 {
   index_meta_ = index_meta;
   field_meta_ = field_meta;
+  fields_meta_.clear();
+  fields_meta_.push_back(&field_meta);
+  return RC::SUCCESS;
+}
+
+RC Index::init(const IndexMeta &index_meta, const vector<const FieldMeta *> &fields_meta)
+{
+  index_meta_ = index_meta;
+  fields_meta_ = fields_meta;
+  if (!fields_meta.empty()) {
+    field_meta_ = *fields_meta[0];  // 向后兼容：第一个字段
+  }
   return RC::SUCCESS;
 }
