@@ -97,9 +97,13 @@ RC PlainCommunicator::write_state(SessionEvent *event, bool &need_disconnect)
   SqlResult    *sql_result   = event->sql_result();
   const int     buf_size     = 2048;
   char         *buf          = new char[buf_size];
-  // 根据输出规范，无论什么错误，都应该只返回 "FAILURE"
-  const char *result = RC::SUCCESS == sql_result->return_code() ? "SUCCESS" : "FAILURE";
-  snprintf(buf, buf_size, "%s\n", result);
+  const string &state_string = sql_result->state_string();
+  if (state_string.empty()) {
+    const char *result = RC::SUCCESS == sql_result->return_code() ? "SUCCESS" : "FAILURE";
+    snprintf(buf, buf_size, "%s\n", result);
+  } else {
+    snprintf(buf, buf_size, "%s > %s\n", strrc(sql_result->return_code()), state_string.c_str());
+  }
 
   RC rc = writer_->writen(buf, strlen(buf));
   if (OB_FAIL(rc)) {
