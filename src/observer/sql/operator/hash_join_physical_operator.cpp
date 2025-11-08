@@ -328,6 +328,11 @@ RC HashJoinPhysicalOperator::build_hash_table()
       continue;
     }
 
+    // 根据 SQL 标准，NULL 值不应该参与 JOIN 匹配（NULL = NULL 的结果是 NULL，不是 TRUE）
+    if (join_value.is_null()) {
+      continue;  // 跳过 NULL 值，不将其加入哈希表
+    }
+
     // 将 Value 转换为字符串作为哈希键
     string hash_key = join_value.to_string();
     
@@ -398,6 +403,14 @@ RC HashJoinPhysicalOperator::probe_hash_table()
   if (rc != RC::SUCCESS) {
     LOG_WARN("Failed to get join field value from left tuple: %s", strrc(rc));
     // 如果无法获取字段值，返回 SUCCESS 让上层处理
+    return RC::SUCCESS;
+  }
+
+  // 根据 SQL 标准，NULL 值不应该参与 JOIN 匹配（NULL = NULL 的结果是 NULL，不是 TRUE）
+  if (join_value.is_null()) {
+    current_matches_ = nullptr;
+    current_match_index_ = 0;
+    // NULL 值不匹配，返回 SUCCESS 让上层处理
     return RC::SUCCESS;
   }
 
