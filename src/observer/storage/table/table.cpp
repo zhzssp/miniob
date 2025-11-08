@@ -291,7 +291,9 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
   LOG_DEBUG("bitmap size = %d, field_num * sizeof bool = %d", bitmap_record_size, table_meta_.field_num());
   assert(bitmap_record_size == sizeof(bool) * table_meta_.field_num());  // 确认定义没问题
   // 暂时使用bool数组 --> 可以进一步优化为bitmap
+  // 注意：tmp 数组的索引是完整字段索引（包括系统字段），所以需要加上 normal_field_start_index
   bool tmp[table_meta_.field_num()];
+  memset(tmp, 0, sizeof(bool) * table_meta_.field_num());  // 初始化为 false
 
   /* 根据各个字段的元数据，将一个元组中的Values一项一项记录到record的data指针中 */
   for (int i = 0; i < value_num && OB_SUCC(rc); i++) {
@@ -299,13 +301,15 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
     const Value     &value = values[i];
     
     // 值为null的字段不做更改，保持全0 --> 在record中实现bitmap进行记录 --> 持久化存储到元组数据的最后
+    // 注意：record.set_is_null() 和 record.is_null() 都使用完整字段索引（包括系统字段）
+    int full_field_index = i + normal_field_start_index;
     if(value.is_null()) {
       LOG_INFO("Num %d value is null, set record's field %s to be null", i, attr_type_to_string(field->type()));
-      record.set_is_null(i);
-      tmp[i] = true;
+      record.set_is_null(full_field_index);  // 完整字段索引
+      tmp[full_field_index] = true;  // 完整字段索引
       continue;
     } else {
-      tmp[i] = false;
+      tmp[full_field_index] = false;  // 完整字段索引
     }
 
     if (!value.is_null() && field->type() != value.attr_type()) {

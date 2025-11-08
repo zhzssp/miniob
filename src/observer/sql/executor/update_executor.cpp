@@ -274,10 +274,12 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
         rc = new_record.set_field(field_meta->offset(), field_meta->len(), (char *)final_value.data());
 
         // 原本的数据是null --> 修改信息
-        if(old_record.is_null(field_meta->field_id())) {
+        // field_id() 返回的是用户字段索引，需要加上 sys_field_num() 转换为完整字段索引
+        int full_field_index = field_meta->field_id() + table_meta.sys_field_num();
+        if(old_record.is_null(full_field_index)) {
           LOG_INFO("Update field %d's null value to be non-null value", field_meta->field_id());
-          new_record.set_bitmap(field_meta->field_id(), table_meta.fields_record_size(), false);
-          new_record.set_is_not_null(field_meta->field_id());
+          new_record.set_bitmap(full_field_index, table_meta.fields_record_size(), false);
+          new_record.set_is_not_null(full_field_index);
         }
       }
       else {
@@ -287,8 +289,10 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
         vector<char> zero(field_meta->len(), 0);
         rc = new_record.set_field(field_meta->offset(), field_meta->len(), zero.data());
 
-        new_record.set_bitmap(field_meta->field_id(), table_meta.fields_record_size(), true);
-        new_record.set_is_null(field_meta->field_id());
+        // field_id() 返回的是用户字段索引，需要加上 sys_field_num() 转换为完整字段索引
+        int full_field_index = field_meta->field_id() + table_meta.sys_field_num();
+        new_record.set_bitmap(full_field_index, table_meta.fields_record_size(), true);
+        new_record.set_is_null(full_field_index);
       }
       if (rc != RC::SUCCESS) {
         return rc;
