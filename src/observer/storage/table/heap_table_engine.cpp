@@ -438,6 +438,24 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
 
   table_meta_->swap(new_table_meta);
 
+  // 在 swap 之后，需要从新的 table_meta_ 中重新获取 FieldMeta 指针并更新索引
+  // 因为 swap 后，原来的 FieldMeta 对象可能被销毁了
+  vector<const FieldMeta *> refreshed_fields_meta;
+  for (const string &field_name : new_index_meta.fields()) {
+    const FieldMeta *field_meta = table_meta_->field(field_name.c_str());
+    if (field_meta == nullptr) {
+      LOG_ERROR("Failed to find field %s in table %s after swap", field_name.c_str(), table_meta_->name());
+      return RC::SCHEMA_FIELD_NOT_EXIST;
+    }
+    refreshed_fields_meta.push_back(field_meta);
+  }
+  // 刷新索引的字段指针
+  rc = index->refresh_fields_meta(refreshed_fields_meta);
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to refresh fields meta for index %s", index_name);
+    return rc;
+  }
+
   LOG_INFO("Successfully added a new composite index (%s) on the table (%s)", index_name, table_meta_->name());
   return rc;
 }

@@ -153,6 +153,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   vector<string> *                           relation_list;
   vector<string> *                           key_list;
   vector<JoinConditionSqlNode> *             join_condition_list;
+  vector<UpdateAssignment> *                 assignment_list;
   char *                                     cstring;
   int                                        number;  // 进一步用于null的表示
   float                                      floats;
@@ -169,6 +170,12 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 // %destructor { delete $$; } <rel_attr_list>
 %destructor { delete $$; } <relation_list>
 %destructor { delete $$; } <key_list>
+%destructor { 
+  if ($$ != nullptr) {
+    // UpdateAssignment 中的 unique_ptr<Expression> 会被自动管理，只需要删除 vector
+    delete $$;
+  }
+} <assignment_list>
 
 %token <number> NUMBER
 %token <floats> FLOAT
@@ -192,6 +199,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <cstring>             storage_format
 %type <key_list>            primary_key
 %type <key_list>            attr_list
+%type <assignment_list>      assignment_list
 %type <relation_list>       rel_list
 %type <relation_sql_node>   relation
 %type <expression>          expression
@@ -565,16 +573,43 @@ delete_stmt:    /*  delete 语句的语法解析树*/
       }
     }
     ;
+assignment_list:
+    ID EQ expression {
+      $$ = new vector<UpdateAssignment>();
+      UpdateAssignment assign;
+      assign.attribute_name = $1;
+      assign.value_expr = unique_ptr<Expression>($3);
+      $$->push_back(std::move(assign));
+    }
+    | ID EQ expression COMMA assignment_list {
+      if ($5 != nullptr) {
+        $$ = $5;
+      } else {
+        $$ = new vector<UpdateAssignment>();
+      }
+      UpdateAssignment assign;
+      assign.attribute_name = $1;
+      assign.value_expr = unique_ptr<Expression>($3);
+      $$->insert($$->begin(), std::move(assign));
+    }
+    ;
+
 update_stmt:      /*  update 语句的语法解析树*/
-    UPDATE ID SET ID EQ expression where 
+    UPDATE ID SET assignment_list where 
     {
       $$ = new ParsedSqlNode(SCF_UPDATE);
       $$->update.relation_name = $2;
-      $$->update.attribute_name = $4;
-      $$->update.value_expr = unique_ptr<Expression>($6);
-      if ($7 != nullptr) {
-        $$->update.conditions.swap(*$7);
-        delete $7;
+      if ($4 != nullptr && !$4->empty()) {
+        // 填充 assignments
+        $$->update.assignments.swap(*$4);
+        // 向后兼容：设置第一个字段和表达式
+        $$->update.attribute_name = $$->update.assignments[0].attribute_name;
+        $$->update.value_expr = unique_ptr<Expression>($$->update.assignments[0].value_expr->copy().release());
+        delete $4;
+      }
+      if ($5 != nullptr) {
+        $$->update.conditions.swap(*$5);
+        delete $5;
       }
     }
     ;
