@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/index/bplus_tree_index.h"
 #include "storage/common/meta_util.h"
 #include "storage/db/db.h"
+#include <unordered_map>
 
 
 HeapTableEngine::~HeapTableEngine()
@@ -126,7 +127,7 @@ RC HeapTableEngine::get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadW
   return rc;
 }
 
-RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name)
+RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name, bool is_unique)
 {
   if (common::is_blank(index_name) || nullptr == field_meta) {
     LOG_INFO("Invalid input arguments, table name is %s, index_name is blank or attribute_name is blank", table_meta_->name());
@@ -135,11 +136,49 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
 
   IndexMeta new_index_meta;
 
-  RC rc = new_index_meta.init(index_name, *field_meta);
+  RC rc = new_index_meta.init(index_name, *field_meta, is_unique);
   if (rc != RC::SUCCESS) {
     LOG_INFO("Failed to init IndexMeta in table:%s, index_name:%s, field_name:%s", 
              table_meta_->name(), index_name, field_meta->name());
     return rc;
+  }
+
+  // 如果是唯一索引，先检查现有数据是否有重复值
+  if (is_unique) {
+    RecordScanner *check_scanner = nullptr;
+    rc = get_record_scanner(check_scanner, trx, ReadWriteMode::READ_ONLY);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to create scanner for uniqueness check. table=%s, index=%s, rc=%s", 
+               table_meta_->name(), index_name, strrc(rc));
+      return rc;
+    }
+
+    unordered_map<string, RID> key_to_rid;  // 用于检查重复键值
+    Record record;
+    while (OB_SUCC(rc = check_scanner->next(record))) {
+      const char *key = record.data() + field_meta->offset();
+      string key_str(key, field_meta->len());
+      
+      auto it = key_to_rid.find(key_str);
+      if (it != key_to_rid.end()) {
+        // 发现重复键值
+        LOG_WARN("duplicate key value found while creating unique index. table=%s, index=%s", 
+                 table_meta_->name(), index_name);
+        check_scanner->close_scan();
+        delete check_scanner;
+        return RC::RECORD_DUPLICATE_KEY;
+      }
+      key_to_rid[key_str] = record.rid();
+    }
+    if (rc != RC::RECORD_EOF) {
+      check_scanner->close_scan();
+      delete check_scanner;
+      LOG_WARN("failed to scan records for uniqueness check. table=%s, index=%s, rc=%s",
+               table_meta_->name(), index_name, strrc(rc));
+      return rc;
+    }
+    check_scanner->close_scan();
+    delete check_scanner;
   }
 
   // 创建索引相关数据
@@ -159,6 +198,7 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to create scanner while creating index. table=%s, index=%s, rc=%s", 
              table_meta_->name(), index_name, strrc(rc));
+    delete index;
     return rc;
   }
 
@@ -168,6 +208,9 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to insert record into index while creating index. table=%s, index=%s, rc=%s",
                table_meta_->name(), index_name, strrc(rc));
+      scanner->close_scan();
+      delete scanner;
+      delete index;
       return rc;
     }
   }
@@ -230,6 +273,22 @@ RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid)
   LOG_TRACE("HeapTableEngine::insert_entry_of_indexes() is called");
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
+    // 如果是唯一索引，先检查是否已存在相同的键值
+    if (index->index_meta().is_unique()) {
+      const FieldMeta *field_meta = table_meta_->field(index->index_meta().field());
+      if (field_meta != nullptr) {
+        const char *key = record + field_meta->offset();
+        list<RID> existing_rids;
+        rc = index->get_entry(key, field_meta->len(), existing_rids);
+        if (rc == RC::SUCCESS && !existing_rids.empty()) {
+          // 已存在相同的键值，违反唯一性约束
+          LOG_WARN("duplicate key value violates unique constraint. table=%s, index=%s", 
+                   table_meta_->name(), index->index_meta().name());
+          return RC::RECORD_DUPLICATE_KEY;
+        }
+      }
+    }
+    
     // BplusTreeIndex::insert_entry --> index_handler_.insert_entry --> 与null无关了
     rc = index->insert_entry(record, &rid);
     if (rc != RC::SUCCESS) {
