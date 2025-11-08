@@ -27,6 +27,10 @@ See the Mulan PSL v2 for more details. */
 #include "storage/trx/trx.h"
 #include "sql/expr/tuple.h"
 #include "sql/expr/expression.h"
+#include "sql/expr/subquery_expr.h"
+#include "sql/optimizer/logical_plan_generator.h"
+#include "sql/optimizer/physical_plan_generator.h"
+#include "sql/stmt/select_stmt.h"
 
 RC UpdateExecutor::execute(SQLStageEvent *sql_event)
 {
@@ -50,6 +54,44 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
     if (field_meta == nullptr) {
       LOG_WARN("no such field. table=%s, field=%s", table->name(), attribute_name);
       return RC::SCHEMA_FIELD_NOT_EXIST;
+    }
+
+    // 如果值表达式是子查询，需要创建逻辑和物理操作符
+    if (value_expr->type() == ExprType::SUB_QUERY) {
+      SubqueryExpr *subquery_expr = static_cast<SubqueryExpr *>(value_expr);
+      
+      // 创建逻辑操作符
+      if (subquery_expr->logical_operator() == nullptr) {
+        LogicalPlanGenerator logical_plan_generator;
+        unique_ptr<LogicalOperator> logical_oper;
+        SelectStmt *sub_stmt = subquery_expr->stmt();
+        if (sub_stmt == nullptr) {
+          LOG_WARN("subquery statement is null");
+          return RC::INVALID_ARGUMENT;
+        }
+        Stmt *stmt_ptr = static_cast<Stmt *>(sub_stmt);
+        rc = logical_plan_generator.create(stmt_ptr, logical_oper);
+        if (rc != RC::SUCCESS) {
+          LOG_WARN("failed to create subquery logical operator. rc=%s", strrc(rc));
+          return rc;
+        }
+        subquery_expr->set_logical_operator(std::move(logical_oper));
+      }
+      
+      // 创建物理操作符
+      if (subquery_expr->physical_operator() == nullptr) {
+        PhysicalPlanGenerator physical_plan_generator;
+        unique_ptr<PhysicalOperator> physical_oper;
+        rc = physical_plan_generator.create(*subquery_expr->logical_operator(), physical_oper, session);
+        if (rc != RC::SUCCESS) {
+          LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
+          return rc;
+        }
+        subquery_expr->set_physical_operator(std::move(physical_oper));
+      }
+      
+      // 设置事务上下文
+      subquery_expr->set_trx(session->current_trx());
     }
 
     // 创建 RowTuple 用于表达式计算
