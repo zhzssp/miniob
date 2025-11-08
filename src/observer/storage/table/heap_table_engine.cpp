@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/common/meta_util.h"
 #include "storage/db/db.h"
 #include <unordered_map>
+#include <cstring>
 
 
 HeapTableEngine::~HeapTableEngine()
@@ -277,39 +278,220 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
   return rc;
 }
 
+RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fields_meta, const char *index_name, bool is_unique)
+{
+  if (common::is_blank(index_name) || fields_meta.empty()) {
+    LOG_INFO("Invalid input arguments, table name is %s, index_name is blank or no fields provided", table_meta_->name());
+    return RC::INVALID_ARGUMENT;
+  }
+
+  IndexMeta new_index_meta;
+  RC rc = new_index_meta.init(index_name, fields_meta, is_unique);
+  if (rc != RC::SUCCESS) {
+    LOG_INFO("Failed to init IndexMeta in table:%s, index_name:%s", 
+             table_meta_->name(), index_name);
+    return rc;
+  }
+
+  // 如果是唯一索引，先检查现有数据是否有重复值
+  if (is_unique) {
+    RecordScanner *check_scanner = nullptr;
+    rc = get_record_scanner(check_scanner, trx, ReadWriteMode::READ_ONLY);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to create scanner for uniqueness check. table=%s, index=%s, rc=%s", 
+               table_meta_->name(), index_name, strrc(rc));
+      return rc;
+    }
+
+    unordered_map<string, RID> key_to_rid;  // 用于检查重复键值
+    Record record;
+    while (OB_SUCC(rc = check_scanner->next(record))) {
+      // 检查所有字段是否都为 NULL（如果任何一个字段为 NULL，则跳过唯一性检查）
+      bool has_null = false;
+      bool *bitmap = reinterpret_cast<bool *>(const_cast<char *>(record.data()) + table_meta_->fields_record_size());
+      
+      for (const FieldMeta *field_meta : fields_meta) {
+        int bitmap_index = field_meta->field_id() + table_meta_->sys_field_num();
+        bool is_field_null = (bitmap_index >= 0 && bitmap_index < table_meta_->field_num()) ? bitmap[bitmap_index] : false;
+        if (is_field_null) {
+          has_null = true;
+          break;
+        }
+      }
+      
+      if (!has_null) {
+        // 构建复合键
+        int total_key_length = 0;
+        for (const FieldMeta *field_meta : fields_meta) {
+          total_key_length += field_meta->len();
+        }
+        string key_str;
+        key_str.reserve(total_key_length);
+        for (const FieldMeta *field_meta : fields_meta) {
+          const char *field_data = record.data() + field_meta->offset();
+          key_str.append(field_data, field_meta->len());
+        }
+        
+        auto it = key_to_rid.find(key_str);
+        if (it != key_to_rid.end()) {
+          // 发现重复键值
+          LOG_WARN("duplicate key value found while creating unique composite index. table=%s, index=%s", 
+                   table_meta_->name(), index_name);
+          check_scanner->close_scan();
+          delete check_scanner;
+          return RC::RECORD_DUPLICATE_KEY;
+        }
+        key_to_rid[key_str] = record.rid();
+      }
+    }
+    if (rc != RC::RECORD_EOF) {
+      check_scanner->close_scan();
+      delete check_scanner;
+      LOG_WARN("failed to scan records for uniqueness check. table=%s, index=%s, rc=%s",
+               table_meta_->name(), index_name, strrc(rc));
+      return rc;
+    }
+    check_scanner->close_scan();
+    delete check_scanner;
+  }
+
+  // 创建索引相关数据
+  BplusTreeIndex *index      = new BplusTreeIndex();
+  string          index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_name);
+
+  rc = index->create(table_, index_file.c_str(), new_index_meta, fields_meta);
+  if (rc != RC::SUCCESS) {
+    delete index;
+    LOG_ERROR("Failed to create bplus tree composite index. file name=%s, rc=%d:%s", index_file.c_str(), rc, strrc(rc));
+    return rc;
+  }
+
+  // 遍历当前的所有数据，插入这个索引
+  RecordScanner *scanner = nullptr;
+  rc = get_record_scanner(scanner, trx, ReadWriteMode::READ_ONLY);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to create scanner while creating index. table=%s, index=%s, rc=%s", 
+             table_meta_->name(), index_name, strrc(rc));
+    delete index;
+    return rc;
+  }
+
+  Record record;
+  while (OB_SUCC(rc = scanner->next(record))) {
+    rc = index->insert_entry(record.data(), &record.rid());
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to insert record into index while creating index. table=%s, index=%s, rc=%s",
+               table_meta_->name(), index_name, strrc(rc));
+      scanner->close_scan();
+      delete scanner;
+      delete index;
+      return rc;
+    }
+  }
+  if (RC::RECORD_EOF == rc) {
+    rc = RC::SUCCESS;
+  } else {
+    LOG_WARN("failed to insert record into index while creating index. table=%s, index=%s, rc=%s",
+             table_meta_->name(), index_name, strrc(rc));
+    return rc;
+  }
+  scanner->close_scan();
+  delete scanner;
+  LOG_INFO("inserted all records into new composite index. table=%s, index=%s", table_meta_->name(), index_name);
+
+  indexes_.push_back(index);
+
+  /// 接下来将这个索引放到表的元数据中
+  TableMeta new_table_meta(*table_meta_);
+  rc = new_table_meta.add_index(new_index_meta);
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to add index (%s) on table (%s). error=%d:%s", index_name, table_meta_->name(), rc, strrc(rc));
+    return rc;
+  }
+
+  /// 内存中有一份元数据，磁盘文件也有一份元数据。修改磁盘文件时，先创建一个临时文件，写入完成后再rename为正式文件
+  /// 这样可以防止文件内容不完整
+  // 创建元数据临时文件
+  string  tmp_file = table_meta_file(db_->path().c_str(), table_meta_->name()) + ".tmp";
+  fstream fs;
+  fs.open(tmp_file, ios_base::out | ios_base::binary | ios_base::trunc);
+  if (!fs.is_open()) {
+    LOG_ERROR("Failed to open file for write. file name=%s, errmsg=%s", tmp_file.c_str(), strerror(errno));
+    return RC::IOERR_OPEN;  // 创建索引中途出错，要做还原操作
+  }
+  if (new_table_meta.serialize(fs) < 0) {
+    LOG_ERROR("Failed to dump new table meta to file: %s. sys err=%d:%s", tmp_file.c_str(), errno, strerror(errno));
+    return RC::IOERR_WRITE;
+  }
+  fs.close();
+
+  // 覆盖原始元数据文件
+  string meta_file = table_meta_file(db_->path().c_str(), table_meta_->name());
+
+  int ret = rename(tmp_file.c_str(), meta_file.c_str());
+  if (ret != 0) {
+    LOG_ERROR("Failed to rename tmp meta file (%s) to normal meta file (%s) while creating index (%s) on table (%s). "
+              "system error=%d:%s",
+              tmp_file.c_str(), meta_file.c_str(), index_name, table_meta_->name(), errno, strerror(errno));
+    return RC::IOERR_WRITE;
+  }
+
+  table_meta_->swap(new_table_meta);
+
+  LOG_INFO("Successfully added a new composite index (%s) on the table (%s)", index_name, table_meta_->name());
+  return rc;
+}
+
 RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid, const Record *record_obj)
 {
   LOG_TRACE("HeapTableEngine::insert_entry_of_indexes() is called");
   RC rc = RC::SUCCESS;
+  bool *bitmap = reinterpret_cast<bool *>(const_cast<char *>(record) + table_meta_->fields_record_size());
+  
   for (Index *index : indexes_) {
-    const FieldMeta *field_meta = table_meta_->field(index->index_meta().field());
-    if (field_meta == nullptr) {
-      continue;
+    const vector<string> &index_fields = index->index_meta().fields();
+    
+    // 检查所有索引字段是否都为 NULL（如果任何一个字段为 NULL，则跳过索引插入）
+    bool has_null = false;
+    vector<const FieldMeta *> fields_meta;
+    for (const string &field_name : index_fields) {
+      const FieldMeta *field_meta = table_meta_->field(field_name.c_str());
+      if (field_meta == nullptr) {
+        continue;  // 字段不存在，跳过这个索引
+      }
+      fields_meta.push_back(field_meta);
+      int bitmap_index = field_meta->field_id() + table_meta_->sys_field_num();
+      bool is_field_null = (bitmap_index >= 0 && bitmap_index < table_meta_->field_num()) ? bitmap[bitmap_index] : false;
+      if (is_field_null) {
+        has_null = true;
+        break;
+      }
     }
     
-    // 检查字段是否为 NULL
-    // 注意：field_id() 返回的是用户字段索引（从 0 开始，不包括系统字段）
-    // 而 bitmap 的大小是 field_num()（包括系统字段），所以需要加上 sys_field_num() 的偏移
-    bool is_field_null = false;
-    int field_id = field_meta->field_id();
-    int bitmap_index = field_id + table_meta_->sys_field_num();  // 转换为完整字段索引
-    
-    // 从持久化的 bitmap 中读取 NULL 信息（因为 set_data_owner 会销毁 is_null_ 向量）
-    bool *bitmap = reinterpret_cast<bool *>(const_cast<char *>(record) + table_meta_->fields_record_size());
-    is_field_null = (bitmap_index >= 0 && bitmap_index < table_meta_->field_num()) ? bitmap[bitmap_index] : false;
-    
-    // 如果字段值为 NULL，跳过索引插入（SQL 标准：唯一索引允许多个 NULL，且 NULL 值不存储在索引中）
-    if (is_field_null) {
-      LOG_TRACE("Field %s is NULL, skipping index insertion for index %s", 
-                field_meta->name(), index->index_meta().name());
+    if (has_null || fields_meta.empty()) {
+      LOG_TRACE("One or more fields are NULL or missing, skipping index insertion for index %s", 
+                index->index_meta().name());
       continue;
     }
     
     // 如果是唯一索引，先检查是否已存在相同的键值
     if (index->index_meta().is_unique()) {
-      const char *key = record + field_meta->offset();
+      // 构建复合键（使用字符数组而不是 string，因为键可能包含二进制数据）
+      int total_key_length = 0;
+      for (const FieldMeta *field_meta : fields_meta) {
+        total_key_length += field_meta->len();
+      }
+      char *key_buffer = new char[total_key_length];
+      int offset = 0;
+      for (const FieldMeta *field_meta : fields_meta) {
+        const char *field_data = record + field_meta->offset();
+        memcpy(key_buffer + offset, field_data, field_meta->len());
+        offset += field_meta->len();
+      }
+      
       list<RID> existing_rids;
-      rc = index->get_entry(key, field_meta->len(), existing_rids);
+      rc = index->get_entry(key_buffer, total_key_length, existing_rids);
+      delete[] key_buffer;
       if (rc == RC::SUCCESS && !existing_rids.empty()) {
         // 已存在相同的键值，违反唯一性约束
         LOG_WARN("duplicate key value violates unique constraint. table=%s, index=%s", 
@@ -330,21 +512,30 @@ RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid, 
 RC HeapTableEngine::delete_entry_of_indexes(const char *record, const RID &rid, bool error_on_not_exists)
 {
   RC rc = RC::SUCCESS;
+  bool *bitmap = reinterpret_cast<bool *>(const_cast<char *>(record) + table_meta_->fields_record_size());
+  
   for (Index *index : indexes_) {
-    const FieldMeta *field_meta = table_meta_->field(index->index_meta().field());
-    if (field_meta == nullptr) {
-      continue;
+    const vector<string> &index_fields = index->index_meta().fields();
+    
+    // 检查所有索引字段是否都为 NULL（如果任何一个字段为 NULL，则跳过索引删除）
+    bool has_null = false;
+    for (const string &field_name : index_fields) {
+      const FieldMeta *field_meta = table_meta_->field(field_name.c_str());
+      if (field_meta == nullptr) {
+        has_null = true;
+        break;
+      }
+      int bitmap_index = field_meta->field_id() + table_meta_->sys_field_num();
+      bool is_field_null = (bitmap_index >= 0 && bitmap_index < table_meta_->field_num()) ? bitmap[bitmap_index] : false;
+      if (is_field_null) {
+        has_null = true;
+        break;
+      }
     }
     
-    // 检查字段是否为 NULL，如果是 NULL，跳过索引删除（因为 NULL 值本来就没有插入到索引中）
-    // field_id() 返回的是用户字段索引，需要加上 sys_field_num() 的偏移
-    bool *bitmap = reinterpret_cast<bool *>(const_cast<char *>(record) + table_meta_->fields_record_size());
-    int bitmap_index = field_meta->field_id() + table_meta_->sys_field_num();
-    bool is_field_null = (bitmap_index >= 0 && bitmap_index < table_meta_->field_num()) ? bitmap[bitmap_index] : false;
-    
-    if (is_field_null) {
-      LOG_TRACE("Field %s is NULL, skipping index deletion for index %s", 
-                field_meta->name(), index->index_meta().name());
+    if (has_null) {
+      LOG_TRACE("One or more fields are NULL, skipping index deletion for index %s", 
+                index->index_meta().name());
       continue;
     }
     
@@ -459,24 +650,36 @@ RC HeapTableEngine::update_record_with_trx(const Record &old_record, const Recor
   RC rc = RC::SUCCESS;
   
   // 1. 更新索引：先删除旧记录，再插入新记录
+  bool *old_bitmap = reinterpret_cast<bool *>(const_cast<char *>(old_record.data()) + table_meta_->fields_record_size());
+  bool *new_bitmap = reinterpret_cast<bool *>(const_cast<char *>(new_record.data()) + table_meta_->fields_record_size());
+  
   for (Index *index : indexes_) {
-    const FieldMeta *field_meta = table_meta_->field(index->index_meta().field());
-    if (field_meta == nullptr) {
-      continue;
+    const vector<string> &index_fields = index->index_meta().fields();
+    
+    // 检查旧值和新值是否都为 NULL（如果任何一个字段为 NULL，则跳过索引操作）
+    bool old_has_null = false;
+    bool new_has_null = false;
+    vector<const FieldMeta *> fields_meta;
+    
+    for (const string &field_name : index_fields) {
+      const FieldMeta *field_meta = table_meta_->field(field_name.c_str());
+      if (field_meta == nullptr) {
+        continue;
+      }
+      fields_meta.push_back(field_meta);
+      int bitmap_index = field_meta->field_id() + table_meta_->sys_field_num();
+      bool old_is_null = (bitmap_index >= 0 && bitmap_index < table_meta_->field_num()) ? old_bitmap[bitmap_index] : false;
+      bool new_is_null = (bitmap_index >= 0 && bitmap_index < table_meta_->field_num()) ? new_bitmap[bitmap_index] : false;
+      if (old_is_null) {
+        old_has_null = true;
+      }
+      if (new_is_null) {
+        new_has_null = true;
+      }
     }
     
-    // 检查旧值是否为 NULL
-    // field_id() 返回的是用户字段索引，需要加上 sys_field_num() 的偏移
-    // 从持久化的 bitmap 中读取 NULL 信息
-    int bitmap_index = field_meta->field_id() + table_meta_->sys_field_num();
-    bool *old_bitmap = reinterpret_cast<bool *>(const_cast<char *>(old_record.data()) + table_meta_->fields_record_size());
-    bool old_is_null = (bitmap_index >= 0 && bitmap_index < table_meta_->field_num()) ? old_bitmap[bitmap_index] : false;
-    // 检查新值是否为 NULL
-    bool *new_bitmap = reinterpret_cast<bool *>(const_cast<char *>(new_record.data()) + table_meta_->fields_record_size());
-    bool new_is_null = (bitmap_index >= 0 && bitmap_index < table_meta_->field_num()) ? new_bitmap[bitmap_index] : false;
-    
     // 如果旧值不是 NULL，需要从索引中删除
-    if (!old_is_null) {
+    if (!old_has_null && !fields_meta.empty()) {
       rc = index->delete_entry(old_record.data(), &old_record.rid());
       if (rc != RC::SUCCESS) {
         LOG_WARN("failed to delete entry from index. table=%s, index=%s, rid=%s, rc=%s",
@@ -487,12 +690,25 @@ RC HeapTableEngine::update_record_with_trx(const Record &old_record, const Recor
     }
     
     // 如果新值不是 NULL，需要插入到索引中
-    if (!new_is_null) {
+    if (!new_has_null && !fields_meta.empty()) {
       // 如果是唯一索引，先检查是否已存在相同的键值
       if (index->index_meta().is_unique()) {
-        const char *key = new_record.data() + field_meta->offset();
+        // 构建复合键（使用字符数组而不是 string，因为键可能包含二进制数据）
+        int total_key_length = 0;
+        for (const FieldMeta *field_meta : fields_meta) {
+          total_key_length += field_meta->len();
+        }
+        char *key_buffer = new char[total_key_length];
+        int offset = 0;
+        for (const FieldMeta *field_meta : fields_meta) {
+          const char *field_data = new_record.data() + field_meta->offset();
+          memcpy(key_buffer + offset, field_data, field_meta->len());
+          offset += field_meta->len();
+        }
+        
         list<RID> existing_rids;
-        rc = index->get_entry(key, field_meta->len(), existing_rids);
+        rc = index->get_entry(key_buffer, total_key_length, existing_rids);
+        delete[] key_buffer;
         if (rc == RC::SUCCESS && !existing_rids.empty()) {
           // 检查是否是自己（如果只是更新了其他字段，但索引字段值没变）
           bool is_self = false;

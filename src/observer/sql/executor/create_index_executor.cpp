@@ -32,5 +32,12 @@ RC CreateIndexExecutor::execute(SQLStageEvent *sql_event)
 
   Trx   *trx   = session->current_trx();
   Table *table = create_index_stmt->table();
-  return table->create_index(trx, create_index_stmt->field_meta(), create_index_stmt->index_name().c_str(), create_index_stmt->is_unique());
+  const vector<const FieldMeta *> &fields_meta = create_index_stmt->fields_meta();
+  
+  // 支持单字段和复合索引
+  if (fields_meta.size() == 1) {
+    return table->create_index(trx, fields_meta[0], create_index_stmt->index_name().c_str(), create_index_stmt->is_unique());
+  } else {
+    return table->create_index(trx, fields_meta, create_index_stmt->index_name().c_str(), create_index_stmt->is_unique());
+  }
 }

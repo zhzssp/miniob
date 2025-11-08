@@ -2053,7 +2053,11 @@ RC BplusTreeScanner::fix_user_key(
 
   // 这里很粗暴，变长字段才需要做调整，其它默认都不需要做调整
   assert(tree_handler_.file_header_.attr_type == AttrType::CHARS);
-  assert(strlen(user_key) >= static_cast<size_t>(key_len));
+  // 对于固定长度的键（key_len == attr_length），可能是二进制数据（如复合索引），跳过 strlen 检查
+  // 对于变长字符串，需要检查 strlen
+  if (key_len < tree_handler_.file_header_.attr_length) {
+    assert(strlen(user_key) >= static_cast<size_t>(key_len));
+  }
 
   *should_inclusive = false;
 

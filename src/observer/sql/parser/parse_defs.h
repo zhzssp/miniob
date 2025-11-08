@@ -283,7 +283,7 @@ struct CreateIndexSqlNode
 {
   string index_name;      ///< Index name
   string relation_name;   ///< Relation name
-  string attribute_name;  ///< Attribute name
+  vector<string> attribute_names;  ///< Attribute names (支持多个字段)
   bool   is_unique = false;  ///< Whether this is a unique index
 };
 

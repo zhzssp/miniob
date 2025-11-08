@@ -370,6 +370,11 @@ RC Table::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_
   return engine_->create_index(trx, field_meta, index_name, is_unique);
 }
 
+RC Table::create_index(Trx *trx, const vector<const FieldMeta *> &fields_meta, const char *index_name, bool is_unique)
+{
+  return engine_->create_index(trx, fields_meta, index_name, is_unique);
+}
+
 RC Table::delete_record(const Record &record)
 {
   return engine_->delete_record(record);
