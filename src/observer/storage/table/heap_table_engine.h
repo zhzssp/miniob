@@ -48,7 +48,7 @@ public:
   RC init() override;
 
 private:
-  RC insert_entry_of_indexes(const char *record, const RID &rid);
+  RC insert_entry_of_indexes(const char *record, const RID &rid, const Record *record_obj = nullptr);
   RC delete_entry_of_indexes(const char *record, const RID &rid, bool error_on_not_exists);
 
 private:
