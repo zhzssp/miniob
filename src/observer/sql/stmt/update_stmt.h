@@ -21,6 +21,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/filter_stmt.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
+#include "sql/expr/expression.h"
 class Db;
 
 /**
@@ -31,8 +32,8 @@ class Db;
 
 class UpdateStmt : public Stmt {
 public:
-  UpdateStmt(Table *table, const char *attribute_name, Value *value, FilterStmt *filter_stmt)
-    : table_(table), attribute_name_(attribute_name), value_(value), filter_stmt_(filter_stmt)
+  UpdateStmt(Table *table, const char *attribute_name, unique_ptr<Expression> value_expr, FilterStmt *filter_stmt)
+    : table_(table), attribute_name_(attribute_name), value_expr_(std::move(value_expr)), filter_stmt_(filter_stmt)
 {}
   ~UpdateStmt()
   {
@@ -44,7 +45,7 @@ public:
   StmtType type() const override { return StmtType::UPDATE; }
   Table *table() const { return table_; }
   const char *attribute_name() const { return attribute_name_; }
-  Value *value() const { return value_; }
+  Expression *value_expr() const { return value_expr_.get(); }
   FilterStmt *filter_stmt() const { return filter_stmt_; }
   
   static RC create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt);
@@ -52,6 +53,6 @@ public:
 private:
   Table *table_;
   const char *attribute_name_;  // 要更新的字段名
-  Value *value_;               // 新值
+  unique_ptr<Expression> value_expr_;  // 新值表达式，支持子查询
   FilterStmt *filter_stmt_;    // WHERE条件
 };

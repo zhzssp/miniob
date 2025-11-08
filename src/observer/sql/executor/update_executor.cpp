@@ -25,6 +25,8 @@ See the Mulan PSL v2 for more details. */
 #include "storage/record/record_scanner.h"
 #include "storage/field/field_meta.h"
 #include "storage/trx/trx.h"
+#include "sql/expr/tuple.h"
+#include "sql/expr/expression.h"
 
 RC UpdateExecutor::execute(SQLStageEvent *sql_event)
 {
@@ -39,7 +41,7 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
 
     Table *table = update_stmt->table();
     const char *attribute_name = update_stmt->attribute_name();
-    Value *value = update_stmt->value();
+    Expression *value_expr = update_stmt->value_expr();
     FilterStmt *filter_stmt = update_stmt->filter_stmt();
 
     RC rc = RC::SUCCESS;
@@ -50,23 +52,13 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
       return RC::SCHEMA_FIELD_NOT_EXIST;
     }
 
-    if(!table_meta.field_nullable(field_meta->field_id()) && value->is_null()) {
-      LOG_INFO("Try to set not nullable field to be null, return failure");
-      return RC::NOT_NULL;
+    // 创建 RowTuple 用于表达式计算
+    RowTuple row_tuple;
+    vector<FieldMeta> fields;
+    for (int i = table_meta.sys_field_num(); i < table_meta.field_num(); i++) {
+      fields.push_back(*table_meta.field(i));
     }
-
-    // 准备更新为的值
-    Value final_value;
-    if (!value->is_null() && value->attr_type() != field_meta->type()) {
-      rc = Value::cast_to(*value, field_meta->type(), final_value);
-      if (rc != RC::SUCCESS) {
-        LOG_WARN("type mismatch and cannot cast. field=%s.%s, rc=%s", table->name(), attribute_name, strrc(rc));
-        return rc;
-      }
-    } else {
-      LOG_INFO("Value's type is consistent or value is null !");
-      final_value = *value;
-    }
+    row_tuple.set_schema(table, &fields);
 
     // 检查并更新
     RecordScanner *scanner = nullptr;
@@ -204,6 +196,35 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
           old_record.set_is_not_null(i);
           new_record.set_is_not_null(i);
         }
+      }
+      
+      // 设置 RowTuple 的 record，用于表达式计算
+      row_tuple.set_record(&old_record);
+      
+      // 使用表达式计算新值
+      Value expr_value;
+      rc = value_expr->get_value(row_tuple, expr_value);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to evaluate expression. rc=%s", strrc(rc));
+        return rc;
+      }
+
+      // 检查非空约束
+      if(!table_meta.field_nullable(field_meta->field_id()) && expr_value.is_null()) {
+        LOG_INFO("Try to set not nullable field to be null, return failure");
+        return RC::NOT_NULL;
+      }
+
+      // 准备更新为的值（类型转换）
+      Value final_value;
+      if (!expr_value.is_null() && expr_value.attr_type() != field_meta->type()) {
+        rc = Value::cast_to(expr_value, field_meta->type(), final_value);
+        if (rc != RC::SUCCESS) {
+          LOG_WARN("type mismatch and cannot cast. field=%s.%s, rc=%s", table->name(), attribute_name, strrc(rc));
+          return rc;
+        }
+      } else {
+        final_value = expr_value;
       }
       
       // 只是将要修改的字段的新值给复制过去 --> null对应的这段内存无用，全部置为0
