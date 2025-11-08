@@ -50,7 +50,7 @@ RC HeapTableEngine::insert_record(Record &record)
     return rc;
   }
 
-  rc = insert_entry_of_indexes(record.data(), record.rid());
+  rc = insert_entry_of_indexes(record.data(), record.rid(), &record);
   if (rc != RC::SUCCESS) {  // 可能出现了键值重复
     RC rc2 = delete_entry_of_indexes(record.data(), record.rid(), false /*error_on_not_exists*/);
     if (rc2 != RC::SUCCESS) {
@@ -156,19 +156,24 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
     unordered_map<string, RID> key_to_rid;  // 用于检查重复键值
     Record record;
     while (OB_SUCC(rc = check_scanner->next(record))) {
-      const char *key = record.data() + field_meta->offset();
-      string key_str(key, field_meta->len());
+      // 检查字段是否为 NULL，如果是 NULL，则跳过唯一性检查（SQL 标准允许多个 NULL）
+      bool is_field_null = record.is_null(field_meta->field_id());
       
-      auto it = key_to_rid.find(key_str);
-      if (it != key_to_rid.end()) {
-        // 发现重复键值
-        LOG_WARN("duplicate key value found while creating unique index. table=%s, index=%s", 
-                 table_meta_->name(), index_name);
-        check_scanner->close_scan();
-        delete check_scanner;
-        return RC::RECORD_DUPLICATE_KEY;
+      if (!is_field_null) {
+        const char *key = record.data() + field_meta->offset();
+        string key_str(key, field_meta->len());
+        
+        auto it = key_to_rid.find(key_str);
+        if (it != key_to_rid.end()) {
+          // 发现重复键值
+          LOG_WARN("duplicate key value found while creating unique index. table=%s, index=%s", 
+                   table_meta_->name(), index_name);
+          check_scanner->close_scan();
+          delete check_scanner;
+          return RC::RECORD_DUPLICATE_KEY;
+        }
+        key_to_rid[key_str] = record.rid();
       }
-      key_to_rid[key_str] = record.rid();
     }
     if (rc != RC::RECORD_EOF) {
       check_scanner->close_scan();
@@ -268,7 +273,7 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
   return rc;
 }
 
-RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid)
+RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid, const Record *record_obj)
 {
   LOG_TRACE("HeapTableEngine::insert_entry_of_indexes() is called");
   RC rc = RC::SUCCESS;
@@ -277,14 +282,27 @@ RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid)
     if (index->index_meta().is_unique()) {
       const FieldMeta *field_meta = table_meta_->field(index->index_meta().field());
       if (field_meta != nullptr) {
-        const char *key = record + field_meta->offset();
-        list<RID> existing_rids;
-        rc = index->get_entry(key, field_meta->len(), existing_rids);
-        if (rc == RC::SUCCESS && !existing_rids.empty()) {
-          // 已存在相同的键值，违反唯一性约束
-          LOG_WARN("duplicate key value violates unique constraint. table=%s, index=%s", 
-                   table_meta_->name(), index->index_meta().name());
-          return RC::RECORD_DUPLICATE_KEY;
+        // 检查字段是否为 NULL，如果是 NULL，则跳过唯一性检查（SQL 标准允许多个 NULL）
+        bool is_field_null = false;
+        if (record_obj != nullptr) {
+          is_field_null = record_obj->is_null(field_meta->field_id());
+        } else {
+          // 如果没有 Record 对象，从 bitmap 中读取 NULL 信息
+          bool *bitmap = reinterpret_cast<bool *>(const_cast<char *>(record) + table_meta_->fields_record_size());
+          is_field_null = bitmap[field_meta->field_id()];
+        }
+        
+        // 如果字段值为 NULL，跳过唯一性检查（允许多个 NULL）
+        if (!is_field_null) {
+          const char *key = record + field_meta->offset();
+          list<RID> existing_rids;
+          rc = index->get_entry(key, field_meta->len(), existing_rids);
+          if (rc == RC::SUCCESS && !existing_rids.empty()) {
+            // 已存在相同的键值，违反唯一性约束
+            LOG_WARN("duplicate key value violates unique constraint. table=%s, index=%s", 
+                     table_meta_->name(), index->index_meta().name());
+            return RC::RECORD_DUPLICATE_KEY;
+          }
         }
       }
     }
