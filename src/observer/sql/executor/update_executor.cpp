@@ -44,54 +44,57 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
     UpdateStmt *update_stmt = static_cast<UpdateStmt *>(stmt);
 
     Table *table = update_stmt->table();
-    const char *attribute_name = update_stmt->attribute_name();
-    Expression *value_expr = update_stmt->value_expr();
+    const vector<UpdateFieldAssignment> &assignments = update_stmt->assignments();
     FilterStmt *filter_stmt = update_stmt->filter_stmt();
 
     RC rc = RC::SUCCESS;
     const TableMeta &table_meta = table->table_meta();
-    const FieldMeta *field_meta = table_meta.field(attribute_name);
-    if (field_meta == nullptr) {
-      LOG_WARN("no such field. table=%s, field=%s", table->name(), attribute_name);
-      return RC::SCHEMA_FIELD_NOT_EXIST;
-    }
+    
+    // 验证所有字段存在，并为子查询创建操作符
+    for (const auto &assign : assignments) {
+      const FieldMeta *field_meta = table_meta.field(assign.attribute_name.c_str());
+      if (field_meta == nullptr) {
+        LOG_WARN("no such field. table=%s, field=%s", table->name(), assign.attribute_name.c_str());
+        return RC::SCHEMA_FIELD_NOT_EXIST;
+      }
 
-    // 如果值表达式是子查询，需要创建逻辑和物理操作符
-    if (value_expr->type() == ExprType::SUB_QUERY) {
-      SubqueryExpr *subquery_expr = static_cast<SubqueryExpr *>(value_expr);
-      
-      // 创建逻辑操作符
-      if (subquery_expr->logical_operator() == nullptr) {
-        LogicalPlanGenerator logical_plan_generator;
-        unique_ptr<LogicalOperator> logical_oper;
-        SelectStmt *sub_stmt = subquery_expr->stmt();
-        if (sub_stmt == nullptr) {
-          LOG_WARN("subquery statement is null");
-          return RC::INVALID_ARGUMENT;
+      // 如果值表达式是子查询，需要创建逻辑和物理操作符
+      if (assign.value_expr->type() == ExprType::SUB_QUERY) {
+        SubqueryExpr *subquery_expr = static_cast<SubqueryExpr *>(assign.value_expr.get());
+        
+        // 创建逻辑操作符
+        if (subquery_expr->logical_operator() == nullptr) {
+          LogicalPlanGenerator logical_plan_generator;
+          unique_ptr<LogicalOperator> logical_oper;
+          SelectStmt *sub_stmt = subquery_expr->stmt();
+          if (sub_stmt == nullptr) {
+            LOG_WARN("subquery statement is null");
+            return RC::INVALID_ARGUMENT;
+          }
+          Stmt *stmt_ptr = static_cast<Stmt *>(sub_stmt);
+          rc = logical_plan_generator.create(stmt_ptr, logical_oper);
+          if (rc != RC::SUCCESS) {
+            LOG_WARN("failed to create subquery logical operator. rc=%s", strrc(rc));
+            return rc;
+          }
+          subquery_expr->set_logical_operator(std::move(logical_oper));
         }
-        Stmt *stmt_ptr = static_cast<Stmt *>(sub_stmt);
-        rc = logical_plan_generator.create(stmt_ptr, logical_oper);
-        if (rc != RC::SUCCESS) {
-          LOG_WARN("failed to create subquery logical operator. rc=%s", strrc(rc));
-          return rc;
+        
+        // 创建物理操作符
+        if (subquery_expr->physical_operator() == nullptr) {
+          PhysicalPlanGenerator physical_plan_generator;
+          unique_ptr<PhysicalOperator> physical_oper;
+          rc = physical_plan_generator.create(*subquery_expr->logical_operator(), physical_oper, session);
+          if (rc != RC::SUCCESS) {
+            LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
+            return rc;
+          }
+          subquery_expr->set_physical_operator(std::move(physical_oper));
         }
-        subquery_expr->set_logical_operator(std::move(logical_oper));
+        
+        // 设置事务上下文
+        subquery_expr->set_trx(session->current_trx());
       }
-      
-      // 创建物理操作符
-      if (subquery_expr->physical_operator() == nullptr) {
-        PhysicalPlanGenerator physical_plan_generator;
-        unique_ptr<PhysicalOperator> physical_oper;
-        rc = physical_plan_generator.create(*subquery_expr->logical_operator(), physical_oper, session);
-        if (rc != RC::SUCCESS) {
-          LOG_WARN("failed to create subquery physical operator. rc=%s", strrc(rc));
-          return rc;
-        }
-        subquery_expr->set_physical_operator(std::move(physical_oper));
-      }
-      
-      // 设置事务上下文
-      subquery_expr->set_trx(session->current_trx());
     }
 
     // 创建 RowTuple 用于表达式计算
@@ -126,8 +129,10 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
             const FieldMeta *fm = lobj.field.meta();
             lval.set_type(fm->type());
             lval.set_data(record.data() + fm->offset(), fm->len());
-            lval.set_null(record.get_null_information(fm->field_id(), table_meta.fields_record_size()));
-            LOG_INFO("field %d, lval's null info is %s", fm->field_id(), record.get_null_information(fm->field_id(), table_meta.fields_record_size()) ? "true" : "false");
+            // field_id() 返回的是用户字段索引，需要加上 sys_field_num() 转换为完整字段索引
+            int full_field_index = fm->field_id() + table_meta.sys_field_num();
+            lval.set_null(record.get_null_information(full_field_index, table_meta.fields_record_size()));
+            LOG_INFO("field %d (full index %d), lval's null info is %s", fm->field_id(), full_field_index, record.get_null_information(full_field_index, table_meta.fields_record_size()) ? "true" : "false");
           } else {
             lval = lobj.value;
           }
@@ -137,8 +142,10 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
             const FieldMeta *fm = robj.field.meta();
             rval.set_type(fm->type());
             rval.set_data(record.data() + fm->offset(), fm->len());
-            rval.set_null(record.get_null_information(fm->field_id(), table_meta.fields_record_size()));
-            LOG_INFO("field %d, rval's null info is %s", fm->field_id(), record.get_null_information(fm->field_id(), table_meta.fields_record_size()) ? "true" : "false");
+            // field_id() 返回的是用户字段索引，需要加上 sys_field_num() 转换为完整字段索引
+            int full_field_index = fm->field_id() + table_meta.sys_field_num();
+            rval.set_null(record.get_null_information(full_field_index, table_meta.fields_record_size()));
+            LOG_INFO("field %d (full index %d), rval's null info is %s", fm->field_id(), full_field_index, record.get_null_information(full_field_index, table_meta.fields_record_size()) ? "true" : "false");
           } else {
             rval = robj.value;
           }
@@ -243,59 +250,73 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
       // 设置 RowTuple 的 record，用于表达式计算
       row_tuple.set_record(&old_record);
       
-      // 使用表达式计算新值
-      Value expr_value;
-      rc = value_expr->get_value(row_tuple, expr_value);
-      if (rc != RC::SUCCESS) {
-        LOG_WARN("failed to evaluate expression. rc=%s", strrc(rc));
-        return rc;
-      }
-
-      // 检查非空约束
-      if(!table_meta.field_nullable(field_meta->field_id()) && expr_value.is_null()) {
-        LOG_INFO("Try to set not nullable field to be null, return failure");
-        return RC::NOT_NULL;
-      }
-
-      // 准备更新为的值（类型转换）
-      Value final_value;
-      if (!expr_value.is_null() && expr_value.attr_type() != field_meta->type()) {
-        rc = Value::cast_to(expr_value, field_meta->type(), final_value);
+      // 遍历所有 assignments，更新每个字段
+      for (const auto &assign : assignments) {
+        const FieldMeta *field_meta = table_meta.field(assign.attribute_name.c_str());
+        if (field_meta == nullptr) {
+          LOG_WARN("no such field. table=%s, field=%s", table->name(), assign.attribute_name.c_str());
+          return RC::SCHEMA_FIELD_NOT_EXIST;
+        }
+        
+        // 使用表达式计算新值
+        Value expr_value;
+        rc = assign.value_expr->get_value(row_tuple, expr_value);
         if (rc != RC::SUCCESS) {
-          LOG_WARN("type mismatch and cannot cast. field=%s.%s, rc=%s", table->name(), attribute_name, strrc(rc));
+          LOG_WARN("failed to evaluate expression for field %s. rc=%s", assign.attribute_name.c_str(), strrc(rc));
           return rc;
         }
-      } else {
-        final_value = expr_value;
-      }
-      
-      // 只是将要修改的字段的新值给复制过去 --> null对应的这段内存无用，全部置为0
-      if(!final_value.is_null()) {
-        rc = new_record.set_field(field_meta->offset(), field_meta->len(), (char *)final_value.data());
 
-        // 原本的数据是null --> 修改信息
-        // field_id() 返回的是用户字段索引，需要加上 sys_field_num() 转换为完整字段索引
-        int full_field_index = field_meta->field_id() + table_meta.sys_field_num();
-        if(old_record.is_null(full_field_index)) {
-          LOG_INFO("Update field %d's null value to be non-null value", field_meta->field_id());
-          new_record.set_bitmap(full_field_index, table_meta.fields_record_size(), false);
-          new_record.set_is_not_null(full_field_index);
+        // 检查非空约束
+        if(!table_meta.field_nullable(field_meta->field_id()) && expr_value.is_null()) {
+          LOG_INFO("Try to set not nullable field %s to be null, return failure", assign.attribute_name.c_str());
+          return RC::NOT_NULL;
         }
-      }
-      else {
-        LOG_INFO("Get null final_value, update field %d's is_null_ information", field_meta->field_id());
 
-        // 清空对应字段原本的值
-        vector<char> zero(field_meta->len(), 0);
-        rc = new_record.set_field(field_meta->offset(), field_meta->len(), zero.data());
+        // 准备更新为的值（类型转换）
+        Value final_value;
+        if (!expr_value.is_null() && expr_value.attr_type() != field_meta->type()) {
+          rc = Value::cast_to(expr_value, field_meta->type(), final_value);
+          if (rc != RC::SUCCESS) {
+            LOG_WARN("type mismatch and cannot cast. field=%s.%s, rc=%s", table->name(), assign.attribute_name.c_str(), strrc(rc));
+            return rc;
+          }
+        } else {
+          final_value = expr_value;
+        }
+        
+        // 只是将要修改的字段的新值给复制过去 --> null对应的这段内存无用，全部置为0
+        if(!final_value.is_null()) {
+          rc = new_record.set_field(field_meta->offset(), field_meta->len(), (char *)final_value.data());
+          if (rc != RC::SUCCESS) {
+            LOG_WARN("failed to set field %s. rc=%s", assign.attribute_name.c_str(), strrc(rc));
+            return rc;
+          }
 
-        // field_id() 返回的是用户字段索引，需要加上 sys_field_num() 转换为完整字段索引
-        int full_field_index = field_meta->field_id() + table_meta.sys_field_num();
-        new_record.set_bitmap(full_field_index, table_meta.fields_record_size(), true);
-        new_record.set_is_null(full_field_index);
-      }
-      if (rc != RC::SUCCESS) {
-        return rc;
+          // 原本的数据是null --> 修改信息
+          // field_id() 返回的是用户字段索引，需要加上 sys_field_num() 转换为完整字段索引
+          int full_field_index = field_meta->field_id() + table_meta.sys_field_num();
+          if(old_record.is_null(full_field_index)) {
+            LOG_INFO("Update field %s's null value to be non-null value", assign.attribute_name.c_str());
+            new_record.set_bitmap(full_field_index, table_meta.fields_record_size(), false);
+            new_record.set_is_not_null(full_field_index);
+          }
+        }
+        else {
+          LOG_INFO("Get null final_value, update field %s's is_null_ information", assign.attribute_name.c_str());
+
+          // 清空对应字段原本的值
+          vector<char> zero(field_meta->len(), 0);
+          rc = new_record.set_field(field_meta->offset(), field_meta->len(), zero.data());
+          if (rc != RC::SUCCESS) {
+            LOG_WARN("failed to set field %s to null. rc=%s", assign.attribute_name.c_str(), strrc(rc));
+            return rc;
+          }
+
+          // field_id() 返回的是用户字段索引，需要加上 sys_field_num() 转换为完整字段索引
+          int full_field_index = field_meta->field_id() + table_meta.sys_field_num();
+          new_record.set_bitmap(full_field_index, table_meta.fields_record_size(), true);
+          new_record.set_is_null(full_field_index);
+        }
       }
 
       new_record.set_rid(old_record.rid());

@@ -70,6 +70,20 @@ public:
   const IndexMeta &index_meta() const { return index_meta_; }
 
   /**
+   * @brief 刷新字段元数据指针（在 TableMeta swap 后使用）
+   * @param fields_meta 新的字段元数据指针列表
+   */
+  RC refresh_fields_meta(const vector<const FieldMeta *> &fields_meta)
+  {
+    if (fields_meta.empty()) {
+      return RC::INVALID_ARGUMENT;
+    }
+    fields_meta_ = fields_meta;
+    field_meta_ = *fields_meta[0];  // 向后兼容：第一个字段
+    return RC::SUCCESS;
+  }
+
+  /**
    * @brief 插入一条数据
    *
    * @param record 插入的记录，当前假设记录是定长的
