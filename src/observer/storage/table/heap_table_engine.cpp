@@ -157,7 +157,11 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
     Record record;
     while (OB_SUCC(rc = check_scanner->next(record))) {
       // 检查字段是否为 NULL，如果是 NULL，则跳过唯一性检查（SQL 标准允许多个 NULL）
-      bool is_field_null = record.is_null(field_meta->field_id());
+      // field_id() 返回的是用户字段索引，需要加上 sys_field_num() 的偏移
+      // 从持久化的 bitmap 中读取 NULL 信息
+      int bitmap_index = field_meta->field_id() + table_meta_->sys_field_num();
+      bool *bitmap = reinterpret_cast<bool *>(const_cast<char *>(record.data()) + table_meta_->fields_record_size());
+      bool is_field_null = (bitmap_index >= 0 && bitmap_index < table_meta_->field_num()) ? bitmap[bitmap_index] : false;
       
       if (!is_field_null) {
         const char *key = record.data() + field_meta->offset();
@@ -278,36 +282,43 @@ RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid, 
   LOG_TRACE("HeapTableEngine::insert_entry_of_indexes() is called");
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
+    const FieldMeta *field_meta = table_meta_->field(index->index_meta().field());
+    if (field_meta == nullptr) {
+      continue;
+    }
+    
+    // 检查字段是否为 NULL
+    // 注意：field_id() 返回的是用户字段索引（从 0 开始，不包括系统字段）
+    // 而 bitmap 的大小是 field_num()（包括系统字段），所以需要加上 sys_field_num() 的偏移
+    bool is_field_null = false;
+    int field_id = field_meta->field_id();
+    int bitmap_index = field_id + table_meta_->sys_field_num();  // 转换为完整字段索引
+    
+    // 从持久化的 bitmap 中读取 NULL 信息（因为 set_data_owner 会销毁 is_null_ 向量）
+    bool *bitmap = reinterpret_cast<bool *>(const_cast<char *>(record) + table_meta_->fields_record_size());
+    is_field_null = (bitmap_index >= 0 && bitmap_index < table_meta_->field_num()) ? bitmap[bitmap_index] : false;
+    
+    // 如果字段值为 NULL，跳过索引插入（SQL 标准：唯一索引允许多个 NULL，且 NULL 值不存储在索引中）
+    if (is_field_null) {
+      LOG_TRACE("Field %s is NULL, skipping index insertion for index %s", 
+                field_meta->name(), index->index_meta().name());
+      continue;
+    }
+    
     // 如果是唯一索引，先检查是否已存在相同的键值
     if (index->index_meta().is_unique()) {
-      const FieldMeta *field_meta = table_meta_->field(index->index_meta().field());
-      if (field_meta != nullptr) {
-        // 检查字段是否为 NULL，如果是 NULL，则跳过唯一性检查（SQL 标准允许多个 NULL）
-        bool is_field_null = false;
-        if (record_obj != nullptr) {
-          is_field_null = record_obj->is_null(field_meta->field_id());
-        } else {
-          // 如果没有 Record 对象，从 bitmap 中读取 NULL 信息
-          bool *bitmap = reinterpret_cast<bool *>(const_cast<char *>(record) + table_meta_->fields_record_size());
-          is_field_null = bitmap[field_meta->field_id()];
-        }
-        
-        // 如果字段值为 NULL，跳过唯一性检查（允许多个 NULL）
-        if (!is_field_null) {
-          const char *key = record + field_meta->offset();
-          list<RID> existing_rids;
-          rc = index->get_entry(key, field_meta->len(), existing_rids);
-          if (rc == RC::SUCCESS && !existing_rids.empty()) {
-            // 已存在相同的键值，违反唯一性约束
-            LOG_WARN("duplicate key value violates unique constraint. table=%s, index=%s", 
-                     table_meta_->name(), index->index_meta().name());
-            return RC::RECORD_DUPLICATE_KEY;
-          }
-        }
+      const char *key = record + field_meta->offset();
+      list<RID> existing_rids;
+      rc = index->get_entry(key, field_meta->len(), existing_rids);
+      if (rc == RC::SUCCESS && !existing_rids.empty()) {
+        // 已存在相同的键值，违反唯一性约束
+        LOG_WARN("duplicate key value violates unique constraint. table=%s, index=%s", 
+                 table_meta_->name(), index->index_meta().name());
+        return RC::RECORD_DUPLICATE_KEY;
       }
     }
     
-    // BplusTreeIndex::insert_entry --> index_handler_.insert_entry --> 与null无关了
+    // 插入索引条目（非 NULL 值）
     rc = index->insert_entry(record, &rid);
     if (rc != RC::SUCCESS) {
       break;
@@ -320,6 +331,23 @@ RC HeapTableEngine::delete_entry_of_indexes(const char *record, const RID &rid, 
 {
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
+    const FieldMeta *field_meta = table_meta_->field(index->index_meta().field());
+    if (field_meta == nullptr) {
+      continue;
+    }
+    
+    // 检查字段是否为 NULL，如果是 NULL，跳过索引删除（因为 NULL 值本来就没有插入到索引中）
+    // field_id() 返回的是用户字段索引，需要加上 sys_field_num() 的偏移
+    bool *bitmap = reinterpret_cast<bool *>(const_cast<char *>(record) + table_meta_->fields_record_size());
+    int bitmap_index = field_meta->field_id() + table_meta_->sys_field_num();
+    bool is_field_null = (bitmap_index >= 0 && bitmap_index < table_meta_->field_num()) ? bitmap[bitmap_index] : false;
+    
+    if (is_field_null) {
+      LOG_TRACE("Field %s is NULL, skipping index deletion for index %s", 
+                field_meta->name(), index->index_meta().name());
+      continue;
+    }
+    
     rc = index->delete_entry(record, &rid);
     if (rc != RC::SUCCESS) {
       if (rc != RC::RECORD_INVALID_KEY || !error_on_not_exists) {
@@ -432,20 +460,64 @@ RC HeapTableEngine::update_record_with_trx(const Record &old_record, const Recor
   
   // 1. 更新索引：先删除旧记录，再插入新记录
   for (Index *index : indexes_) {
-    rc = index->delete_entry(old_record.data(), &old_record.rid());
-    if (rc != RC::SUCCESS) {
-      LOG_WARN("failed to delete entry from index. table=%s, index=%s, rid=%s, rc=%s",
-               table_meta_->name(), index->index_meta().name(), 
-               old_record.rid().to_string().c_str(), strrc(rc));
-      return rc;
+    const FieldMeta *field_meta = table_meta_->field(index->index_meta().field());
+    if (field_meta == nullptr) {
+      continue;
     }
     
-    rc = index->insert_entry(new_record.data(), &new_record.rid());
-    if (rc != RC::SUCCESS) {
-      LOG_WARN("failed to insert entry to index. table=%s, index=%s, rid=%s, rc=%s",
-               table_meta_->name(), index->index_meta().name(), 
-               new_record.rid().to_string().c_str(), strrc(rc));
-      return rc;
+    // 检查旧值是否为 NULL
+    // field_id() 返回的是用户字段索引，需要加上 sys_field_num() 的偏移
+    // 从持久化的 bitmap 中读取 NULL 信息
+    int bitmap_index = field_meta->field_id() + table_meta_->sys_field_num();
+    bool *old_bitmap = reinterpret_cast<bool *>(const_cast<char *>(old_record.data()) + table_meta_->fields_record_size());
+    bool old_is_null = (bitmap_index >= 0 && bitmap_index < table_meta_->field_num()) ? old_bitmap[bitmap_index] : false;
+    // 检查新值是否为 NULL
+    bool *new_bitmap = reinterpret_cast<bool *>(const_cast<char *>(new_record.data()) + table_meta_->fields_record_size());
+    bool new_is_null = (bitmap_index >= 0 && bitmap_index < table_meta_->field_num()) ? new_bitmap[bitmap_index] : false;
+    
+    // 如果旧值不是 NULL，需要从索引中删除
+    if (!old_is_null) {
+      rc = index->delete_entry(old_record.data(), &old_record.rid());
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to delete entry from index. table=%s, index=%s, rid=%s, rc=%s",
+                 table_meta_->name(), index->index_meta().name(), 
+                 old_record.rid().to_string().c_str(), strrc(rc));
+        return rc;
+      }
+    }
+    
+    // 如果新值不是 NULL，需要插入到索引中
+    if (!new_is_null) {
+      // 如果是唯一索引，先检查是否已存在相同的键值
+      if (index->index_meta().is_unique()) {
+        const char *key = new_record.data() + field_meta->offset();
+        list<RID> existing_rids;
+        rc = index->get_entry(key, field_meta->len(), existing_rids);
+        if (rc == RC::SUCCESS && !existing_rids.empty()) {
+          // 检查是否是自己（如果只是更新了其他字段，但索引字段值没变）
+          bool is_self = false;
+          for (const RID &existing_rid : existing_rids) {
+            if (existing_rid == new_record.rid()) {
+              is_self = true;
+              break;
+            }
+          }
+          if (!is_self) {
+            // 已存在相同的键值，违反唯一性约束
+            LOG_WARN("duplicate key value violates unique constraint. table=%s, index=%s", 
+                     table_meta_->name(), index->index_meta().name());
+            return RC::RECORD_DUPLICATE_KEY;
+          }
+        }
+      }
+      
+      rc = index->insert_entry(new_record.data(), &new_record.rid());
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to insert entry to index. table=%s, index=%s, rid=%s, rc=%s",
+                 table_meta_->name(), index->index_meta().name(), 
+                 new_record.rid().to_string().c_str(), strrc(rc));
+        return rc;
+      }
     }
   }
   
