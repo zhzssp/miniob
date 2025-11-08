@@ -97,13 +97,9 @@ RC PlainCommunicator::write_state(SessionEvent *event, bool &need_disconnect)
   SqlResult    *sql_result   = event->sql_result();
   const int     buf_size     = 2048;
   char         *buf          = new char[buf_size];
-  const string &state_string = sql_result->state_string();
-  if (state_string.empty()) {
-    const char *result = RC::SUCCESS == sql_result->return_code() ? "SUCCESS" : "FAILURE";
-    snprintf(buf, buf_size, "%s\n", result);
-  } else {
-    snprintf(buf, buf_size, "%s > %s\n", strrc(sql_result->return_code()), state_string.c_str());
-  }
+  // 根据输出规范，无论什么错误，都应该只返回 "FAILURE"
+  const char *result = RC::SUCCESS == sql_result->return_code() ? "SUCCESS" : "FAILURE";
+  snprintf(buf, buf_size, "%s\n", result);
 
   RC rc = writer_->writen(buf, strlen(buf));
   if (OB_FAIL(rc)) {
@@ -244,8 +240,11 @@ RC PlainCommunicator::write_result_internal(SessionEvent *event, bool &need_disc
     rc = write_tuple_result(sql_result);
   }
 
-  if (OB_FAIL(rc)) {
-    return rc;
+  // 如果执行过程中出现错误（如 SUBQUERY_MULTIPLE_ROWS），需要设置 return_code 并显示错误
+  if (OB_FAIL(rc) && rc != RC::RECORD_EOF) {
+    sql_result->close();
+    sql_result->set_return_code(rc);
+    return write_state(event, need_disconnect);
   }
 
   if (cell_num == 0) {
