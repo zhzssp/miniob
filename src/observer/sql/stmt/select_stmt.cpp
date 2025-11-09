@@ -83,6 +83,31 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
   vector<Table *>                tables;
   unordered_map<string, Table *> table_map;
   
+  // 首先将 loaded_relation_names 中的表名添加到 table_map 中
+  // 同时将外层查询的别名也添加到 table_map，以便子查询可以通过别名访问外层表
+  for (auto &rel_name : *loaded_relation_names) {
+    if (table_map.find(rel_name) != table_map.end()) {
+      continue;
+    }
+    Table *table = db->find_table(rel_name.c_str());
+    if (nullptr == table) {
+      LOG_WARN("no such table. db=%s, table_name=%s", db->name(), rel_name.c_str());
+      return RC::SCHEMA_TABLE_NOT_EXIST;
+    }
+    table_map.insert({rel_name, table});
+    binder_context.add_table(table);
+    
+    // 查找该表对应的别名，并将别名也添加到 table_map
+    if (alias2name) {
+      for (const auto &pair : *alias2name) {
+        if (pair.second == rel_name) {
+          table_map.insert({pair.first, table});
+          binder_context.add_table_alias(pair.first.c_str(), table);
+        }
+      }
+    }
+  }
+  
   // 
   // 构建本层别名映射（不继承外层，允许子查询遮蔽外层同名别名）
   unordered_map<string, string> table_alias_map;  // 别名 -> 表名映射（仅当前层）
@@ -125,6 +150,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
     tables.push_back(table);
     table_map.insert({table_name, table});
     visible_tables.insert(table_name);
+    loaded_relation_names->push_back(table_name);
   }
 
   // 先不基于 ALIASES 直接注册别名，稍后统一基于可见表过滤
@@ -168,10 +194,10 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
     tables.push_back(table);
     table_map.insert({table_name, table});
     visible_tables.insert(table_name);
-    // 处理 JOIN 条件（此处略）
+    loaded_relation_names->push_back(table_name);
   }
   
-  // 关键修复：确保 visible_tables 只包含当前层的表（用于别名重复检查）
+  // 确保 visible_tables 只包含当前层的表（用于别名重复检查）
   // 但保留外层表在 table_map 中（用于相关子查询的字段绑定）
   // 如果解析器错误地把外层的表也放在了 table_references 中，我们需要基于 relations 来过滤 visible_tables
   // 因为 relations 通常只包含当前层的表（从 FROM 子句解析而来）
@@ -281,13 +307,20 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
     // 不添加 table_references 中的表，因为可能包含外层表
   }
 
-  // 注册别名到本层上下文
+  // 注册别名到本层上下文，并更新 name2alias 和 alias2name 以便传递给子查询
   for (const auto &kv : table_alias_map) { 
     auto it = table_map.find(kv.second);
     if (it == table_map.end()) continue;
     Table *tbl = it->second;
     table_map.emplace(kv.first, tbl);
     binder_context.add_table_alias(kv.first.c_str(), tbl);
+    // 更新 name2alias 和 alias2name，以便子查询可以访问外层查询的别名
+    if (name2alias) {
+      name2alias->insert({kv.second, kv.first});
+    }
+    if (alias2name) {
+      alias2name->insert({kv.first, kv.second});
+    }
   }
 
   // collect query fields in `select` statement

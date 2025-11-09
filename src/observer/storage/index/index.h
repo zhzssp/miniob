@@ -45,6 +45,11 @@ public:
     return RC::UNSUPPORTED;
   }
 
+  virtual RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const vector<const FieldMeta *> &fields_meta)
+  {
+    return RC::UNSUPPORTED;
+  }
+
   virtual RC clear()
   {
     return RC::UNSUPPORTED;
@@ -55,9 +60,28 @@ public:
     return RC::UNSUPPORTED;
   }
 
+  virtual RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const vector<const FieldMeta *> &fields_meta)
+  {
+    return RC::UNSUPPORTED;
+  }
+
   virtual bool is_vector_index() { return false; }
 
   const IndexMeta &index_meta() const { return index_meta_; }
+
+  /**
+   * @brief 刷新字段元数据指针（在 TableMeta swap 后使用）
+   * @param fields_meta 新的字段元数据指针列表
+   */
+  RC refresh_fields_meta(const vector<const FieldMeta *> &fields_meta)
+  {
+    if (fields_meta.empty()) {
+      return RC::INVALID_ARGUMENT;
+    }
+    fields_meta_ = fields_meta;
+    field_meta_ = *fields_meta[0];  // 向后兼容：第一个字段
+    return RC::SUCCESS;
+  }
 
   /**
    * @brief 插入一条数据
@@ -74,6 +98,18 @@ public:
    * @param[in] rid   删除的记录的位置
    */
   virtual RC delete_entry(const char *record, const RID *rid) = 0;
+
+  /**
+   * @brief 获取指定键值对应的所有RID
+   *
+   * @param user_key 键值
+   * @param key_len 键值长度
+   * @param rids 输出的RID列表
+   */
+  virtual RC get_entry(const char *user_key, int key_len, list<RID> &rids)
+  {
+    return RC::UNSUPPORTED;
+  }
 
   /**
    * @brief 创建一个索引数据的扫描器
@@ -96,10 +132,12 @@ public:
 
 protected:
   RC init(const IndexMeta &index_meta, const FieldMeta &field_meta);
+  RC init(const IndexMeta &index_meta, const vector<const FieldMeta *> &fields_meta);
 
 protected:
   IndexMeta index_meta_;  ///< 索引的元数据
-  FieldMeta field_meta_;  ///< 当前实现仅考虑一个字段的索引
+  FieldMeta field_meta_;  ///< 当前实现仅考虑一个字段的索引（向后兼容）
+  vector<const FieldMeta *> fields_meta_;  ///< 支持复合索引的多个字段
 };
 
 /**

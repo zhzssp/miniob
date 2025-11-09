@@ -132,6 +132,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         NULL_T
         NOT
         IS
+        UNIQUE
 
 /** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
 %union {
@@ -152,6 +153,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   vector<string> *                           relation_list;
   vector<string> *                           key_list;
   vector<JoinConditionSqlNode> *             join_condition_list;
+  vector<UpdateAssignment> *                 assignment_list;
   char *                                     cstring;
   int                                        number;  // 进一步用于null的表示
   float                                      floats;
@@ -168,6 +170,12 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 // %destructor { delete $$; } <rel_attr_list>
 %destructor { delete $$; } <relation_list>
 %destructor { delete $$; } <key_list>
+%destructor { 
+  if ($$ != nullptr) {
+    // UpdateAssignment 中的 unique_ptr<Expression> 会被自动管理，只需要删除 vector
+    delete $$;
+  }
+} <assignment_list>
 
 %token <number> NUMBER
 %token <floats> FLOAT
@@ -191,6 +199,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <cstring>             storage_format
 %type <key_list>            primary_key
 %type <key_list>            attr_list
+%type <assignment_list>      assignment_list
 %type <relation_list>       rel_list
 %type <relation_sql_node>   relation
 %type <expression>          expression
@@ -340,7 +349,39 @@ create_index_stmt:    /*create index 语句的语法解析树*/
       CreateIndexSqlNode &create_index = $$->create_index;
       create_index.index_name = $3;
       create_index.relation_name = $5;
-      create_index.attribute_name = $7;
+      create_index.attribute_names.clear();
+      create_index.attribute_names.push_back($7);
+      create_index.is_unique = false;
+    }
+    | CREATE UNIQUE INDEX ID ON ID LBRACE ID RBRACE
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
+      CreateIndexSqlNode &create_index = $$->create_index;
+      create_index.index_name = $4;
+      create_index.relation_name = $6;
+      create_index.attribute_names.clear();
+      create_index.attribute_names.push_back($8);
+      create_index.is_unique = true;
+    }
+    | CREATE INDEX ID ON ID LBRACE attr_list RBRACE
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
+      CreateIndexSqlNode &create_index = $$->create_index;
+      create_index.index_name = $3;
+      create_index.relation_name = $5;
+      create_index.attribute_names.swap(*$7);
+      delete $7;
+      create_index.is_unique = false;
+    }
+    | CREATE UNIQUE INDEX ID ON ID LBRACE attr_list RBRACE
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
+      CreateIndexSqlNode &create_index = $$->create_index;
+      create_index.index_name = $4;
+      create_index.relation_name = $6;
+      create_index.attribute_names.swap(*$8);
+      delete $8;
+      create_index.is_unique = true;
     }
     ;
 
@@ -532,16 +573,43 @@ delete_stmt:    /*  delete 语句的语法解析树*/
       }
     }
     ;
+assignment_list:
+    ID EQ expression {
+      $$ = new vector<UpdateAssignment>();
+      UpdateAssignment assign;
+      assign.attribute_name = $1;
+      assign.value_expr = unique_ptr<Expression>($3);
+      $$->push_back(std::move(assign));
+    }
+    | ID EQ expression COMMA assignment_list {
+      if ($5 != nullptr) {
+        $$ = $5;
+      } else {
+        $$ = new vector<UpdateAssignment>();
+      }
+      UpdateAssignment assign;
+      assign.attribute_name = $1;
+      assign.value_expr = unique_ptr<Expression>($3);
+      $$->insert($$->begin(), std::move(assign));
+    }
+    ;
+
 update_stmt:      /*  update 语句的语法解析树*/
-    UPDATE ID SET ID EQ value where 
+    UPDATE ID SET assignment_list where 
     {
       $$ = new ParsedSqlNode(SCF_UPDATE);
       $$->update.relation_name = $2;
-      $$->update.attribute_name = $4;
-      $$->update.value = *$6;
-      if ($7 != nullptr) {
-        $$->update.conditions.swap(*$7);
-        delete $7;
+      if ($4 != nullptr && !$4->empty()) {
+        // 填充 assignments
+        $$->update.assignments.swap(*$4);
+        // 向后兼容：设置第一个字段和表达式
+        $$->update.attribute_name = $$->update.assignments[0].attribute_name;
+        $$->update.value_expr = unique_ptr<Expression>($$->update.assignments[0].value_expr->copy().release());
+        delete $4;
+      }
+      if ($5 != nullptr) {
+        $$->update.conditions.swap(*$5);
+        delete $5;
       }
     }
     ;
@@ -569,21 +637,38 @@ subquery_stmt:
         delete $6;
       }
       
-      // 处理 JOIN 条件
-      if (!g_table_references.empty()) {
-        $$->selection.table_references = g_table_references;
+      // 只使用子查询自己的表引用（从 rel_list 解析时添加到 g_table_references 的表）
+      // 计算子查询自己的表引用数量（基于 relations 的数量）
+      size_t subquery_table_count = $$->selection.relations.size();
+      
+      // 从 g_table_references 的末尾提取子查询自己的表引用
+      if (subquery_table_count > 0 && g_table_references.size() >= subquery_table_count) {
+        // 提取最后 subquery_table_count 个表引用（这些是子查询自己的表）
+        vector<TableReferenceSqlNode> subquery_table_refs;
+        subquery_table_refs.insert(
+          subquery_table_refs.end(),
+          g_table_references.end() - subquery_table_count,
+          g_table_references.end()
+        );
+        $$->selection.table_references = subquery_table_refs;
+        
         // 同时填充 ALIASES 字段
-        for (const auto &ref : g_table_references) {
+        for (const auto &ref : subquery_table_refs) {
           RelationSqlNode alias_node;
           alias_node.name = ref.table_name;
           alias_node.alias = ref.alias;
           $$->selection.ALIASES.push_back(alias_node);
         }
+        
+        // 从 g_table_references 中移除子查询的表引用，恢复外层查询的状态
+        g_table_references.erase(
+          g_table_references.end() - subquery_table_count,
+          g_table_references.end()
+        );
       }
       
-      // 清空 JOIN 条件相关的全局变量
+      // 清空 JOIN 条件相关的全局变量（只清空 join_conditions，table_references 已恢复）
       g_join_conditions.clear();
-      g_table_references.clear();
     }
     ;
 
@@ -617,18 +702,71 @@ select_stmt:        /*  select 语句的语法解析树*/
         delete $7;
       }
       
-      // 处理 JOIN 条件
-      if (!g_table_references.empty()) {
-        $$->selection.table_references = g_table_references;
+      // 注意：由于 yacc 是递归下降解析，当执行到这里时：
+      // 1. rel_list 已经解析完成，把当前查询的表添加到 g_table_references
+      // 2. where 子句也已经解析完成，如果包含子查询，子查询的表引用已经被添加到 g_table_references 然后又被移除
+      // 所以，g_table_references 现在应该只包含当前查询的表引用
+      // 但是，为了安全起见，我们只使用 relations 中的表来构建 table_references
+      // 因为 relations 是直接从 FROM 子句解析而来的，不会被子查询污染
+      
+      // 基于 relations 构建 table_references 和 ALIASES
+      // 这样可以避免 g_table_references 被子查询污染的问题
+      if (!$$->selection.relations.empty()) {
+        // 从 g_table_references 中查找与 relations 匹配的表引用
+        // 注意：我们需要从 g_table_references 的末尾向前查找，因为当前查询的表应该在末尾
+        size_t current_query_table_count = $$->selection.relations.size();
+        size_t start_pos = (g_table_references.size() >= current_query_table_count) 
+                          ? (g_table_references.size() - current_query_table_count) 
+                          : 0;
+        
+        // 构建一个 relations 的集合，用于快速查找
+        unordered_set<string> relations_set($$->selection.relations.begin(), $$->selection.relations.end());
+        
+        // 从 g_table_references 的末尾向前查找匹配的表引用
+        vector<TableReferenceSqlNode> current_query_table_refs;
+        for (size_t i = g_table_references.size(); i > start_pos && current_query_table_refs.size() < current_query_table_count; ) {
+          --i;
+          const auto &ref = g_table_references[i];
+          if (relations_set.count(ref.table_name)) {
+            current_query_table_refs.insert(current_query_table_refs.begin(), ref);
+          }
+        }
+        
+        // 如果从 g_table_references 中找到的表引用数量不够，说明可能被污染了
+        // 这种情况下，我们直接基于 relations 构建 table_references（不包含别名信息）
+        if (current_query_table_refs.size() < current_query_table_count) {
+          // 清空并重新构建
+          current_query_table_refs.clear();
+          for (const auto &rel_name : $$->selection.relations) {
+            TableReferenceSqlNode ref;
+            ref.table_name = rel_name;
+            ref.alias = "";  // 别名信息可能丢失，但至少表名是正确的
+            current_query_table_refs.push_back(ref);
+          }
+        }
+        
+        $$->selection.table_references = current_query_table_refs;
+        
         // 同时填充 ALIASES 字段
-        for (const auto& table_ref : g_table_references) {
+        for (const auto& table_ref : current_query_table_refs) {
           RelationSqlNode alias_node;
           alias_node.name = table_ref.table_name;
           alias_node.alias = table_ref.alias;
           $$->selection.ALIASES.push_back(alias_node);
         }
-        // 不要在这里清空 g_table_references，让它在 sql_list 中统一清理
+        
+        // 从 g_table_references 中移除当前查询的表引用，恢复外层查询的状态
+        // 注意：我们需要移除与 relations 匹配的表引用，而不是简单地移除末尾的表引用
+        // 因为 g_table_references 可能已经被子查询污染
+        for (auto it = g_table_references.begin(); it != g_table_references.end(); ) {
+          if (relations_set.count(it->table_name)) {
+            it = g_table_references.erase(it);
+          } else {
+            ++it;
+          }
+        }
       }
+      // 如果 relations 为空，说明可能是子查询或其他情况，不清空 g_table_references
     }
     ;
 calc_stmt:
@@ -1025,6 +1163,28 @@ condition:
       $$->right_expr = $3;
       $$->comp = $2;
     }
+    | rel_attr comp_op LBRACE subquery_stmt RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 1;
+      $$->left_attr = *$1;
+      $$->right_is_attr = 0;
+      $$->right_expr = new SubqueryExpr($4);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = $2;
+      delete $1;
+    }
+    | LBRACE subquery_stmt RBRACE comp_op rel_attr
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 0;
+      $$->left_expr = new SubqueryExpr($2);
+      $$->left_expr->set_name(token_name(sql_string, &@$));
+      $$->right_is_attr = 1;
+      $$->right_attr = *$5;
+      $$->comp = $4;
+      delete $5;
+    }
     | rel_attr IN LBRACE subquery_stmt RBRACE
     {
       $$ = new ConditionSqlNode;
@@ -1064,6 +1224,48 @@ condition:
       $$->left_expr = $1;
       $$->right_is_attr = 0;
       $$->right_expr =new SubqueryExpr($5);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = NOT_IN_OP;
+    }
+    | rel_attr IN LBRACE value_list RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 1;
+      $$->left_attr = *$1;
+      $$->right_is_attr = 0;
+      $$->right_expr = new ValueListExpr($4);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = IN_OP;
+      delete $1;
+    }
+    | rel_attr NOT IN LBRACE value_list RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 1;
+      $$->left_attr = *$1;
+      $$->right_is_attr = 0;
+      $$->right_expr = new ValueListExpr($5);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = NOT_IN_OP;
+      delete $1;
+    }
+    | expression IN LBRACE value_list RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 0;
+      $$->left_expr = $1;
+      $$->right_is_attr = 0;
+      $$->right_expr = new ValueListExpr($4);
+      $$->right_expr->set_name(token_name(sql_string, &@$));
+      $$->comp = IN_OP;
+    }
+    | expression NOT IN LBRACE value_list RBRACE
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 0;
+      $$->left_expr = $1;
+      $$->right_is_attr = 0;
+      $$->right_expr = new ValueListExpr($5);
       $$->right_expr->set_name(token_name(sql_string, &@$));
       $$->comp = NOT_IN_OP;
     }

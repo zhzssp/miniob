@@ -18,6 +18,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/expr/tuple.h"
 #include "common/value.h"
 #include "common/sys/rc.h"
+#include "common/log/log.h"
 
 template <typename ExprPointerType>
 class ExpressionTuple : public Tuple
@@ -34,6 +35,11 @@ public:
   {
     if (index < 0 || index >= cell_num()) {
       return RC::INVALID_ARGUMENT;
+    }
+
+    if (child_tuple_ == nullptr) {
+      LOG_WARN("ExpressionTuple::cell_at: child_tuple_ is nullptr, cannot evaluate expression");
+      return RC::INTERNAL;
     }
 
     const ExprPointerType &expression = expressions_[index];
@@ -78,8 +84,21 @@ private:
     RC rc = RC::SUCCESS;
     if (child_tuple_ != nullptr) {
       rc = expression->get_value(*child_tuple_, value);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("ExpressionTuple::get_value: expression->get_value failed. rc=%s, expr_type=%d, child_tuple_=%p", 
+                 strrc(rc), (int)expression->type(), child_tuple_);
+      }
     } else {
+      // 如果 child_tuple_ 为 nullptr，尝试使用 try_get_value
+      // 但对于 FieldExpr 等需要 tuple 的表达式，这可能会失败
       rc = expression->try_get_value(value);
+      if (rc != RC::SUCCESS) {
+        // 如果 try_get_value 失败，返回更明确的错误
+        // 这通常意味着表达式需要 tuple 但 child_tuple_ 未设置
+        LOG_WARN("ExpressionTuple::get_value: child_tuple_ is nullptr and try_get_value failed. rc=%s, expr_type=%d", 
+                 strrc(rc), (int)expression->type());
+        return RC::INTERNAL;
+      }
     }
     return rc;
   }

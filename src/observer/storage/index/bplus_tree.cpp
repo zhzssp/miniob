@@ -2053,7 +2053,22 @@ RC BplusTreeScanner::fix_user_key(
 
   // 这里很粗暴，变长字段才需要做调整，其它默认都不需要做调整
   assert(tree_handler_.file_header_.attr_type == AttrType::CHARS);
-  assert(strlen(user_key) >= static_cast<size_t>(key_len));
+  // 对于固定长度的键（key_len == attr_length），可能是二进制数据（如复合索引或整数索引），跳过 strlen 检查
+  // 对于变长字符串，需要检查 strlen，但只有当键中不包含 null 字节时才使用 strlen（说明是真正的字符串）
+  if (key_len < tree_handler_.file_header_.attr_length) {
+    // 检查键中是否包含 null 字节，如果包含，说明是二进制数据（如整数），不应该使用 strlen
+    bool contains_null = false;
+    for (int i = 0; i < key_len; i++) {
+      if (user_key[i] == '\0') {
+        contains_null = true;
+        break;
+      }
+    }
+    // 只有当键中不包含 null 字节时，才使用 strlen 检查（说明是真正的字符串）
+    if (!contains_null) {
+      assert(strlen(user_key) >= static_cast<size_t>(key_len));
+    }
+  }
 
   *should_inclusive = false;
 

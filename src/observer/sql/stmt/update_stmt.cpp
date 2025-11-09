@@ -13,7 +13,9 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "sql/stmt/update_stmt.h"
-
+#include "sql/expr/subquery_expr.h"
+#include "sql/parser/expression_binder.h"
+#include "sql/stmt/select_stmt.h"
 
 RC UpdateStmt::create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt)
 {
@@ -29,33 +31,106 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt)
     return RC::SCHEMA_TABLE_NOT_EXIST;
   }
 
-  // 检查字段是否存在
   const TableMeta &table_meta = table->table_meta();
-  const FieldMeta *field_meta = table_meta.field(update_sql.attribute_name.c_str());
-  if (nullptr == field_meta) {
-    LOG_WARN("no such field. field=%s.%s.%s", db->name(), table->name(), update_sql.attribute_name.c_str());
-    return RC::SCHEMA_FIELD_NOT_EXIST;
-  }
+  vector<UpdateFieldAssignment> assignments;
 
-  // 检查值类型是否兼容，如果不兼容则尝试转换
-  const AttrType field_type = field_meta->type();
-  const AttrType value_type = update_sql.value.attr_type();
-  
-  Value final_value = update_sql.value;
-  // null值不进行类型转换
-  if(!final_value.is_null()) {
-    LOG_INFO("Get value used to set is not null");
-    if (field_type != value_type) {
-      // 尝试类型转换
-      RC cast_rc = Value::cast_to(update_sql.value, field_type, final_value);
-      if (cast_rc != RC::SUCCESS) {
-        LOG_WARN("type mismatch and cannot cast. field=%s.%s.%s, field_type=%d, value_type=%d",
-                db->name(), table->name(), update_sql.attribute_name.c_str(), field_type, value_type);
-        return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+  // 如果使用新的 assignments 列表
+  if (!update_sql.assignments.empty()) {
+    for (const auto &assign : update_sql.assignments) {
+      // 检查字段是否存在
+      const FieldMeta *field_meta = table_meta.field(assign.attribute_name.c_str());
+      if (nullptr == field_meta) {
+        LOG_WARN("no such field. field=%s.%s.%s", db->name(), table->name(), assign.attribute_name.c_str());
+        return RC::SCHEMA_FIELD_NOT_EXIST;
       }
+
+      // 复制表达式
+      if (assign.value_expr == nullptr) {
+        LOG_WARN("update value expression is null for field %s", assign.attribute_name.c_str());
+        return RC::INVALID_ARGUMENT;
+      }
+      unique_ptr<Expression> value_expr = assign.value_expr->copy();
+
+      // 处理子查询表达式
+      if (value_expr->type() == ExprType::SUB_QUERY) {
+        SubqueryExpr *subquery_expr = static_cast<SubqueryExpr *>(value_expr.get());
+        
+        // 创建子查询的 Stmt
+        Stmt *sub_stmt = nullptr;
+        RC rc = SelectStmt::create(
+          db,
+          subquery_expr->sub_query_sn()->selection,
+          sub_stmt,
+          nullptr,  // name2alias
+          nullptr,  // alias2name
+          nullptr,    // loaded_relation_names (UPDATE 语句中，子查询不能访问外层表)
+          nullptr     // field_alias2name
+        );
+        if (rc != RC::SUCCESS) {
+          LOG_WARN("cannot construct subquery stmt. rc=%s", strrc(rc));
+          return rc;
+        }
+
+        // 检查子查询的合法性：子查询的查询的属性只能有一个
+        RC rc_ = Stmt::check_sub_select_legal(db, subquery_expr->sub_query_sn());
+        if (rc_ != RC::SUCCESS) {
+          LOG_WARN("subquery is not legal. rc=%s", strrc(rc_));
+          delete sub_stmt;
+          return rc_;
+        }
+        
+        subquery_expr->set_stmt(unique_ptr<SelectStmt>(static_cast<SelectStmt *>(sub_stmt)));
+      }
+
+      UpdateFieldAssignment field_assign;
+      field_assign.attribute_name = assign.attribute_name;
+      field_assign.value_expr = std::move(value_expr);
+      assignments.push_back(std::move(field_assign));
     }
   } else {
-    LOG_INFO("Value used to set is null");
+    // 向后兼容：使用单个字段和表达式
+    const FieldMeta *field_meta = table_meta.field(update_sql.attribute_name.c_str());
+    if (nullptr == field_meta) {
+      LOG_WARN("no such field. field=%s.%s.%s", db->name(), table->name(), update_sql.attribute_name.c_str());
+      return RC::SCHEMA_FIELD_NOT_EXIST;
+    }
+
+    if (update_sql.value_expr == nullptr) {
+      LOG_WARN("update value expression is null");
+      return RC::INVALID_ARGUMENT;
+    }
+    unique_ptr<Expression> value_expr = update_sql.value_expr->copy();
+
+    // 处理子查询表达式
+    if (value_expr->type() == ExprType::SUB_QUERY) {
+      SubqueryExpr *subquery_expr = static_cast<SubqueryExpr *>(value_expr.get());
+      
+      Stmt *sub_stmt = nullptr;
+      RC rc = SelectStmt::create(
+        db,
+        subquery_expr->sub_query_sn()->selection,
+        sub_stmt,
+        nullptr, nullptr, nullptr, nullptr
+      );
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("cannot construct subquery stmt. rc=%s", strrc(rc));
+        return rc;
+      }
+
+      RC rc_ = Stmt::check_sub_select_legal(db, subquery_expr->sub_query_sn());
+      if (rc_ != RC::SUCCESS) {
+        LOG_WARN("subquery is not legal. rc=%s", strrc(rc_));
+        delete sub_stmt;
+        return rc_;
+      }
+      
+      subquery_expr->set_stmt(unique_ptr<SelectStmt>(static_cast<SelectStmt *>(sub_stmt)));
+    }
+
+    UpdateFieldAssignment field_assign;
+    field_assign.attribute_name = update_sql.attribute_name;
+    field_assign.value_expr = std::move(value_expr);
+    assignments.push_back(std::move(field_assign));
   }
 
   // 解析WHERE条件
@@ -73,7 +148,7 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt)
     }
   }
 
-  stmt = new UpdateStmt(table, update_sql.attribute_name.c_str(), new Value(final_value), filter_stmt);
+  stmt = new UpdateStmt(table, std::move(assignments), filter_stmt);
 
   return RC::SUCCESS;
 }
