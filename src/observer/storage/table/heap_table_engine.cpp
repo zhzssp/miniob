@@ -470,12 +470,18 @@ RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid, 
     const vector<string> &index_fields = index->index_meta().fields();
     
     // 检查所有索引字段是否都为 NULL（如果任何一个字段为 NULL，则跳过索引插入）
+    // 重要：必须确保 fields_meta 的长度与索引内部的 fields_meta_ 一致，否则键值长度不匹配
     bool has_null = false;
     vector<const FieldMeta *> fields_meta;
     for (const string &field_name : index_fields) {
       const FieldMeta *field_meta = table_meta_->field(field_name.c_str());
       if (field_meta == nullptr) {
-        continue;  // 字段不存在，跳过这个索引
+        // 字段不存在，这是不应该发生的，但为了健壮性，跳过这个索引
+        // 如果跳过字段，会导致 fields_meta 长度与 fields_meta_ 不一致，键值长度不匹配
+        LOG_WARN("Field %s not found in table %s for index %s, skipping index insertion", 
+                 field_name.c_str(), table_meta_->name(), index->index_meta().name());
+        fields_meta.clear();
+        break;
       }
       fields_meta.push_back(field_meta);
       int bitmap_index = field_meta->field_id() + table_meta_->sys_field_num();
@@ -486,15 +492,19 @@ RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid, 
       }
     }
     
-    if (has_null || fields_meta.empty()) {
+    // 必须确保 fields_meta 的长度与 index_fields 一致，否则键值长度与索引期望的 attr_length 不匹配
+    // 这会导致 fix_user_key 用 0 填充键值，造成键值不匹配，唯一性检查误判
+    if (has_null || fields_meta.empty() || fields_meta.size() != index_fields.size()) {
       LOG_TRACE("One or more fields are NULL or missing, skipping index insertion for index %s", 
                 index->index_meta().name());
       continue;
     }
     
     // 如果是唯一索引，先检查是否已存在相同的键值
+    // 注意：insert_entry 内部检查的是完整键（user_key + rid），无法检测唯一性约束违反
+    // 所以需要预先检查用户键值是否重复
     if (index->index_meta().is_unique()) {
-      // 构建复合键（使用字符数组而不是 string，因为键可能包含二进制数据）
+      // 构建复合键：使用 fields_meta 的顺序（已经按照 index_fields 的顺序构建）
       int total_key_length = 0;
       for (const FieldMeta *field_meta : fields_meta) {
         total_key_length += field_meta->len();
@@ -507,13 +517,17 @@ RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid, 
         offset += field_meta->len();
       }
       
+      // 调试：打印键值内容（仅用于调试）
+      LOG_DEBUG("Checking unique constraint. table=%s, index=%s, key_len=%d", 
+                table_meta_->name(), index->index_meta().name(), total_key_length);
+      
       list<RID> existing_rids;
       rc = index->get_entry(key_buffer, total_key_length, existing_rids);
       delete[] key_buffer;
       if (rc == RC::SUCCESS && !existing_rids.empty()) {
         // 已存在相同的键值，违反唯一性约束
-        LOG_WARN("duplicate key value violates unique constraint. table=%s, index=%s", 
-                 table_meta_->name(), index->index_meta().name());
+        LOG_WARN("duplicate key value violates unique constraint. table=%s, index=%s, existing_rids_count=%zu", 
+                 table_meta_->name(), index->index_meta().name(), existing_rids.size());
         return RC::RECORD_DUPLICATE_KEY;
       }
     }
