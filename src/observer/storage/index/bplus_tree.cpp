@@ -1980,6 +1980,7 @@ bool BplusTreeScanner::touch_end()
 
   const char *this_key       = node.key_at(iter_index_);
   int         compare_result = tree_handler_.key_comparator_(this_key, static_cast<char *>(right_key_.get()));
+  LOG_DEBUG("touch_end: compare_result=%d, iter_index_=%d", compare_result, iter_index_);
   return compare_result > 0;
 }
 
@@ -1990,6 +1991,32 @@ RC BplusTreeScanner::next_entry(RID &rid)
   }
 
   if (!first_emitted_) {
+    // 检查第一个条目是否真的在范围内（对于精确匹配，必须等于 user_key）
+    // 首先检查是否超过右边界
+    if (touch_end()) {
+      LOG_DEBUG("First entry exceeds right boundary, returning EOF");
+      return RC::RECORD_EOF;
+    }
+    
+    // 对于精确匹配，还需要检查用户键部分是否真的等于 user_key
+    // 如果 right_key_ 不为空，说明有右边界，需要检查用户键部分是否匹配
+    if (right_key_ != nullptr) {
+      LeafIndexNodeHandler node(mtr_, tree_handler_.file_header_, current_frame_);
+      const char *this_key = node.key_at(iter_index_);
+      // 比较用户键部分（不包括 RID）
+      const auto &attr_comparator = tree_handler_.key_comparator_.attr_comparator();
+      const char *right_user_key = static_cast<const char *>(right_key_.get());
+      int compare_result = attr_comparator(this_key, right_user_key);
+      LOG_DEBUG("Checking first entry user key match. compare_result=%d, iter_index_=%d", compare_result, iter_index_);
+      // 如果用户键部分不相等，说明不在范围内（对于精确匹配）
+      // 注意：compare_result > 0 表示 this_key > right_user_key，应该返回 EOF
+      // compare_result < 0 表示 this_key < right_user_key，但这种情况不应该发生（因为 lookup 找到的是 >= 的位置）
+      if (compare_result != 0) {
+        LOG_DEBUG("First entry user key does not match search key. compare_result=%d", compare_result);
+        return RC::RECORD_EOF;
+      }
+    }
+    
     fetch_item(rid);
     first_emitted_ = true;
     return RC::SUCCESS;
