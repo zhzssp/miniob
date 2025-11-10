@@ -89,10 +89,20 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
   // create filter statement in `where` statement
   FilterStmt *filter_stmt = nullptr;
-  RC          rc          = FilterStmt::create(db, default_table, &table_map, select_sql.conditions, filter_stmt);
+  RC rc = FilterStmt::create(db, default_table, &table_map, select_sql.conditions, filter_stmt);
   if (rc != RC::SUCCESS) {
     LOG_WARN("cannot construct filter stmt");
     return rc;
+  }
+
+  // create filter statement in `having` statement
+  FilterStmt *filter_stmt_having = nullptr;
+  if (!select_sql.havings.empty()) {
+    RC rc = FilterStmt::create(db, default_table, &table_map, select_sql.havings, filter_stmt_having);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("cannot construct filter stmt");
+      return rc;
+    }
   }
 
   // everything alright
@@ -102,6 +112,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   select_stmt->query_expressions_.swap(bound_expressions);
   select_stmt->filter_stmt_ = filter_stmt;
   select_stmt->group_by_.swap(group_by_expressions);
+  select_stmt->filter_stmt_having_ = filter_stmt_having;
   stmt                      = select_stmt;
   return RC::SUCCESS;
 }

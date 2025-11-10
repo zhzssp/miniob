@@ -123,6 +123,10 @@ RC CountAggregator::count(const Value &value)
 
 RC CountAggregator::evaluate(Value& result)
 {
+  if (value_.attr_type() == AttrType::UNDEFINED) {
+    result = Value(0);
+    return RC::SUCCESS;
+  }
   result = value_;
   return RC::SUCCESS;
 }

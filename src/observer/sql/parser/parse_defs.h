@@ -132,6 +132,7 @@ struct SelectSqlNode
   vector<TableReferenceSqlNode>  table_references;  ///JOIN
   vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件
   vector<unique_ptr<Expression>> group_by;     ///< group by clause
+  vector<ConditionSqlNode>       havings;      ///< having clause
   vector<RelationSqlNode>        ALIASES;      ///< 别名列表
   vector<unique_ptr<OrderedUnboundFieldExpr>> order_by;
 };

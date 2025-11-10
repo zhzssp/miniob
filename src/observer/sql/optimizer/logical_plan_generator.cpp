@@ -129,7 +129,9 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     last_oper = &predicate_oper;
   }
 
+  //group by
   unique_ptr<LogicalOperator> group_by_oper;
+  bool has_group_by = false;
   rc = create_group_by_plan(select_stmt, group_by_oper);
   if (OB_FAIL(rc)) {
     LOG_WARN("failed to create group by logical plan. rc=%s", strrc(rc));
@@ -142,6 +144,29 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     }
 
     last_oper = &group_by_oper;
+    has_group_by = true;
+  }
+
+  // having
+  unique_ptr<LogicalOperator> predicate_oper_having;
+  if (!has_group_by && select_stmt->filter_stmt_having() != nullptr) {
+    LOG_WARN("having statement without group by statement");
+    return RC::INVALID_ARGUMENT;
+  }
+  if (select_stmt->filter_stmt_having() != nullptr) {
+    RC rc = create_plan(select_stmt->filter_stmt_having(), predicate_oper_having);
+    if (OB_FAIL(rc)) {
+      LOG_WARN("failed to create predicate(having) logical plan. rc=%s", strrc(rc));
+      return rc;
+    }
+
+    if (predicate_oper_having) {
+      if (*last_oper) {
+        predicate_oper_having->add_child(std::move(*last_oper)); // predicate -> tableget/join
+      }
+
+      last_oper = &predicate_oper_having;
+    }
   }
 
   unique_ptr<LogicalOperator> project_oper = make_unique<ProjectLogicalOperator>(std::move(select_stmt->query_expressions()));
@@ -425,6 +450,25 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
   if (group_by_expressions.empty() && aggregate_expressions.empty()) {
     // 既没有group by也没有聚合函数，不需要group by
     return RC::SUCCESS;
+  }
+
+  // having aggrs
+  if (select_stmt->filter_stmt_having() != nullptr) {
+    for (auto &expr : select_stmt->filter_stmt_having()->conditions_) {
+      if (expr->type() == ExprType::COMPARISON) {
+        auto cmp_expr = static_cast<ComparisonExpr *>(expr.get());
+        if (cmp_expr->left()->type() == ExprType::AGGREGATION) {
+          auto aggr_expr = static_cast<AggregateExpr *>(cmp_expr->left().get());
+          aggregate_expressions.push_back(aggr_expr);
+          LOG_DEBUG("logical_gen_groupby: having aggr expr type in left comparison");
+        }
+        if (cmp_expr->right()->type() == ExprType::AGGREGATION) {
+          auto aggr_expr = static_cast<AggregateExpr *>(cmp_expr->right().get());
+          aggregate_expressions.push_back(aggr_expr);
+          LOG_DEBUG("logical_gen_groupby: having aggr expr type in right comparison");
+        }
+      }
+    }
   }
 
   if (found_unbound_column) {
