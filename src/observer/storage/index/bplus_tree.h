@@ -66,11 +66,15 @@ public:
 
   int operator()(const char *v1, const char *v2) const
   {
-    // 对于 CHARS 类型，如果长度大于 4（可能是复合键的二进制数据），直接使用 memcmp 比较
-    // 因为 Value::set_string 使用 strnlen，会在遇到 '\0' 时提前停止，导致二进制数据只比较了部分字节
-    if (attr_type_ == AttrType::CHARS && attr_length_ > 4) {
+    // 对于 CHARS 类型，在 B+ 树索引中主要用于复合索引的二进制数据
+    // Value::set_string 使用 strnlen，会在遇到 '\0' 时提前停止，导致二进制数据只比较了部分字节
+    // 因此对于 CHARS 类型，直接使用 memcmp 比较二进制数据
+    if (attr_type_ == AttrType::CHARS) {
       // 直接使用 memcmp 比较二进制数据
-      return memcmp(v1, v2, attr_length_);
+      int result = memcmp(v1, v2, attr_length_);
+      // 标准化返回值：memcmp 返回任意负数/正数，但我们需要保持与 compare_string 一致的语义
+      // 不过对于 B+ 树，只要符号正确（负数表示 <，正数表示 >，0 表示 ==）即可
+      return result;
     }
     // TODO: optimized the comparison
     Value left;
