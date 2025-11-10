@@ -97,6 +97,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         VALUES
         FROM
         WHERE
+        HAVING
         AND
         SET
         ON
@@ -171,6 +172,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <value_list>          value_list
 %type <condition_list>      where
 %type <condition_list>      condition_list
+%type <condition_list>      having
 %type <cstring>             storage_format
 %type <key_list>            primary_key
 %type <key_list>            attr_list
@@ -490,7 +492,7 @@ update_stmt:      /*  update 语句的语法解析树*/
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list where group_by
+    SELECT expression_list FROM rel_list where group_by having
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -500,17 +502,27 @@ select_stmt:        /*  select 语句的语法解析树*/
 
       if ($4 != nullptr) {
         $$->selection.relations.swap(*$4);
+        std::reverse($$->selection.relations.begin(), $$->selection.relations.end()); //from 逆序
         delete $4;
       }
 
       if ($5 != nullptr) {
-        $$->selection.conditions.swap(*$5);
+        for (auto &condition : *$5) {
+          $$->selection.conditions.emplace_back(std::move(condition));
+        }
+        std::reverse($$->selection.conditions.begin(), $$->selection.conditions.end()); // where逆序
         delete $5;
       }
 
       if ($6 != nullptr) {
-        $$->selection.group_by.swap(*$6);
+        $$->selection.group_by.swap(*$6); //无需逆序，顺序不影响结果
         delete $6;
+      }
+
+      if ($7 != nullptr) {
+        $$->selection.havings.swap(*$7);
+        std::reverse($$->selection.havings.begin(), $$->selection.havings.end());// having 逆序
+        delete $7;
       }
     }
     ;
@@ -673,9 +685,22 @@ group_by:
     {
       // group by 的表达式范围与select查询值的表达式范围是不同的，比如group by不支持 *
       // 但是这里没有处理。
-      $$ = $3;
+      $$ = new std::vector<std::unique_ptr<Expression>>;
+      $$->swap(*$3);
+      delete $3;
     }
     ;
+
+having:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | HAVING condition_list {   
+      $$ = $2;
+    }
+    ;// 参考where
+
 load_data_stmt:
     LOAD DATA INFILE SSS INTO TABLE ID fields_terminated_by enclosed_by
     {

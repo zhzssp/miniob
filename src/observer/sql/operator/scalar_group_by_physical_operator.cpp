@@ -82,6 +82,18 @@ RC ScalarGroupByPhysicalOperator::open(Trx *trx)
     return rc;
   }
 
+  // 如果没有数据，也需要初始化group_value_，以便输出count()为0等结果
+  if (group_value_ == nullptr) {
+    AggregatorList aggregator_list;
+    create_aggregator_list(aggregator_list);
+
+    // 创建一个空的ValueListTuple用于初始化
+    ValueListTuple empty_tuple;
+    CompositeTuple composite_tuple;
+    composite_tuple.add_tuple(make_unique<ValueListTuple>(std::move(empty_tuple)));
+    group_value_ = make_unique<GroupValueType>(std::move(aggregator_list), std::move(composite_tuple));
+  }
+
   // 得到最终聚合后的值
   if (group_value_) {
     rc = evaluate(*group_value_);
