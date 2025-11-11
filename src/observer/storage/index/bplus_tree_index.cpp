@@ -175,6 +175,18 @@ RC BplusTreeIndex::get_entry(const char *user_key, int key_len, list<RID> &rids)
 IndexScanner *BplusTreeIndex::create_scanner(
     const char *left_key, int left_len, bool left_inclusive, const char *right_key, int right_len, bool right_inclusive)
 {
+  // 单键索引：直接按原样创建扫描器，禁止走复合键扩展逻辑，避免误用 fields_meta_
+  if (fields_meta_.size() <= 1) {
+    BplusTreeIndexScanner *index_scanner = new BplusTreeIndexScanner(index_handler_);
+    RC rc = index_scanner->open(left_key, left_len, left_inclusive, right_key, right_len, right_inclusive);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to open index scanner. rc=%d:%s", rc, strrc(rc));
+      delete index_scanner;
+      return nullptr;
+    }
+    return index_scanner;
+  }
+
   // 单列索引：直接创建扫描器，不做复合键扩展
   if (fields_meta_.size() <= 1) {
     BplusTreeIndexScanner *index_scanner = new BplusTreeIndexScanner(index_handler_);
