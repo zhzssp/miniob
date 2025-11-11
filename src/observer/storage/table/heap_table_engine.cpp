@@ -460,6 +460,31 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
   return rc;
 }
 
+RC HeapTableEngine::drop_index(const char *index_name)
+{
+  for(unsigned int i = 0; i < indexes_.size(); i++) {
+    if(strcmp(indexes_[i]->index_meta().name(), index_name) == 0) {
+      indexes_.erase(indexes_.begin() + i);
+      LOG_INFO("Find index to drop, now drop it !");
+      break;
+    }
+    if(i == indexes_.size() - 1) {
+      LOG_ERROR("Cannot find corresponding Index *, return");
+      return RC::INDEX_NOT_EXISTS;
+    }
+  }
+
+  string index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_name);
+
+  if (remove(index_file.c_str()) != 0) {
+    LOG_ERROR("Failed to remove table meta file: %s", index_file.c_str());
+    return RC::IOERR_DELETE;
+  } else {
+    LOG_INFO("Find .index file successfully, delete it !");
+    return RC::SUCCESS;
+  }
+}
+
 RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid, const Record *record_obj)
 {
   LOG_TRACE("HeapTableEngine::insert_entry_of_indexes() is called");

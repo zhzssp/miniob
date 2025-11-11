@@ -172,8 +172,7 @@ RC Table::drop(Db *db, int32_t table_id, const char *meta_path, const char *tabl
   if (remove(meta_path) != 0) {
     LOG_ERROR("Failed to remove table meta file: %s", meta_path);
     return RC::IOERR_DELETE;
-  }
-  else {
+  } else {
     LOG_INFO("Table meta file has been removed: %s", meta_path);
   }
 
@@ -373,6 +372,11 @@ RC Table::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_
 RC Table::create_index(Trx *trx, const vector<const FieldMeta *> &fields_meta, const char *index_name, bool is_unique)
 {
   return engine_->create_index(trx, fields_meta, index_name, is_unique);
+}
+
+RC Table::drop_index(const char *index_name)
+{
+  return engine_->drop_index(index_name);
 }
 
 RC Table::delete_record(const Record &record)
