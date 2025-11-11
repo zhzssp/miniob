@@ -668,7 +668,7 @@ RC HeapTableEngine::init()
   return rc;
 }
 
-// 创建field and index --> 索引还unsupported
+// 创建field and index
 RC HeapTableEngine::open()
 {
   RC rc = RC::SUCCESS;
@@ -676,19 +676,37 @@ RC HeapTableEngine::open()
   const int index_num = table_meta_->index_num();
   for (int i = 0; i < index_num; i++) {
     const IndexMeta *index_meta = table_meta_->index(i);
-    const FieldMeta *field_meta = table_meta_->field(index_meta->field());
-    if (field_meta == nullptr) {
-      LOG_ERROR("Found invalid index meta info which has a non-exists field. table=%s, index=%s, field=%s",
-                table_meta_->name(), index_meta->name(), index_meta->field());
-      // skip cleanup
-      //  do all cleanup action in destructive Table function
-      return RC::INTERNAL;
-    }
-
     BplusTreeIndex *index      = new BplusTreeIndex();
     string          index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_meta->name());
 
-    rc = index->open(table_, index_file.c_str(), *index_meta, *field_meta);
+    // 检查是单字段索引还是复合索引
+    if (index_meta->field_count() > 1) {
+      // 复合索引：获取所有字段的元数据
+      vector<const FieldMeta *> fields_meta;
+      const vector<string> &field_names = index_meta->fields();
+      for (const string &field_name : field_names) {
+        const FieldMeta *field_meta = table_meta_->field(field_name.c_str());
+        if (field_meta == nullptr) {
+          LOG_ERROR("Found invalid index meta info which has a non-exists field. table=%s, index=%s, field=%s",
+                    table_meta_->name(), index_meta->name(), field_name.c_str());
+          delete index;
+          return RC::INTERNAL;
+        }
+        fields_meta.push_back(field_meta);
+      }
+      rc = index->open(table_, index_file.c_str(), *index_meta, fields_meta);
+    } else {
+      // 单字段索引：向后兼容
+      const FieldMeta *field_meta = table_meta_->field(index_meta->field());
+      if (field_meta == nullptr) {
+        LOG_ERROR("Found invalid index meta info which has a non-exists field. table=%s, index=%s, field=%s",
+                  table_meta_->name(), index_meta->name(), index_meta->field());
+        delete index;
+        return RC::INTERNAL;
+      }
+      rc = index->open(table_, index_file.c_str(), *index_meta, *field_meta);
+    }
+
     if (rc != RC::SUCCESS) {
       delete index;
       LOG_ERROR("Failed to open index. table=%s, index=%s, file=%s, rc=%s",
