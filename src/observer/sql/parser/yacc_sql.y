@@ -104,6 +104,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         VALUES
         FROM
         WHERE
+        HAVING
         AND
         SET
         ON
@@ -196,6 +197,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <value_list>          value_list
 %type <condition_list>      where
 %type <condition_list>      condition_list
+%type <condition_list>      having
 %type <cstring>             storage_format
 %type <key_list>            primary_key
 %type <key_list>            attr_list
@@ -673,7 +675,7 @@ subquery_stmt:
     ;
 
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list where group_by order_by
+    SELECT expression_list FROM rel_list where group_by having order_by
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -696,10 +698,16 @@ select_stmt:        /*  select 语句的语法解析树*/
         delete $6;
       }
 
-      // 把解析得到的列表放入SQL Node的order_by属性中存起来
+      //having
       if ($7 != nullptr) {
-        $$->selection.order_by.swap(*$7);
+        $$->selection.havings.swap(*$7);
         delete $7;
+      }
+
+      // 把解析得到的列表放入SQL Node的order_by属性中存起来
+      if ($8 != nullptr) {
+        $$->selection.order_by.swap(*$8);
+        delete $8;
       }
       
       // 注意：由于 yacc 是递归下降解析，当执行到这里时：
@@ -1349,9 +1357,22 @@ group_by:
     {
       // group by 的表达式范围与select查询值的表达式范围是不同的，比如group by不支持 *
       // 但是这里没有处理。
-      $$ = $3;
+      $$ = new std::vector<std::unique_ptr<Expression>>;
+      $$->swap(*$3);
+      delete $3;
     }
     ;
+
+having:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | HAVING condition_list {
+      $$ = $2;
+    }
+    ;
+
 
 order_by:
     /* empty */

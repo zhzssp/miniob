@@ -261,7 +261,9 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   }
 
   // 第三层
+  // group by
   unique_ptr<LogicalOperator> group_by_oper;
+  bool has_group_by = false;
   rc = create_group_by_plan(select_stmt, group_by_oper);
   if (OB_FAIL(rc)) {
     LOG_WARN("failed to create group by logical plan. rc=%s", strrc(rc));
@@ -275,6 +277,29 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     }
 
     last_oper = &group_by_oper;
+    has_group_by = true;
+  }
+
+  // having
+  unique_ptr<LogicalOperator> predicate_oper_having;
+  if (!has_group_by && select_stmt->filter_stmt_having() != nullptr) {
+    LOG_WARN("having statement without group by statement");
+    return RC::INVALID_ARGUMENT;
+  }
+  if (select_stmt->filter_stmt_having() != nullptr) {
+    RC rc = create_plan(select_stmt->filter_stmt_having(), predicate_oper_having);
+    if (OB_FAIL(rc)) {
+      LOG_WARN("failed to create predicate(having) logical plan. rc=%s", strrc(rc));
+      return rc;
+    }
+
+    if (predicate_oper_having) {
+      if (*last_oper) {
+        predicate_oper_having->add_child(std::move(*last_oper)); // predicate -> tableget/join
+      }
+
+      last_oper = &predicate_oper_having;
+    }
   }
 
   // 最上层
@@ -310,6 +335,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   }
 
   logical_operator = std::move(*last_oper);
+
   return RC::SUCCESS;
 }
 
@@ -747,6 +773,29 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
   if (group_by_expressions.empty() && aggregate_expressions.empty()) {
     // 既没有group by也没有聚合函数，不需要group by
     return RC::SUCCESS;
+  }
+
+  // having aggrs
+  if (select_stmt->filter_stmt_having() != nullptr) 
+  {
+    LOG_INFO("having aggrs from logical_plan_generator.cpp");
+    auto & filter_units_ = select_stmt->filter_stmt_having()->filter_units();
+    for (auto &filter_unit : filter_units_)
+    {
+      const FilterObj &filter_obj_left  = filter_unit->left();
+      const FilterObj &filter_obj_right  = filter_unit->right();
+      if (filter_obj_left.is_expr && filter_obj_left.expression->type() == ExprType::AGGREGATION)
+      {
+        LOG_INFO("test left expression from having aggrs from logical_plan_generator.cpp");
+        auto aggr_expr = static_cast<AggregateExpr *>(filter_obj_left.expression);
+        aggregate_expressions.push_back(aggr_expr);
+      }
+      if (filter_obj_right.is_expr && filter_obj_right.expression->type() == ExprType::AGGREGATION)
+      {
+        auto aggr_expr = static_cast<AggregateExpr *>(filter_obj_right.expression);
+        aggregate_expressions.push_back(aggr_expr);
+      }
+    }
   }
 
   if (found_unbound_column) {

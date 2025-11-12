@@ -399,15 +399,6 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
     }
   }
 
-  vector<unique_ptr<Expression>> group_by_expressions;
-  for (unique_ptr<Expression> &expression : select_sql.group_by) {
-    RC rc = expression_binder.bind_expression(expression, group_by_expressions);
-    if (OB_FAIL(rc)) {
-      LOG_INFO("bind expression failed. rc=%s", strrc(rc));
-      return rc;
-    }
-  }
-
   // 只有存在order by子句的时候才会发挥作用
   vector<unique_ptr<OrderedUnboundFieldExpr>> order_by_expressions;
   for (unique_ptr<OrderedUnboundFieldExpr> &expression : select_sql.order_by) {
@@ -613,6 +604,28 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
       table_join_filters.push_back(nullptr);
     }
   }
+
+  // 遍历 group by 语句中的表达式, 绑定表达式
+  vector<unique_ptr<Expression>> group_by_expressions;
+  for (unique_ptr<Expression> &expression : select_sql.group_by) {
+    RC rc = expression_binder.bind_expression(expression, group_by_expressions);
+    if (OB_FAIL(rc)) {
+      LOG_INFO("bind expression failed. rc=%s", strrc(rc));
+      return rc;
+    }
+  }
+
+  // create filter statement in `having` statement
+  FilterStmt *filter_stmt_having = nullptr;
+  if (!select_sql.havings.empty()) {
+    LOG_INFO("!select_sql.havings.empty(),create FilterStmt");
+    RC rc = FilterStmt::create(db, default_table, &table_map, select_sql.havings.data(), static_cast<int>(select_sql.havings.size()),filter_stmt_having);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("cannot construct filter stmt");
+      return rc;
+    }
+  }
+
 
   // everything alright
   SelectStmt *select_stmt = new SelectStmt();
