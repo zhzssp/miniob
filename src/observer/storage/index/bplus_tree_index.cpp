@@ -17,6 +17,8 @@ See the Mulan PSL v2 for more details. */
 #include "storage/table/table.h"
 #include "storage/db/db.h"
 #include <cstring>
+#include <climits>
+#include <cfloat>
 
 BplusTreeIndex::~BplusTreeIndex() noexcept { close(); }
 
@@ -173,8 +175,120 @@ RC BplusTreeIndex::get_entry(const char *user_key, int key_len, list<RID> &rids)
 IndexScanner *BplusTreeIndex::create_scanner(
     const char *left_key, int left_len, bool left_inclusive, const char *right_key, int right_len, bool right_inclusive)
 {
+  // 单键索引：直接按原样创建扫描器，禁止走复合键扩展逻辑，避免误用 fields_meta_
+  if (fields_meta_.size() <= 1) {
+    BplusTreeIndexScanner *index_scanner = new BplusTreeIndexScanner(index_handler_);
+    RC rc = index_scanner->open(left_key, left_len, left_inclusive, right_key, right_len, right_inclusive);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to open index scanner. rc=%d:%s", rc, strrc(rc));
+      delete index_scanner;
+      return nullptr;
+    }
+    return index_scanner;
+  }
+
+  // 单列索引：直接创建扫描器，不做复合键扩展
+  if (fields_meta_.size() <= 1) {
+    BplusTreeIndexScanner *index_scanner = new BplusTreeIndexScanner(index_handler_);
+    RC rc = index_scanner->open(left_key, left_len, left_inclusive, right_key, right_len, right_inclusive);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to open index scanner. rc=%d:%s", rc, strrc(rc));
+      delete index_scanner;
+      return nullptr;
+    }
+    return index_scanner;
+  }
+
+  // 复合索引：当传入的键长度小于完整键长度时，按字段类型扩展剩余字段
+  int full_key_length = calculate_key_length();
+  const char *final_left_key = left_key;
+  int final_left_len = left_len;
+  const char *final_right_key = right_key;
+  int final_right_len = right_len;
+
+  char *expanded_left_key = nullptr;
+  char *expanded_right_key = nullptr;
+
+  if (left_key != nullptr && left_len < full_key_length) {
+    expanded_left_key = new char[full_key_length];
+    memcpy(expanded_left_key, left_key, left_len);
+
+    int offset = left_len;
+    // 找到第一个未完全填充的字段
+    int accumulated_len = 0;
+    size_t start_field_idx = 0;
+    for (size_t i = 0; i < fields_meta_.size(); i++) {
+      accumulated_len += fields_meta_[i]->len();
+      if (accumulated_len > left_len) {
+        start_field_idx = i;
+        break;
+      }
+    }
+    // 从找到的字段开始填充最小值
+    for (size_t j = start_field_idx; j < fields_meta_.size(); j++) {
+      const FieldMeta *field_meta = fields_meta_[j];
+      AttrType field_type = field_meta->type();
+      int field_len = field_meta->len();
+      if (field_type == AttrType::INTS) {
+        int min_int = INT_MIN;
+        memcpy(expanded_left_key + offset, &min_int, field_len);
+      } else if (field_type == AttrType::FLOATS) {
+        float min_float = -FLT_MAX;
+        memcpy(expanded_left_key + offset, &min_float, field_len);
+      } else {
+        memset(expanded_left_key + offset, 0, field_len);
+      }
+      offset += field_len;
+    }
+    final_left_key = expanded_left_key;
+    final_left_len = full_key_length;
+  }
+
+  if (right_key != nullptr && right_len < full_key_length) {
+    expanded_right_key = new char[full_key_length];
+    memcpy(expanded_right_key, right_key, right_len);
+
+    int offset = right_len;
+    // 找到第一个未完全填充的字段
+    int accumulated_len = 0;
+    size_t start_field_idx = 0;
+    for (size_t i = 0; i < fields_meta_.size(); i++) {
+      accumulated_len += fields_meta_[i]->len();
+      if (accumulated_len > right_len) {
+        start_field_idx = i;
+        break;
+      }
+    }
+    // 从找到的字段开始填充最大值
+    for (size_t j = start_field_idx; j < fields_meta_.size(); j++) {
+      const FieldMeta *field_meta = fields_meta_[j];
+      AttrType field_type = field_meta->type();
+      int field_len = field_meta->len();
+      if (field_type == AttrType::INTS) {
+        int max_int = INT_MAX;
+        memcpy(expanded_right_key + offset, &max_int, field_len);
+      } else if (field_type == AttrType::FLOATS) {
+        float max_float = FLT_MAX;
+        memcpy(expanded_right_key + offset, &max_float, field_len);
+      } else {
+        memset(expanded_right_key + offset, 0xFF, field_len);
+      }
+      offset += field_len;
+    }
+    final_right_key = expanded_right_key;
+    final_right_len = full_key_length;
+  }
+
   BplusTreeIndexScanner *index_scanner = new BplusTreeIndexScanner(index_handler_);
-  RC rc = index_scanner->open(left_key, left_len, left_inclusive, right_key, right_len, right_inclusive);
+  RC rc = index_scanner->open(final_left_key, final_left_len, left_inclusive, final_right_key, final_right_len, right_inclusive);
+
+  if (expanded_left_key != nullptr) {
+    delete[] expanded_left_key;
+  }
+  if (expanded_right_key != nullptr) {
+    delete[] expanded_right_key;
+  }
+
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to open index scanner. rc=%d:%s", rc, strrc(rc));
     delete index_scanner;

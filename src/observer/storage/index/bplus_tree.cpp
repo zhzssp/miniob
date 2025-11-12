@@ -1980,7 +1980,6 @@ bool BplusTreeScanner::touch_end()
 
   const char *this_key       = node.key_at(iter_index_);
   int         compare_result = tree_handler_.key_comparator_(this_key, static_cast<char *>(right_key_.get()));
-  LOG_DEBUG("touch_end: compare_result=%d, iter_index_=%d", compare_result, iter_index_);
   return compare_result > 0;
 }
 
@@ -2011,10 +2010,14 @@ RC BplusTreeScanner::next_entry(RID &rid)
       // 如果用户键部分不相等，说明不在范围内（对于精确匹配）
       // 注意：compare_result > 0 表示 this_key > right_user_key，应该返回 EOF
       // compare_result < 0 表示 this_key < right_user_key，但这种情况不应该发生（因为 lookup 找到的是 >= 的位置）
-      if (compare_result != 0) {
-        LOG_DEBUG("First entry user key does not match search key. compare_result=%d", compare_result);
+      // 但是，对于部分键查询（复合索引的部分字段查询），我们不应该进行精确匹配检查
+      // 因为扩展后的右边界键（如 (4, INT_MAX)）和索引中的键（如 (4, 1)）不相等是正常的
+      // 我们只需要检查 this_key 是否 <= right_user_key（即 compare_result <= 0）
+      if (compare_result > 0) {
+        LOG_DEBUG("First entry user key exceeds right boundary. compare_result=%d", compare_result);
         return RC::RECORD_EOF;
       }
+      // 对于 compare_result < 0 或 == 0，都认为是有效的（在范围内）
     }
     
     fetch_item(rid);
