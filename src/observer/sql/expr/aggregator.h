@@ -65,6 +65,9 @@ class MaxAggregator : public Aggregator
 public:
   RC max(const Value &value);
   RC evaluate(Value &result) override;
+
+private:
+  int count_ = 0;  
 };
 
 class MinAggregator : public Aggregator
@@ -72,4 +75,7 @@ class MinAggregator : public Aggregator
 public:
   RC min(const Value &value);
   RC evaluate(Value &result) override;
+
+private:
+  int count_ = 0; 
 };

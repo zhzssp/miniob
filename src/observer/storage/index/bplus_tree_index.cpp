@@ -175,145 +175,120 @@ RC BplusTreeIndex::get_entry(const char *user_key, int key_len, list<RID> &rids)
 IndexScanner *BplusTreeIndex::create_scanner(
     const char *left_key, int left_len, bool left_inclusive, const char *right_key, int right_len, bool right_inclusive)
 {
-  // 如果是复合索引且传入的键长度小于完整键长度，需要扩展键
+  // 单键索引：直接按原样创建扫描器，禁止走复合键扩展逻辑，避免误用 fields_meta_
+  if (fields_meta_.size() <= 1) {
+    BplusTreeIndexScanner *index_scanner = new BplusTreeIndexScanner(index_handler_);
+    RC rc = index_scanner->open(left_key, left_len, left_inclusive, right_key, right_len, right_inclusive);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to open index scanner. rc=%d:%s", rc, strrc(rc));
+      delete index_scanner;
+      return nullptr;
+    }
+    return index_scanner;
+  }
+
+  // 单列索引：直接创建扫描器，不做复合键扩展
+  if (fields_meta_.size() <= 1) {
+    BplusTreeIndexScanner *index_scanner = new BplusTreeIndexScanner(index_handler_);
+    RC rc = index_scanner->open(left_key, left_len, left_inclusive, right_key, right_len, right_inclusive);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to open index scanner. rc=%d:%s", rc, strrc(rc));
+      delete index_scanner;
+      return nullptr;
+    }
+    return index_scanner;
+  }
+
+  // 复合索引：当传入的键长度小于完整键长度时，按字段类型扩展剩余字段
   int full_key_length = calculate_key_length();
   const char *final_left_key = left_key;
   int final_left_len = left_len;
   const char *final_right_key = right_key;
   int final_right_len = right_len;
-  
+
   char *expanded_left_key = nullptr;
   char *expanded_right_key = nullptr;
-  
-  if (fields_meta_.size() > 1) {
-    // 复合索引
-    if (left_key != nullptr && left_len < full_key_length) {
-      // 扩展左边界键：根据每个字段的类型填充最小值
-      expanded_left_key = new char[full_key_length];
-      memcpy(expanded_left_key, left_key, left_len);
-      
-      int offset = left_len;
-      // 找到第一个未完全填充的字段
-      int accumulated_len = 0;
-      size_t start_field_idx = 0;
-      for (size_t i = 0; i < fields_meta_.size(); i++) {
-        accumulated_len += fields_meta_[i]->len();
-        if (accumulated_len > left_len) {
-          start_field_idx = i;
-          break;
-        }
-      }
-      
-      // 从找到的字段开始填充最小值
-      for (size_t j = start_field_idx; j < fields_meta_.size(); j++) {
-        const FieldMeta *field_meta = fields_meta_[j];
-        AttrType field_type = field_meta->type();
-        int field_len = field_meta->len();
-        
-        // 根据字段类型填充最小值
-        if (field_type == AttrType::INTS) {
-          // 有符号整数的最小值：INT_MIN = -2147483648 = 0x80000000
-          int min_int = INT_MIN;
-          memcpy(expanded_left_key + offset, &min_int, field_len);
-        } else if (field_type == AttrType::FLOATS) {
-          // 浮点数的最小值：-FLT_MAX
-          float min_float = -FLT_MAX;
-          memcpy(expanded_left_key + offset, &min_float, field_len);
-        } else {
-          // 其他类型（CHARS, DATES等）用全0填充
-          memset(expanded_left_key + offset, 0, field_len);
-        }
-        offset += field_len;
-      }
-      
-      final_left_key = expanded_left_key;
-      final_left_len = full_key_length;
-    }
-    
-    if (right_key != nullptr && right_len < full_key_length) {
-      // 扩展右边界键：根据每个字段的类型填充最大值
-      expanded_right_key = new char[full_key_length];
-      memcpy(expanded_right_key, right_key, right_len);
-      
-      int offset = right_len;
-      // 找到第一个未完全填充的字段
-      int accumulated_len = 0;
-      size_t start_field_idx = 0;
-      for (size_t i = 0; i < fields_meta_.size(); i++) {
-        accumulated_len += fields_meta_[i]->len();
-        if (accumulated_len > right_len) {
-          start_field_idx = i;
-          break;
-        }
-      }
-      
-      // 从找到的字段开始填充最大值
-      for (size_t j = start_field_idx; j < fields_meta_.size(); j++) {
-        const FieldMeta *field_meta = fields_meta_[j];
-        AttrType field_type = field_meta->type();
-        int field_len = field_meta->len();
-        
-        // 根据字段类型填充最大值
-        if (field_type == AttrType::INTS) {
-          // 有符号整数的最大值：INT_MAX = 2147483647 = 0x7FFFFFFF
-          int max_int = INT_MAX;
-          memcpy(expanded_right_key + offset, &max_int, field_len);
-        } else if (field_type == AttrType::FLOATS) {
-          // 浮点数的最大值：FLT_MAX
-          float max_float = FLT_MAX;
-          memcpy(expanded_right_key + offset, &max_float, field_len);
-        } else {
-          // 其他类型（CHARS, DATES等）用全0xFF填充
-          memset(expanded_right_key + offset, 0xFF, field_len);
-        }
-        offset += field_len;
-      }
-      
-      final_right_key = expanded_right_key;
-      final_right_len = full_key_length;
-      
-      // 对于部分键查询，确保右边界键大于左边界键，避免触发精确匹配检查
-      // 如果左右边界键相等，BplusTreeScanner 会进行精确匹配检查，导致部分键查询失败
-      if (left_key != nullptr && left_len == right_len && 
-          memcmp(left_key, right_key, left_len) == 0) {
-        // 左右边界键相等，说明这是等值查询的部分键
-        // 我们需要确保扩展后的右边界键大于左边界键
-        // 由于我们已经用最大值填充了右边界，所以应该已经满足条件
-        // 但为了确保，我们可以稍微调整右边界键的最后一个字节
-        if (expanded_right_key != nullptr && expanded_left_key != nullptr) {
-          // 检查扩展后的键是否相等
-          if (memcmp(expanded_left_key, expanded_right_key, full_key_length) == 0) {
-            // 如果相等，我们需要让右边界键稍微大一点
-            // 在最后一个字节加1（如果可能的话）
-            if (full_key_length > 0) {
-              unsigned char last_byte = static_cast<unsigned char>(expanded_right_key[full_key_length - 1]);
-              if (last_byte < 0xFF) {
-                expanded_right_key[full_key_length - 1] = last_byte + 1;
-              } else {
-                // 如果已经是0xFF，我们需要在更前面的字节加1
-                // 但为了简单，我们可以在前面添加一个字节（但这会改变键长度）
-                // 实际上，由于我们填充的是最大值，左右边界键不应该相等
-                // 如果相等，说明填充逻辑有问题
-                LOG_WARN("Expanded left and right keys are equal for partial key query");
-              }
-            }
-          }
-        }
+
+  if (left_key != nullptr && left_len < full_key_length) {
+    expanded_left_key = new char[full_key_length];
+    memcpy(expanded_left_key, left_key, left_len);
+
+    int offset = left_len;
+    // 找到第一个未完全填充的字段
+    int accumulated_len = 0;
+    size_t start_field_idx = 0;
+    for (size_t i = 0; i < fields_meta_.size(); i++) {
+      accumulated_len += fields_meta_[i]->len();
+      if (accumulated_len > left_len) {
+        start_field_idx = i;
+        break;
       }
     }
+    // 从找到的字段开始填充最小值
+    for (size_t j = start_field_idx; j < fields_meta_.size(); j++) {
+      const FieldMeta *field_meta = fields_meta_[j];
+      AttrType field_type = field_meta->type();
+      int field_len = field_meta->len();
+      if (field_type == AttrType::INTS) {
+        int min_int = INT_MIN;
+        memcpy(expanded_left_key + offset, &min_int, field_len);
+      } else if (field_type == AttrType::FLOATS) {
+        float min_float = -FLT_MAX;
+        memcpy(expanded_left_key + offset, &min_float, field_len);
+      } else {
+        memset(expanded_left_key + offset, 0, field_len);
+      }
+      offset += field_len;
+    }
+    final_left_key = expanded_left_key;
+    final_left_len = full_key_length;
   }
-  
+
+  if (right_key != nullptr && right_len < full_key_length) {
+    expanded_right_key = new char[full_key_length];
+    memcpy(expanded_right_key, right_key, right_len);
+
+    int offset = right_len;
+    // 找到第一个未完全填充的字段
+    int accumulated_len = 0;
+    size_t start_field_idx = 0;
+    for (size_t i = 0; i < fields_meta_.size(); i++) {
+      accumulated_len += fields_meta_[i]->len();
+      if (accumulated_len > right_len) {
+        start_field_idx = i;
+        break;
+      }
+    }
+    // 从找到的字段开始填充最大值
+    for (size_t j = start_field_idx; j < fields_meta_.size(); j++) {
+      const FieldMeta *field_meta = fields_meta_[j];
+      AttrType field_type = field_meta->type();
+      int field_len = field_meta->len();
+      if (field_type == AttrType::INTS) {
+        int max_int = INT_MAX;
+        memcpy(expanded_right_key + offset, &max_int, field_len);
+      } else if (field_type == AttrType::FLOATS) {
+        float max_float = FLT_MAX;
+        memcpy(expanded_right_key + offset, &max_float, field_len);
+      } else {
+        memset(expanded_right_key + offset, 0xFF, field_len);
+      }
+      offset += field_len;
+    }
+    final_right_key = expanded_right_key;
+    final_right_len = full_key_length;
+  }
+
   BplusTreeIndexScanner *index_scanner = new BplusTreeIndexScanner(index_handler_);
   RC rc = index_scanner->open(final_left_key, final_left_len, left_inclusive, final_right_key, final_right_len, right_inclusive);
-  
-  // 清理临时分配的内存
+
   if (expanded_left_key != nullptr) {
     delete[] expanded_left_key;
   }
   if (expanded_right_key != nullptr) {
     delete[] expanded_right_key;
   }
-  
+
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to open index scanner. rc=%d:%s", rc, strrc(rc));
     delete index_scanner;

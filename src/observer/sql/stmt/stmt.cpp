@@ -33,6 +33,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/trx_begin_stmt.h"
 #include "sql/stmt/trx_end_stmt.h"
 #include "sql/stmt/update_stmt.h"
+#include "sql/stmt/drop_index_stmt.h"
 
 bool stmt_type_ddl(StmtType type)
 {
