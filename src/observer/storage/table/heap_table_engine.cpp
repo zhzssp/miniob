@@ -814,55 +814,128 @@ RC HeapTableEngine::update_record_with_trx(const Record &old_record, const Recor
       }
     }
     
+    // 如果新值不是 NULL，需要先检查唯一性约束（在删除旧值之前）
+    if (!new_has_null && !fields_meta.empty()) {
+      // 如果是唯一索引，先检查是否已存在相同的键值（在删除旧值之前检查）
+      if (index->index_meta().is_unique()) {
+        // 构建新值的复合键
+        int total_key_length = 0;
+        for (const FieldMeta *field_meta : fields_meta) {
+          total_key_length += field_meta->len();
+        }
+        char *new_key_buffer = new char[total_key_length];
+        int offset = 0;
+        for (const FieldMeta *field_meta : fields_meta) {
+          const char *field_data = new_record.data() + field_meta->offset();
+          memcpy(new_key_buffer + offset, field_data, field_meta->len());
+          offset += field_meta->len();
+        }
+        
+        // 构建旧值的复合键，用于比较
+        char *old_key_buffer = nullptr;
+        bool keys_equal = false;
+        if (!old_has_null && !fields_meta.empty()) {
+          old_key_buffer = new char[total_key_length];
+          offset = 0;
+          for (const FieldMeta *field_meta : fields_meta) {
+            const char *field_data = old_record.data() + field_meta->offset();
+            memcpy(old_key_buffer + offset, field_data, field_meta->len());
+            offset += field_meta->len();
+          }
+          keys_equal = (memcmp(old_key_buffer, new_key_buffer, total_key_length) == 0);
+        }
+        
+        // 如果键值相同，说明只是更新了非索引字段，不需要检查唯一性
+        if (!keys_equal) {
+          list<RID> existing_rids;
+          rc = index->get_entry(new_key_buffer, total_key_length, existing_rids);
+          if (rc == RC::SUCCESS && !existing_rids.empty()) {
+            // 检查是否是自己（如果只是更新了其他字段，但索引字段值没变）
+            bool is_self = false;
+            for (const RID &existing_rid : existing_rids) {
+              if (existing_rid == new_record.rid()) {
+                is_self = true;
+                break;
+              }
+            }
+            if (!is_self) {
+              // 已存在相同的键值，违反唯一性约束
+              LOG_WARN("duplicate key value violates unique constraint. table=%s, index=%s", 
+                       table_meta_->name(), index->index_meta().name());
+              delete[] new_key_buffer;
+              if (old_key_buffer != nullptr) {
+                delete[] old_key_buffer;
+              }
+              return RC::RECORD_DUPLICATE_KEY;
+            }
+          }
+        }
+        
+        delete[] new_key_buffer;
+        if (old_key_buffer != nullptr) {
+          delete[] old_key_buffer;
+        }
+      }
+    }
+    
     // 如果旧值不是 NULL，需要从索引中删除
     if (!old_has_null && !fields_meta.empty()) {
+      // 先检查旧值是否真的在索引中（用于调试）
+      if (index->index_meta().is_unique()) {
+        int total_key_length = 0;
+        for (const FieldMeta *field_meta : fields_meta) {
+          total_key_length += field_meta->len();
+        }
+        char *old_key_buffer = new char[total_key_length];
+        int offset = 0;
+        for (const FieldMeta *field_meta : fields_meta) {
+          const char *field_data = old_record.data() + field_meta->offset();
+          memcpy(old_key_buffer + offset, field_data, field_meta->len());
+          offset += field_meta->len();
+        }
+        
+        list<RID> old_rids;
+        RC check_rc = index->get_entry(old_key_buffer, total_key_length, old_rids);
+        if (check_rc == RC::SUCCESS && !old_rids.empty()) {
+          bool found_old_rid = false;
+          for (const RID &rid : old_rids) {
+            if (rid == old_record.rid()) {
+              found_old_rid = true;
+              break;
+            }
+          }
+          if (!found_old_rid) {
+            LOG_WARN("Old record RID not found in index entries for the key. table=%s, index=%s, old_rid=%s, found_rids_count=%zu",
+                     table_meta_->name(), index->index_meta().name(), 
+                     old_record.rid().to_string().c_str(), old_rids.size());
+          }
+        } else {
+          LOG_WARN("Old record key not found in index. table=%s, index=%s, old_rid=%s",
+                   table_meta_->name(), index->index_meta().name(), 
+                   old_record.rid().to_string().c_str());
+        }
+        delete[] old_key_buffer;
+      }
+      
       rc = index->delete_entry(old_record.data(), &old_record.rid());
       if (rc != RC::SUCCESS) {
         LOG_WARN("failed to delete entry from index. table=%s, index=%s, rid=%s, rc=%s",
                  table_meta_->name(), index->index_meta().name(), 
                  old_record.rid().to_string().c_str(), strrc(rc));
-        return rc;
+        // 如果是 RECORD_NOT_EXIST，可能是因为索引不一致，但我们仍然需要继续执行
+        // 因为我们的目标是确保新值在索引中
+        if (rc != RC::RECORD_NOT_EXIST) {
+          return rc;
+        } else {
+          LOG_DEBUG("Index entry not found when deleting, continuing anyway. table=%s, index=%s, rid=%s",
+                    table_meta_->name(), index->index_meta().name(), 
+                    old_record.rid().to_string().c_str());
+        }
       }
     }
     
     // 如果新值不是 NULL，需要插入到索引中
     if (!new_has_null && !fields_meta.empty()) {
-      // 如果是唯一索引，先检查是否已存在相同的键值
-      if (index->index_meta().is_unique()) {
-        // 构建复合键（使用字符数组而不是 string，因为键可能包含二进制数据）
-        int total_key_length = 0;
-        for (const FieldMeta *field_meta : fields_meta) {
-          total_key_length += field_meta->len();
-        }
-        char *key_buffer = new char[total_key_length];
-        int offset = 0;
-        for (const FieldMeta *field_meta : fields_meta) {
-          const char *field_data = new_record.data() + field_meta->offset();
-          memcpy(key_buffer + offset, field_data, field_meta->len());
-          offset += field_meta->len();
-        }
-        
-        list<RID> existing_rids;
-        rc = index->get_entry(key_buffer, total_key_length, existing_rids);
-        delete[] key_buffer;
-        if (rc == RC::SUCCESS && !existing_rids.empty()) {
-          // 检查是否是自己（如果只是更新了其他字段，但索引字段值没变）
-          bool is_self = false;
-          for (const RID &existing_rid : existing_rids) {
-            if (existing_rid == new_record.rid()) {
-              is_self = true;
-              break;
-            }
-          }
-          if (!is_self) {
-            // 已存在相同的键值，违反唯一性约束
-            LOG_WARN("duplicate key value violates unique constraint. table=%s, index=%s", 
-                     table_meta_->name(), index->index_meta().name());
-            return RC::RECORD_DUPLICATE_KEY;
-          }
-        }
-      }
-      
       rc = index->insert_entry(new_record.data(), &new_record.rid());
       if (rc != RC::SUCCESS) {
         LOG_WARN("failed to insert entry to index. table=%s, index=%s, rid=%s, rc=%s",
@@ -914,3 +987,4 @@ RC HeapTableEngine::close()
   LOG_INFO("Table has been closed: %s", table_meta_->name());
   return RC::SUCCESS;
 }
+
