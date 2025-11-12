@@ -460,6 +460,92 @@ RC HeapTableEngine::create_index(Trx *trx, const vector<const FieldMeta *> &fiel
   return rc;
 }
 
+
+RC HeapTableEngine::drop_index(const char *index_name)
+{
+  // 1. 查找并关闭索引（关闭 buffer pool）
+  Index *index_to_drop = nullptr;
+  for(unsigned int i = 0; i < indexes_.size(); i++) {
+    if(strcmp(indexes_[i]->index_meta().name(), index_name) == 0) {
+      index_to_drop = indexes_[i];
+      // 先关闭索引，这会关闭 buffer pool
+      // 由于 Index 基类没有 close() 方法，需要转换为 BplusTreeIndex
+      BplusTreeIndex *bplus_index = dynamic_cast<BplusTreeIndex *>(index_to_drop);
+      if (bplus_index != nullptr) {
+        RC rc = bplus_index->close();
+        if (rc != RC::SUCCESS) {
+          LOG_WARN("Failed to close index %s before dropping. rc=%d:%s", index_name, rc, strrc(rc));
+          // 继续执行，因为可能 buffer pool 已经关闭了
+        }
+      }
+      // 从内存中删除索引对象
+      indexes_.erase(indexes_.begin() + i);
+      delete index_to_drop;
+      LOG_INFO("Find index to drop, now drop it !");
+      break;
+    }
+    if(i == indexes_.size() - 1) {
+      LOG_ERROR("Cannot find corresponding Index *, return");
+      return RC::INDEX_NOT_EXISTS;
+    }
+  }
+
+  // 2. 从 table_meta_ 中删除索引信息
+  TableMeta new_table_meta(*table_meta_);
+  RC rc_meta = new_table_meta.remove_index(index_name);
+  if (rc_meta != RC::SUCCESS) {
+    LOG_WARN("Index %s not found in table meta, but continuing with drop operation", index_name);
+  }
+
+  // 3. 更新元数据文件
+  string tmp_file = table_meta_file(db_->path().c_str(), table_meta_->name()) + ".tmp";
+  fstream fs;
+  fs.open(tmp_file, ios_base::out | ios_base::binary | ios_base::trunc);
+  if (!fs.is_open()) {
+    LOG_ERROR("Failed to open file for write. file name=%s, errmsg=%s", tmp_file.c_str(), strerror(errno));
+    return RC::IOERR_OPEN;
+  }
+  if (new_table_meta.serialize(fs) < 0) {
+    LOG_ERROR("Failed to dump new table meta to file: %s. sys err=%d:%s", tmp_file.c_str(), errno, strerror(errno));
+    fs.close();
+    return RC::IOERR_WRITE;
+  }
+  fs.close();
+
+  // 覆盖原始元数据文件
+  string meta_file = table_meta_file(db_->path().c_str(), table_meta_->name());
+  int ret = rename(tmp_file.c_str(), meta_file.c_str());
+  if (ret != 0) {
+    LOG_ERROR("Failed to rename tmp meta file (%s) to normal meta file (%s) while dropping index (%s) on table (%s). "
+              "system error=%d:%s",
+              tmp_file.c_str(), meta_file.c_str(), index_name, table_meta_->name(), errno, strerror(errno));
+    return RC::IOERR_WRITE;
+  }
+
+  // 更新内存中的 table_meta_
+  table_meta_->swap(new_table_meta);
+
+  // 4. 删除索引文件
+  string index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_name);
+  
+  // 5. 关闭 buffer pool（如果还在打开状态）
+  BufferPoolManager &bpm = db_->buffer_pool_manager();
+  RC rc = bpm.close_file(index_file.c_str());
+  if (rc != RC::SUCCESS && rc != RC::INTERNAL) {
+    LOG_WARN("Failed to close index file in buffer pool: %s, rc=%d:%s", index_file.c_str(), rc, strrc(rc));
+    // 继续执行，因为可能 buffer pool 已经关闭了
+  }
+
+  // 6. 删除索引文件
+  if (remove(index_file.c_str()) != 0) {
+    LOG_ERROR("Failed to remove index file: %s, error: %s", index_file.c_str(), strerror(errno));
+    return RC::IOERR_DELETE;
+  } else {
+    LOG_INFO("Successfully dropped index %s from table %s", index_name, table_meta_->name());
+    return RC::SUCCESS;
+  }
+}
+
 RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid, const Record *record_obj)
 {
   LOG_TRACE("HeapTableEngine::insert_entry_of_indexes() is called");
