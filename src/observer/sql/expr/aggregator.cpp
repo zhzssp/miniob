@@ -136,6 +136,7 @@ RC MaxAggregator::max(const Value &value)
 {
   if (value_.attr_type() == AttrType::UNDEFINED) {
     value_ = value;
+    count_++;
     return RC::SUCCESS;
   }
   
@@ -144,12 +145,17 @@ RC MaxAggregator::max(const Value &value)
   
   if (value.compare(value_) > 0) {
     value_ = value;
+    count_++;
   }
   return RC::SUCCESS;
 }
 
 RC MaxAggregator::evaluate(Value& result)
 {
+  if(count_ == 0) {
+    value_ = Value("NULL", 4);
+    value_.set_null(true);
+  }
   result = value_;
   return RC::SUCCESS;
 }
@@ -158,6 +164,7 @@ RC MinAggregator::min(const Value &value)
 {
   if (value_.attr_type() == AttrType::UNDEFINED) {
     value_ = value;
+    count_++;
     return RC::SUCCESS;
   }
   
@@ -166,12 +173,17 @@ RC MinAggregator::min(const Value &value)
   
   if (value.compare(value_) < 0) {
     value_ = value;
+    count_++;
   }
   return RC::SUCCESS;
 }
 
 RC MinAggregator::evaluate(Value& result)
 {
+  if (count_ == 0) {
+    value_ = Value("NULL", 4);
+    value_.set_null(true);
+  }
   result = value_;
   return RC::SUCCESS;
 }

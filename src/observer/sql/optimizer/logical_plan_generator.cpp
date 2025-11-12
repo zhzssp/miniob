@@ -44,6 +44,29 @@ See the Mulan PSL v2 for more details. */
 using namespace std;
 using namespace common;
 
+const char* Expr_to_string(ExprType type)
+{
+  switch (type)
+  {
+  case ExprType::AGGREGATION: return "AGGREGATION";
+  case ExprType::ARITHMETIC: return "ARITHMETIC";
+  case ExprType::CAST: return "CAST";
+  case ExprType::COMPARISON: return "COMPARISON";
+  case ExprType::CONJUNCTION: return "CONJUNCTION";
+  case ExprType::FIELD: return"FIELD";
+  case ExprType::NONE: return"NONE";
+  case ExprType::ORDERED_UNBOUND_FIELD: return"ORDERED_UNBOUND_FIELD";
+  case ExprType::STAR: return"STAR";
+  case ExprType::SUB_QUERY: return"SUB_QUERY";
+  case ExprType::UNBOUND_AGGREGATION: return"UNBOUND_AGGREGATION";
+  case ExprType::UNBOUND_FIELD: return"UNBOUND_FIELD";
+  case ExprType::VALUE: return"VALUE";
+  case ExprType::VALUE_LIST: return"VALUE_LIST";
+  default:return "unknown";
+  }
+}
+
+
 RC LogicalPlanGenerator::create(Stmt *stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
   RC rc = RC::SUCCESS;
@@ -784,14 +807,19 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
     {
       const FilterObj &filter_obj_left  = filter_unit->left();
       const FilterObj &filter_obj_right  = filter_unit->right();
-      if (filter_obj_left.is_expr && filter_obj_left.expression->type() == ExprType::AGGREGATION)
+
+      LOG_INFO("type from filter_obj_left%s",Expr_to_string(filter_obj_left.expression->type()));
+      LOG_INFO("type from filter_obj_right%s",Expr_to_string(filter_obj_right.expression->type()));
+
+      if (filter_obj_left.is_expr && (filter_obj_left.expression->type() == ExprType::UNBOUND_AGGREGATION || filter_obj_left.expression->type() == ExprType::AGGREGATION))
       {
         LOG_INFO("test left expression from having aggrs from logical_plan_generator.cpp");
         auto aggr_expr = static_cast<AggregateExpr *>(filter_obj_left.expression);
         aggregate_expressions.push_back(aggr_expr);
       }
-      if (filter_obj_right.is_expr && filter_obj_right.expression->type() == ExprType::AGGREGATION)
+      if (filter_obj_right.is_expr && (filter_obj_right.expression->type() == ExprType::AGGREGATION || filter_obj_right.expression->type() == ExprType::UNBOUND_AGGREGATION))
       {
+        LOG_INFO("test right expression from having aggrs from logical_plan_generator.cpp");
         auto aggr_expr = static_cast<AggregateExpr *>(filter_obj_right.expression);
         aggregate_expressions.push_back(aggr_expr);
       }

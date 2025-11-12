@@ -637,7 +637,9 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
   select_stmt->filter_stmt_ = filter_stmt;
   select_stmt->join_filter_stmt_ = join_filter_stmt;
   select_stmt->group_by_.swap(group_by_expressions);
+  select_stmt->filter_stmt_having_ = filter_stmt_having;
   select_stmt->order_by_.swap(order_by_expressions);
+
   stmt                      = select_stmt;
   return RC::SUCCESS;
 }
