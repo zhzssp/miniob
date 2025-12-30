@@ -1438,6 +1438,402 @@ for (auto &expr : expressions_) {
 \end{tabular}
 \end{center}
 
+\subsection{Drop Table 功能实现}
+
+\subsubsection{概述}
+Drop Table 是数据库中用于删除表及其相关数据的操作。在 MiniOB 中，该功能涉及 SQL 语法解析、执行器以及底层存储文件的删除等，这里重点关注对于数据文件、索引文件和元数据文件的处理。
+
+文件删除通常通过数据库、表以及存储引擎三层所提供的接口完成，功能核心是删除如下三种文件，它们包含了表的全部信息。
+\begin{itemize}
+    \item \textbf{数据文件（.data）}：存储表的所有元组数据。
+    \item \textbf{索引文件（.idx）}：存储表的索引信息，必须同步删除以避免产生孤立索引。（可能存在不止一个）
+    \item \textbf{元数据文件（.meta）}：记录表的 schema 等元数据信息。
+\end{itemize}
+
+\subsubsection{语法与词法解析}
+在 MiniOB 中，用户的 DROP TABLE 命令首先经过词法解析和语法解析：
+\begin{itemize}
+    \item \textbf{词法解析（Lexer）}：将输入的 SQL 字符串分解为标记（tokens），识别关键字 \texttt{DROP}、\texttt{TABLE} 以及表名。
+    \item \textbf{语法解析（Parser）}：将 token 序列转换为抽象语法树（AST），生成对应的 \texttt{DropTableStmt} 对象，用于将信息传递到执行器中进行后续处理的规划。
+\end{itemize}
+
+\subsubsection{执行器（Executor）}
+\begin{itemize}
+    \item MiniOB 中的执行器负责将语法树中的 DROP TABLE 映射到下层的具体操作。
+    \item \texttt{DropTableExecutor} 会检查表是否存在，验证相关约束，并调用数据库层的删除操作。
+\end{itemize}
+
+\subsubsection{三层接口的实现}
+\paragraph{Database层}
+如下所示是数据库层的表删除接口，其核心代码如下：
+\begin{itemize}
+    \item 找到数据库实例中维护的对应表实例，清除数据库实例为其维护的所有资源。
+    \item 获取表对应的存储引擎，并调用表实例的下层接口 drop 完成文件的删除和下层资源的清理。
+\end{itemize}
+
+\begin{lstlisting}
+RC Db::drop_table(const char *table_name)
+{
+  RC rc = RC::SUCCESS;
+  Table *table_to_drop = find_table(table_name);
+
+  ...
+
+  // drop函数待定义 --> 清理资源
+  rc = table_to_drop->drop(
+      this,
+      table_id,
+      table_file_path.c_str(),
+      table_name,
+      path_.c_str(),
+      get_storage_engine()
+  );
+
+  ...
+
+  // 清除打开表的记录
+  string table_name_string(table_name);
+  opened_tables_.erase(table_name_string);
+
+  ...
+}
+\end{lstlisting}
+
+\paragraph{Table层}
+如下所示是表层的删除接口，其核心代码如下：
+\begin{itemize}
+    \item 根据获取到的路径，将表的数据文件和元文件进行删除。
+    \item 继续调用下层接口，清理该表对应的存储引擎和缓冲区资源。
+\end{itemize}
+\begin{lstlisting}
+RC Table::drop(Db *db, int32_t table_id, const char *meta_path, const char *table_name, const char *base_dir, StorageEngine storage_engine)
+{
+    ...
+
+  // 查找表的元数据，确保该表存在
+  std::string name1 = table_meta_.name();
+  std::string name2 = table_name;
+
+  // 关闭并清理表的存储引擎
+  if (engine_) {
+    // 自定义close, 关闭索引等 （--> 内部调用了buffer pool的close_file --> 进一步调用manager的close_file）
+    RC rc = engine_->close();
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("Failed to close table engine: %s", table_meta_.name());
+      return rc;
+    }
+    engine_.reset();
+  }
+
+  string data_file = table_data_file(base_dir, table_name);
+  // db为传入的this
+  BufferPoolManager &bpm = db->buffer_pool_manager();
+  // close buffer pool 中的文件并且进行删除
+  RC rc = bpm.drop_file(data_file.c_str());
+
+  if (remove(meta_path) != 0) {
+    LOG_ERROR("Failed to remove table meta file: %s", meta_path);
+    return RC::IOERR_DELETE;
+  }
+
+  ...
+}
+\end{lstlisting}
+
+\paragraph{Storage engine层}
+如下所示是存储引擎层的表删除接口，负责清除索引和记录处理器，释放相关资源。
+\begin{lstlisting}
+RC HeapTableEngine::close()
+{
+  // 关闭索引
+  indexes_.clear();  
+
+  // 关闭记录处理器
+  if (record_handler_ != nullptr) {
+    // 已经完整实现
+    record_handler_->close();  
+    delete record_handler_;
+    record_handler_ = nullptr;
+  }
+
+  ...
+}
+\end{lstlisting}
+
+\subsubsection{小结}
+Drop Table 操作在 MiniOB 中虽然从用户视角简单，但在内核中涉及语法解析、执行器调度以及多文件删除。通过逐层传递信息并对数据文件、索引文件和元数据文件等进行处理，可以保证操作的便捷性、正确性和数据库的一致性。
+
+\subsection{ORDER BY 功能实现}
+
+\subsubsection{概述}
+ORDER BY 是 SQL 中用于对查询结果进行排序的操作，在查询中至关重要。在 MiniOB 中，ORDER BY 的实现涉及语法解析、逻辑算子构建、物理算子执行以及记录排序等，这里重点关注算子及其下层操作的实现。
+
+\subsubsection{语法与词法解析}
+\begin{itemize}
+    \item \textbf{词法解析（Lexer）}：将 SQL 查询字符串分解，然后识别 order by，并递归识别其后的排序字段和升降序标识。
+    \item \textbf{语法解析（Parser）}：生成使用表达式存储了 order by 字段与升降序信息的查询语句对象（\texttt{SelectStmt}）。
+\end{itemize}
+
+\subsubsection{Order By逻辑算子（Order By Logical Operator）}
+\begin{itemize}
+    \item MiniOB 会在逻辑计划阶段生成相应的逻辑算子，如 \texttt{LogicalSort}。
+    \item 逻辑算子描述排序操作的语义，而不关心具体的执行细节。
+    \item 可以与其他逻辑算子（如扫描、投影、过滤等）组合形成完整的查询计划。
+\end{itemize}
+
+\subsubsection{Order By物理算子（Order By Physical Operator）}
+\paragraph{\heiti 物理算子功能概述}
+\begin{itemize}
+    \item 物理算子将逻辑计划映射为具体的操作，每个物理算子最终均会在执行算子树时，获取前面算子的结果，然后对其执行自身的逻辑。
+    \item MiniOB 的元组获取采用从底层数据文件流式读取，并向上传递的实现方式（扫描算子）。order by 的物理算子会将流在内存处进行截断，直到流中所有的目标元组全部获取出来，再统一排序并向上层算子或客户端传递。
+\end{itemize}
+
+\paragraph{\heiti 物理算子核心代码} 
+
+根据前面的功能概述，ORDER BY 物理算子的核心执行流程可以概括为三个阶段：数据收集、内存排序以及结果输出，其关键代码结构如下所示。
+
+在物理算子的执行中，open 用于截断数据流，通过子算子提前将所有符合条件的元组获取出来，然后使用sort\_buffer进行内存排序。
+
+\begin{lstlisting}
+    RC OrderByPhysicalOperator::open(Trx *trx)
+    {
+        PhysicalOperator *child = children_.front().get();
+        child->open(trx);
+
+        while (child->next() == RC::SUCCESS) {
+            Tuple *tuple = child->current_tuple();
+            ValueListTuple *copy = new ValueListTuple();
+            ValueListTuple::make(*tuple, *copy);
+            tuples_buffer.emplace_back(copy);
+        }
+
+        return sort_buffer();
+    }
+\end{lstlisting}
+
+sort\_buffer 支持多字段、升降序的方式，其排序依据主要是物理算子从上层获取的排序表达式（包含字段、升降序信息）。
+
+\begin{lstlisting}
+    RC OrderByPhysicalOperator::sort_buffer()
+    {
+        std::sort(tuples_buffer.begin(), tuples_buffer.end(),
+            [this](ValueListTuple *a, ValueListTuple *b) {
+
+            for (const auto &expr : order_by_expressions_) {
+                Value va, vb;
+                a->nonstrict_get_value(expr->field_name(), va);
+                b->nonstrict_get_value(expr->field_name(), vb);
+
+                int cmp = va.compare(vb);
+                if (cmp != 0) {
+                return (expr->order() == DESC) ? (cmp > 0) : (cmp < 0);
+                }
+            }
+            return true;
+            }
+        );
+        return RC::SUCCESS;
+    }
+\end{lstlisting}
+
+next 是所有算子流式获取下一个元组的统一接口。由于 order by 物理算子已经在 open 中将所有目标元组全部取出，因此这里只需要进行下标的递增即可。
+
+\begin{lstlisting}
+    RC OrderByPhysicalOperator::next()
+    {
+        index++;
+        return RC::SUCCESS;
+    }
+\end{lstlisting}
+
+currnet\_tuple 是所有算子将元组读取出来，用于向上传递的统一接口。
+
+\begin{lstlisting}
+    Tuple *OrderByPhysicalOperator::current_tuple()
+    {
+        if (index >= tuples_buffer.size()) {
+            return nullptr;
+        }
+        return tuples_buffer[index];
+    }
+\end{lstlisting}
+
+\paragraph{\heiti 算子执行流程分析}
+
+从执行流程上看，ORDER BY 物理算子的行为具有明显的阶段性。
+
+首先，ORDER BY 算子并不直接访问底层数据文件。
+其下层算子（如表扫描算子）通过存储引擎读取数据页，
+并逐条构造逻辑元组（\texttt{Tuple}）返回给 ORDER BY 算子。
+ORDER BY 与存储引擎之间的交互边界由子算子明确隔离。
+
+其次，在算子打开阶段，ORDER BY 会完整遍历子算子的输出，
+并将每个元组拷贝为 \texttt{ValueListTuple} 缓存在
+\texttt{tuples\_buffer} 中。
+这一设计表明 MiniOB 当前的 ORDER BY 实现采用\textbf{纯内存排序}，
+不支持外部排序，也不具备流式输出能力。
+
+排序阶段通过 \texttt{std::sort} 完成，其比较逻辑严格按照
+ORDER BY 子句中字段的声明顺序执行。
+对于每个排序字段，算子从元组中提取对应的 \texttt{Value}，
+并通过 \texttt{Value::compare()} 完成类型无关的比较。
+若当前字段值相等，则继续比较下一个字段，
+直至得出确定的顺序关系或遍历完所有排序字段。
+
+在排序完成后，ORDER BY 算子进入结果输出阶段。
+此时 \texttt{next()} 方法仅维护一个递增索引，
+\texttt{current\_tuple()} 直接返回已排序缓冲区中的对应元素，
+不再涉及任何排序或存储操作。
+
+\paragraph{\heiti 内存管理与资源释放}
+
+由于 ORDER BY 在执行过程中显式分配了
+\texttt{ValueListTuple} 对象，算子在关闭阶段需要逐一释放缓存中的元组，
+并清空内部缓冲区。
+该过程由 \texttt{close()} 方法统一完成，体现了 MiniOB 中
+物理算子对内存资源生命周期的显式管理方式。
+
+\begin{verbatim}
+    RC OrderByPhysicalOperator::close()
+    {
+        LOG_INFO("Execute order by physical operator's close method");
+        RC rc = RC::SUCCESS;
+        // 清理所有分配的内存
+        for (auto *ptr : tuples_buffer) {
+            if (ptr != nullptr) {
+            delete ptr;
+            }
+        }
+        tuples_buffer.clear();
+        rc = children_[0]->close();
+        return rc;
+    }
+\end{verbatim}
+
+总体来看，MiniOB 中 ORDER BY 的物理实现结构清晰，
+通过阻塞式算子和内存排序完成结果集的有序输出，
+同时也暴露了在大规模数据场景下受限于内存容量的潜在问题，
+为后续引入外部排序或基于索引的排序优化提供了改进空间。
+
+\subsubsection{小结}
+ORDER BY 在 MiniOB 中虽然是常见 SQL 操作，但其实现涉及逻辑算子与物理算子的映射，以及对存储引擎数据块中元组的访问和排序。物理算子在执行排序时，会结合内存资源情况，高效完成查询结果的排序输出。
+
+\subsection{NULL 功能实现}
+
+\subsubsection{概述}
+在数据库中，NULL 用于表示缺失或未知的值。MiniOB 对 NULL 的支持贯穿查询解析、执行和存储。在本节中，我们重点关注存储引擎等偏底层的位置如何处理 NULL 值的相关实现。
+
+\subsubsection{语法与词法解析}
+\begin{itemize}
+    \item \textbf{词法解析（Lexer）}：将 SQL 输入分解为 token，包括关键字 \texttt{NULL}、表名、列名等。
+    \item \textbf{语法解析（Parser）}：构建抽象语法树（AST），识别列是否允许 NULL、INSERT/UPDATE 时的 NULL 值等。
+\end{itemize}
+在解析阶段，主要是标记哪些列或表达式可能包含 NULL。
+
+\subsubsection{实现原理}
+\begin{itemize}
+    \item 在miniob数据库中，所有的值由抽象数据类型value表示，value中有一个bool类型的成员变量is\_null用于标记该值是否为NULL，这使得在存储和处理数据时可以通过判断来统一对待NULL值。
+    \item 存储引擎需要在数据块中为每一元组提供表示 NULL 的机制，例如使用位图（NULL bitmap）标记 NULL 值，我这里近似使用bool*来表示。
+    \item 读取和写入数据时，需要检查并维护该 NULL 位图，以保证 NULL 信息与实际数据一致。
+    \item 对于索引列，存储引擎需要额外处理 NULL 值在索引中的存储和查询。
+\end{itemize}
+
+\paragraph{\textbf{Value}}
+用于表达数据库中所有类型的值的抽象类Value的核心属性如下，在其中添加is\_null\_作为标记即可统一NULL与非NULL值的处理。这也是整个NULL功能实现的基础。
+\begin{lstlisting}
+    class Value
+    {
+            ...
+        private:
+        AttrType attr_type_ = AttrType::UNDEFINED;
+        int      length_    = 0;
+        // 只能显式设置为null类型
+        bool is_null_ = false;
+
+        union Val
+        {
+            int32_t int_value_;
+            float   float_value_;
+            bool    bool_value_;
+            char   *pointer_value_;
+        } value_ = {.int_value_ = 0};
+
+        /// 是否申请并占有内存, 目前对于 CHARS 类型 own_data_ 为true, 其余类型 own_data_ 为false
+        bool own_data_ = false;
+    };
+\end{lstlisting}
+
+\paragraph{\textbf{Record}}
+Record类用于表示存储引擎中的一条记录，其相较Tuple类包含更多的信息。其与NULL相关的核心属性和方法如下，在其中添加is\_null\_“位图”用于标记每个字段是否为NULL，并提供相应的设置和获取方法。
+\begin{lstlisting}
+    class Record {
+            ...
+        public:
+        bool is_null(int index) const {
+            if (index < 0 || index >= is_null_.size()) {
+            LOG_WARN("Record::is_null() out of range, index = %d !", index);
+            return false;
+            }
+            return is_null_[index]; 
+        }
+
+        void set_bitmap(int field_id, int fields_record_size, bool n) {
+            bool *bitmap = reinterpret_cast<bool *>(data_ + fields_record_size);
+            bitmap[field_id] = n;
+            LOG_INFO("Set num %d field's bitmap information");
+        }
+
+        bool get_null_information(int field_id, int fields_record_size)
+        {
+            const bool *bitmap     = reinterpret_cast<const bool *>(data_ + fields_record_size);
+            LOG_INFO("Get num %d field's bitmap information");
+            return bitmap[field_id];
+        }
+
+        private:
+        RID    rid_;
+        string key_;  //// 记录的主键，用于 lsm-tree 引擎，需要考虑重构 Record
+        char  *data_  = nullptr;  // Value::data()获取到的具体值的指针
+        int    len_   = 0;      /// 如果不是record自己来管理内存，这个字段可能是无效的
+        bool   owner_ = false;  /// 表示当前是否由record来管理内存
+        vector<bool> is_null_;
+    };
+\end{lstlisting}
+
+\paragraph{\textbf{Table\_Scan}}
+表扫描算子需要从底层文件读取记录，此时需要根据记录的数据指针char*以及已知的偏移量，正确获取并还原每个字段的 NULL 状态标记。下面是表扫描算子中 next 方法的核心代码片段，展示了如何在从文件中读取记录的数据后处理 NULL 信息。
+\begin{lstlisting}
+    RC TableScanPhysicalOperator::next()
+    {
+            ...
+        while (OB_SUCC(rc = record_scanner_->next(current_record_))) {
+            ...
+            bool *null_bitmap = reinterpret_cast<bool *>(current_record_.data() + table_meta.fields_record_size());
+            for(int i = 0; i < table_meta.bitmap_record_size() / sizeof(bool); i++) {
+                if(null_bitmap[i]) {
+                    current_record_.set_is_null(i);
+                }
+            }
+        }
+    }
+\end{lstlisting}
+
+\subsubsection{底层文件管理}
+\begin{itemize}
+    \item 表数据文件（.data）中，NULL 位图通常与实际列数据一起存储。
+    \item 元数据文件（.meta）记录哪些列允许 NULL，以及列在数据文件中的偏移。
+    \item 在删除或更新表数据时，存储引擎必须同步更新 NULL 位图文件或数据块中相关信息。
+\end{itemize}
+
+\subsubsection{执行算子与查询处理}
+\begin{itemize}
+    \item 查询执行算子需要支持 NULL 值比较和逻辑判断，如 \texttt{IS NULL}、\texttt{IS NOT NULL}。
+    \item 在扫描、过滤和投影算子中，NULL 的处理会影响结果集和排序。
+    \item 物理算子在访问存储引擎时，会结合 NULL 位图完成数据过滤。
+\end{itemize}
+
+\subsubsection{小结}
+NULL 的实现虽然对用户透明，但在 MiniOB 中涉及存储引擎位图管理、数据文件与元数据文件的协同维护，以及查询算子对 NULL 值的正确处理。通过底层文件和算子机制，MiniOB 能够保证 NULL 值在数据存储和查询中的一致性。
 
 \section{功能测试}
 \begin{itemize}
