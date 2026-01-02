@@ -50,13 +50,14 @@
 \section*{题目}
 以miniob为基础的数据库设计
 
-\section{开发环境与开发工具}
+\section{开发环境与架构简介}
 \begin{itemize}
     \item Docker, Visual Studio Code
     \item MiniOB: OceanBase团队基于华中科技大学数据库课程原型开发的入门学习项目
 \end{itemize}
 
-\subsection*{MiniOB 架构}
+\subsection*{MiniOB 整体架构} 
+
 \begin{center}
     \includegraphics[width=0.8\textwidth]{miniob_arch.png}
 \end{center}
@@ -72,6 +73,9 @@
     \item 日志管理(Redo Log)：记录操作日志
     \item B+ Tree：索引存储结构
 \end{itemize}
+
+\paragraph{\heiti 注：}
+如上为MiniOB整体架构图，展示了各个模块及其交互关系。我们将在模块阐释与实现分析中{\heiti 重点关注}与存储引擎、B+树和文件组织等相关底层模块，{\heiti 淡化}对于语法解析器Parser、执行器Executor等上层模块的讨论。
 
 \subsection*{\heiti 表文件管理}
 \begin{figure}[H]
@@ -102,7 +106,7 @@ MiniOB 的缓冲区采用典型的 Buffer Pool 机制。内存被划分为若干
 
 当访问某个磁盘页面时，系统首先在 BPFrameManager 中查找空闲 frame；若存在，则将该 frame 与目标 page 绑定，并将页面数据读入内存。若内存中不存在空闲 frame，则需要从已占用的 frame 中选择一个进行淘汰，将其解除绑定后，重新关联到新页面并加载数据。
 
-MiniOB 采用 LRU（Least Recently Used）算法 作为页面替换策略，以优先淘汰最近最少使用的页面。
+值得注意的是，MiniOB 采用 LRU（Least Recently Used）算法 作为页面替换策略。
 
 \subsection*{\heiti 文件结构}
 \begin{figure}[H]
@@ -141,7 +145,7 @@ Record Manager 是在 Buffer Pool 的基础上实现的，比如 page0 是 Buffe
   \caption{索引文件图}
 \end{figure}
 
-\paragraph{叶子节点}
+\paragraph{\heiti 叶子节点}
 B+ 树中的每个结点都存放在一个固定大小的 page 中。每个 page 在文件中由 page\_num 唯一标识。结点页都包含一个公共头部（IndexNode），其中记录了结点是否为叶结点（is\_leaf）、当前结点中键的数量（key\_num）以及父结点的页号（parent，为 -1 表示无父结点）。
 
 叶子结点在公共头部之外，还维护了左右兄弟结点的页号（prev\_brother 和 next\_brother），用于支持顺序遍历和范围查询。页中剩余空间按顺序存放键值数据：每个键由索引列的值和对应记录的 RID 组成，Value 同样为 RID。因此，所有索引键及其对应的数据定位信息均存放在叶子结点中，符合 B+ 树“数据集中在叶子结点”的设计特点。
@@ -152,7 +156,7 @@ B+ 树中的每个结点都存放在一个固定大小的 page 中。每个 page
   \caption{叶子节点图}
 \end{figure}
 
-\paragraph{内部节点}
+\paragraph{\heiti 内部节点}
 内部结点和叶结点有两点不同，一个是没有左右结点的 page num；另一个是所存放的值是 page num，也就是标识了子结点的 page 位置。如下图所示，键值对在内部结点是这样表示的，第一个键值对中的键是一个无效数据，真正用于比较的只有 k1 和 k2。
 
 \begin{figure}[H]
@@ -161,7 +165,126 @@ B+ 树中的每个结点都存放在一个固定大小的 page 中。每个 page
   \caption{内部节点图}
 \end{figure}
 
-\section{具体设计}
+
+\section{\heiti 功能设计与代码实现}
+
+\subsection{NULL 功能实现}
+
+\subsubsection{概述}
+在数据库中，NULL 用于表示缺失或未知的值。MiniOB 对 NULL 的支持贯穿查询解析、执行和存储。在本节中，我们重点关注存储引擎等偏底层的位置如何处理 NULL 值的相关实现。
+
+\subsubsection{语法与词法解析}
+\begin{itemize}
+    \item \textbf{词法解析（Lexer）}：将 SQL 输入分解为 token，包括关键字 \texttt{NULL}、表名、列名等。
+    \item \textbf{语法解析（Parser）}：构建抽象语法树（AST），识别列是否允许 NULL、INSERT/UPDATE 时的 NULL 值等。
+\end{itemize}
+在解析阶段，主要是标记哪些列或表达式可能包含 NULL。
+
+\subsubsection{实现原理}
+\begin{itemize}
+    \item 在miniob数据库中，所有的值由抽象数据类型value表示，value中有一个bool类型的成员变量is\_null用于标记该值是否为NULL，这使得在存储和处理数据时可以通过判断来统一对待NULL值。
+    \item 存储引擎需要在数据块中为每一元组提供表示 NULL 的机制，例如使用位图（NULL bitmap）标记 NULL 值，我这里近似使用bool*来表示。
+    \item 读取和写入数据时，需要检查并维护该 NULL 位图，以保证 NULL 信息与实际数据一致。
+    \item 对于索引列，存储引擎需要额外处理 NULL 值在索引中的存储和查询。
+\end{itemize}
+
+\paragraph{\textbf{Value}}
+用于表达数据库中所有类型的值的抽象类Value的核心属性如下，在其中添加is\_null\_作为标记即可统一NULL与非NULL值的处理。这也是整个NULL功能实现的基础。
+\begin{lstlisting}
+    class Value
+    {
+            ...
+        private:
+        AttrType attr_type_ = AttrType::UNDEFINED;
+        int      length_    = 0;
+        // 只能显式设置为null类型
+        bool is_null_ = false;
+
+        union Val
+        {
+            int32_t int_value_;
+            float   float_value_;
+            bool    bool_value_;
+            char   *pointer_value_;
+        } value_ = {.int_value_ = 0};
+
+        /// 是否申请并占有内存, 目前对于 CHARS 类型 own_data_ 为true, 其余类型 own_data_ 为false
+        bool own_data_ = false;
+    };
+\end{lstlisting}
+
+\paragraph{\textbf{Record}}
+Record类用于表示存储引擎中的一条记录，其相较Tuple类包含更多的信息。其与NULL相关的核心属性和方法如下，在其中添加is\_null\_“位图”用于标记每个字段是否为NULL，并提供相应的设置和获取方法。
+\begin{lstlisting}
+    class Record {
+            ...
+        public:
+        bool is_null(int index) const {
+            if (index < 0 || index >= is_null_.size()) {
+            LOG_WARN("Record::is_null() out of range, index = %d !", index);
+            return false;
+            }
+            return is_null_[index]; 
+        }
+
+        void set_bitmap(int field_id, int fields_record_size, bool n) {
+            bool *bitmap = reinterpret_cast<bool *>(data_ + fields_record_size);
+            bitmap[field_id] = n;
+            LOG_INFO("Set num %d field's bitmap information");
+        }
+
+        bool get_null_information(int field_id, int fields_record_size)
+        {
+            const bool *bitmap     = reinterpret_cast<const bool *>(data_ + fields_record_size);
+            LOG_INFO("Get num %d field's bitmap information");
+            return bitmap[field_id];
+        }
+
+        private:
+        RID    rid_;
+        string key_;  // 记录的主键，用于 lsm-tree 引擎，需要考虑重构 Record
+        char  *data_  = nullptr;  // Value::data()获取到的具体值的指针
+        int    len_   = 0;      // 如果不是record自己来管理内存，这个字段可能是无效的
+        bool   owner_ = false;  // 表示当前是否由record来管理内存
+        vector<bool> is_null_;
+    };
+\end{lstlisting}
+
+\paragraph{\textbf{TableScan Operator}}
+表扫描算子需要从底层文件读取记录，此时需要根据记录的数据指针char*以及已知的偏移量，正确获取并还原每个字段的 NULL 状态标记。下面是表扫描算子中 next 方法的核心代码片段，展示了如何在从文件中读取记录的数据后处理 NULL 信息。
+\begin{lstlisting}
+    RC TableScanPhysicalOperator::next()
+    {
+            ...
+        while (OB_SUCC(rc = record_scanner_->next(current_record_))) {
+            ...
+            bool *null_bitmap = reinterpret_cast<bool *>(current_record_.data() + table_meta.fields_record_size());
+            for(int i = 0; i < table_meta.bitmap_record_size() / sizeof(bool); i++) {
+                if(null_bitmap[i]) {
+                    current_record_.set_is_null(i);
+                }
+            }
+        }
+    }
+\end{lstlisting}
+
+\subsubsection{底层文件管理}
+\begin{itemize}
+    \item 表数据文件（.data）中，NULL 位图通常与实际列数据一起存储。
+    \item 元数据文件（.meta）记录哪些列允许 NULL，以及列在数据文件中的偏移。
+    \item 在删除或更新表数据时，存储引擎必须同步更新 NULL 位图文件或数据块中相关信息。
+\end{itemize}
+
+\subsubsection{执行算子与查询处理}
+\begin{itemize}
+    \item 查询执行算子需要支持 NULL 值比较和逻辑判断，如 \texttt{IS NULL}、\texttt{IS NOT NULL}。
+    \item 在扫描、过滤和投影算子中，NULL 的处理会影响结果集和排序。
+    \item 物理算子在访问存储引擎时，会结合 NULL 位图完成数据过滤。
+\end{itemize}
+
+\subsubsection{小结}
+NULL 的实现虽然对用户透明，但在 MiniOB 中涉及存储引擎位图管理、数据文件与元数据文件的协同维护，以及聚合函数、查询算子等诸多模块对 NULL 值的正确处理。其实现的核心如前所述，但是在接下来介绍的各个功能模块的实现中均可以看到其身影。
+
 \subsection{UPDATE 实现流程}
 \begin{enumerate}
     \item \textbf{语法解析} (yacc\_sql.y)：解析表名、赋值列表、条件
@@ -433,7 +556,7 @@ CREATE TABLE users (
     \end{itemize}
 \end{enumerate}
 
-\subsection{JOIN Table 实现流程}
+\subsection{Join Table 实现流程}
 \begin{enumerate}
     \item \textbf{语法解析} (yacc\_sql.y)
     \begin{itemize}
@@ -1320,7 +1443,7 @@ if (value_expr->type() == ExprType::SUB_QUERY) {
     \end{itemize}
 \end{itemize}
 
-\subsection{六、ALIAS（别名）实现流程}
+\subsection{ALIAS（别名）实现流程}
 别名机制用于为表或字段提供临时名称，提升查询可读性和灵活性。MiniOB 支持表别名和字段别名，并处理了多层嵌套查询中的别名遮蔽问题。
 
 \begin{enumerate}
@@ -1810,123 +1933,6 @@ ORDER BY 子句中字段的声明顺序执行。
 
 \subsubsection{小结}
 ORDER BY 在 MiniOB 中虽然是常见 SQL 操作，但其实现涉及逻辑算子与物理算子的映射，以及对存储引擎数据块中元组的访问和排序。物理算子在执行排序时，会结合内存资源情况，高效完成查询结果的排序输出。
-
-\subsection{NULL 功能实现}
-
-\subsubsection{概述}
-在数据库中，NULL 用于表示缺失或未知的值。MiniOB 对 NULL 的支持贯穿查询解析、执行和存储。在本节中，我们重点关注存储引擎等偏底层的位置如何处理 NULL 值的相关实现。
-
-\subsubsection{语法与词法解析}
-\begin{itemize}
-    \item \textbf{词法解析（Lexer）}：将 SQL 输入分解为 token，包括关键字 \texttt{NULL}、表名、列名等。
-    \item \textbf{语法解析（Parser）}：构建抽象语法树（AST），识别列是否允许 NULL、INSERT/UPDATE 时的 NULL 值等。
-\end{itemize}
-在解析阶段，主要是标记哪些列或表达式可能包含 NULL。
-
-\subsubsection{实现原理}
-\begin{itemize}
-    \item 在miniob数据库中，所有的值由抽象数据类型value表示，value中有一个bool类型的成员变量is\_null用于标记该值是否为NULL，这使得在存储和处理数据时可以通过判断来统一对待NULL值。
-    \item 存储引擎需要在数据块中为每一元组提供表示 NULL 的机制，例如使用位图（NULL bitmap）标记 NULL 值，我这里近似使用bool*来表示。
-    \item 读取和写入数据时，需要检查并维护该 NULL 位图，以保证 NULL 信息与实际数据一致。
-    \item 对于索引列，存储引擎需要额外处理 NULL 值在索引中的存储和查询。
-\end{itemize}
-
-\paragraph{\textbf{Value}}
-用于表达数据库中所有类型的值的抽象类Value的核心属性如下，在其中添加is\_null\_作为标记即可统一NULL与非NULL值的处理。这也是整个NULL功能实现的基础。
-\begin{lstlisting}
-    class Value
-    {
-            ...
-        private:
-        AttrType attr_type_ = AttrType::UNDEFINED;
-        int      length_    = 0;
-        // 只能显式设置为null类型
-        bool is_null_ = false;
-
-        union Val
-        {
-            int32_t int_value_;
-            float   float_value_;
-            bool    bool_value_;
-            char   *pointer_value_;
-        } value_ = {.int_value_ = 0};
-
-        /// 是否申请并占有内存, 目前对于 CHARS 类型 own_data_ 为true, 其余类型 own_data_ 为false
-        bool own_data_ = false;
-    };
-\end{lstlisting}
-
-\paragraph{\textbf{Record}}
-Record类用于表示存储引擎中的一条记录，其相较Tuple类包含更多的信息。其与NULL相关的核心属性和方法如下，在其中添加is\_null\_“位图”用于标记每个字段是否为NULL，并提供相应的设置和获取方法。
-\begin{lstlisting}
-    class Record {
-            ...
-        public:
-        bool is_null(int index) const {
-            if (index < 0 || index >= is_null_.size()) {
-            LOG_WARN("Record::is_null() out of range, index = %d !", index);
-            return false;
-            }
-            return is_null_[index]; 
-        }
-
-        void set_bitmap(int field_id, int fields_record_size, bool n) {
-            bool *bitmap = reinterpret_cast<bool *>(data_ + fields_record_size);
-            bitmap[field_id] = n;
-            LOG_INFO("Set num %d field's bitmap information");
-        }
-
-        bool get_null_information(int field_id, int fields_record_size)
-        {
-            const bool *bitmap     = reinterpret_cast<const bool *>(data_ + fields_record_size);
-            LOG_INFO("Get num %d field's bitmap information");
-            return bitmap[field_id];
-        }
-
-        private:
-        RID    rid_;
-        string key_;  //// 记录的主键，用于 lsm-tree 引擎，需要考虑重构 Record
-        char  *data_  = nullptr;  // Value::data()获取到的具体值的指针
-        int    len_   = 0;      /// 如果不是record自己来管理内存，这个字段可能是无效的
-        bool   owner_ = false;  /// 表示当前是否由record来管理内存
-        vector<bool> is_null_;
-    };
-\end{lstlisting}
-
-\paragraph{\textbf{Table\_Scan}}
-表扫描算子需要从底层文件读取记录，此时需要根据记录的数据指针char*以及已知的偏移量，正确获取并还原每个字段的 NULL 状态标记。下面是表扫描算子中 next 方法的核心代码片段，展示了如何在从文件中读取记录的数据后处理 NULL 信息。
-\begin{lstlisting}
-    RC TableScanPhysicalOperator::next()
-    {
-            ...
-        while (OB_SUCC(rc = record_scanner_->next(current_record_))) {
-            ...
-            bool *null_bitmap = reinterpret_cast<bool *>(current_record_.data() + table_meta.fields_record_size());
-            for(int i = 0; i < table_meta.bitmap_record_size() / sizeof(bool); i++) {
-                if(null_bitmap[i]) {
-                    current_record_.set_is_null(i);
-                }
-            }
-        }
-    }
-\end{lstlisting}
-
-\subsubsection{底层文件管理}
-\begin{itemize}
-    \item 表数据文件（.data）中，NULL 位图通常与实际列数据一起存储。
-    \item 元数据文件（.meta）记录哪些列允许 NULL，以及列在数据文件中的偏移。
-    \item 在删除或更新表数据时，存储引擎必须同步更新 NULL 位图文件或数据块中相关信息。
-\end{itemize}
-
-\subsubsection{执行算子与查询处理}
-\begin{itemize}
-    \item 查询执行算子需要支持 NULL 值比较和逻辑判断，如 \texttt{IS NULL}、\texttt{IS NOT NULL}。
-    \item 在扫描、过滤和投影算子中，NULL 的处理会影响结果集和排序。
-    \item 物理算子在访问存储引擎时，会结合 NULL 位图完成数据过滤。
-\end{itemize}
-
-\subsubsection{小结}
-NULL 的实现虽然对用户透明，但在 MiniOB 中涉及存储引擎位图管理、数据文件与元数据文件的协同维护，以及查询算子对 NULL 值的正确处理。通过底层文件和算子机制，MiniOB 能够保证 NULL 值在数据存储和查询中的一致性。
 
 \section{功能测试}
 \begin{itemize}
