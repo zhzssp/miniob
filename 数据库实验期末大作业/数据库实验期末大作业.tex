@@ -9,16 +9,21 @@
 \usepackage{hyperref}
 \usepackage{amsmath}
 \usepackage{tikz}
+\usepackage{float}     % 提供 [H] 浮动控制符
 \usetikzlibrary{arrows, positioning}
 
 % 列表设置
 \setlist[itemize]{leftmargin=*, nosep}
 \setlist[enumerate]{leftmargin=*, nosep}
 
-
-
 \title{数据库系统实验课程设计报告}
-\author{姚书璟 \\ 学号：23336386 \\ 班级：8}
+\author{
+    郑皓 \\ 姚书璟\\ 罗斯
+    \and
+    学号：23336328  \\ 学号：23336386 \\ 学号：xxx
+    \and
+    班级：9 \\ 班级：8 \\ 班级：9
+}
 \date{提交时间：\rule{3cm}{0.4pt} 年 \rule{2cm}{0.4pt} 月 \rule{2cm}{0.4pt} 日}
 
 % ========== 解决中文代码注释问题 ==========
@@ -67,6 +72,94 @@
     \item 日志管理(Redo Log)：记录操作日志
     \item B+ Tree：索引存储结构
 \end{itemize}
+
+\subsection*{\heiti 表文件管理}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.6\textwidth]{file-arange.png}
+  \caption{表文件组织方式图}
+\end{figure}
+
+\begin{itemize}
+    \item test1.table：元数据文件，这里面存放了一些元数据。如：表名、数据的索引、字段类型、类型长度等。
+    \item test1.data：数据文件，真正记录存放的文件。
+    \item test1-i\_name.index：索引文件，索引文件有很多个，这里只展示一个示例。
+\end{itemize}
+
+
+\subsection*{\heiti 缓冲区结构}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.6\textwidth]{buffer-pool.png}
+  \caption{缓冲区结构示意图}
+\end{figure}
+
+\paragraph{\heiti 概述}
+
+MiniOB 的缓冲区采用典型的 Buffer Pool 机制。内存被划分为若干固定大小的页帧（frame），磁盘文件按固定大小的页（page）组织，每个 page 在内存中至多对应一个 frame，二者大小一致，数据交换以页为单位进行。
+
+在实现上，每个物理文件对应一个 DiskBufferPool 对象，而所有 DiskBufferPool 共享统一的页帧管理组件 BPFrameManager，由其负责 frame 的分配、回收与淘汰。
+
+当访问某个磁盘页面时，系统首先在 BPFrameManager 中查找空闲 frame；若存在，则将该 frame 与目标 page 绑定，并将页面数据读入内存。若内存中不存在空闲 frame，则需要从已占用的 frame 中选择一个进行淘汰，将其解除绑定后，重新关联到新页面并加载数据。
+
+MiniOB 采用 LRU（Least Recently Used）算法 作为页面替换策略，以优先淘汰最近最少使用的页面。
+
+\subsection*{\heiti 文件结构}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.6\textwidth]{file-structure.png}
+  \caption{文件结构图}
+\end{figure}
+
+\begin{itemize}
+    \item 文件上的第一页称为页头或文件头。文件头是一个特殊的页面，这个页面上会存放一个页号，这个页号肯定都是零号页，即 page num 是 0。
+    \item page count 表示当前的文件一共有多少个页面。
+    \item allocated pages 表示已经分配了多少个页面。如图所示标灰的是已经分配的三个页面。
+    \item Bitmap 表示每一个 bit 位当前对应的页面的分配状态，1 已分配页面，0 空闲页面。
+\end{itemize}
+
+
+\subsection*{\heiti 记录管理}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.6\textwidth]{record-manage.png}
+  \caption{记录管理结构图}
+\end{figure}
+
+\paragraph{\heiti 简述}
+
+Record Manager 是在 Buffer Pool 的基础上实现的，比如 page0 是 Buffer Pool 里面使用的元数据，Record Manager 利用了其他的一些页面。每个页面有一个头信息 Page Header，一个 Bitmap，Bitmap 为 0 表示最近的记录是不是已经有有效数据；1 表示有有效数据。Page Header 中记录了当前页面一共有多少记录、最多可以容纳多少记录、每个记录的实际长度与对齐后的长度等信息。
+
+\subsection*{\heiti B+树}
+
+\paragraph{索引文件}
+每一个索引文件都存储着一棵B+树，其第一个page为树的根节点。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.6\textwidth]{index-file.png}
+  \caption{索引文件图}
+\end{figure}
+
+\paragraph{叶子节点}
+B+ 树中的每个结点都存放在一个固定大小的 page 中。每个 page 在文件中由 page\_num 唯一标识。结点页都包含一个公共头部（IndexNode），其中记录了结点是否为叶结点（is\_leaf）、当前结点中键的数量（key\_num）以及父结点的页号（parent，为 -1 表示无父结点）。
+
+叶子结点在公共头部之外，还维护了左右兄弟结点的页号（prev\_brother 和 next\_brother），用于支持顺序遍历和范围查询。页中剩余空间按顺序存放键值数据：每个键由索引列的值和对应记录的 RID 组成，Value 同样为 RID。因此，所有索引键及其对应的数据定位信息均存放在叶子结点中，符合 B+ 树“数据集中在叶子结点”的设计特点。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.6\textwidth]{leaf.png}
+  \caption{叶子节点图}
+\end{figure}
+
+\paragraph{内部节点}
+内部结点和叶结点有两点不同，一个是没有左右结点的 page num；另一个是所存放的值是 page num，也就是标识了子结点的 page 位置。如下图所示，键值对在内部结点是这样表示的，第一个键值对中的键是一个无效数据，真正用于比较的只有 k1 和 k2。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.6\textwidth]{internal.png}
+  \caption{内部节点图}
+\end{figure}
 
 \section{具体设计}
 \subsection{UPDATE 实现流程}
