@@ -47,16 +47,29 @@
 \begin{document}
 \maketitle
 
-\section*{题目}
-以miniob为基础的数据库设计
+\section*{\heiti 课程设计题目}
+基于MiniOB的数据库内核设计
 
-\section{开发环境与架构简介}
+\section{\heiti 开发环境}
 \begin{itemize}
-    \item Docker, Visual Studio Code
+    \item 开发环境: Windows 11 + WSL
+    \item 开发工具: Docker, Visual Studio Code
     \item MiniOB: OceanBase团队基于华中科技大学数据库课程原型开发的入门学习项目
 \end{itemize}
 
-\subsection*{MiniOB 整体架构} 
+\paragraph{\heiti 环境配置}
+
+\begin{itemize}
+    \item 从 github 的 competition-2025 分支下载源码。
+    \item 使用 docker run -d --name miniob --privileged -v path\_to\_src:/root/miniob oceanbase/miniob 安装 docker 开发环境并绑定本地源码目录（路径为 path\_to\_src）。
+    \item 在使用 vscode 附加到容器后，使用 CTRL + SHIFT + P， 点击 Task: Run Task，然后点击里面已经设置好的 cmake 和 make 指令并选中{\heiti “继续而不扫描任务输出”}即可对源码进行编译。
+    \item 编译成功后，在 Task: Run Task 中找到 Run observer 指令即可运行 miniob 数据库服务器，再使用 Run obclient 指令即可运行客户端进行交互。
+\end{itemize}
+
+
+\section{\heiti MiniOB 系统架构说明}
+
+\subsection*{\heiti MiniOB 整体架构} 
 
 \begin{center}
     \includegraphics[width=0.8\textwidth]{miniob_arch.png}
@@ -168,10 +181,15 @@ B+ 树中的每个结点都存放在一个固定大小的 page 中。每个 page
 
 \section{\heiti 功能设计与代码实现}
 
-\subsection{NULL 功能实现}
+\subsection{\heiti NULL 功能实现}
 
 \subsubsection{概述}
-在数据库中，NULL 用于表示缺失或未知的值。MiniOB 对 NULL 的支持贯穿查询解析、执行和存储。在本节中，我们重点关注存储引擎等偏底层的位置如何处理 NULL 值的相关实现。
+在数据库中，NULL 用于表示缺失或未知的值。MiniOB 对 NULL 的支持贯穿查询解析、执行和存储。在本节中，我们重点关注存储引擎等偏底层的位置如何处理 NULL 值的相关实现。如下是我开发阶段绘制的实现流程思维导图，包含具体实现中的部分核心内容，可供参考：
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{null.png}
+    \caption{NULL 实现流程图}
+\end{figure}
 
 \subsubsection{语法与词法解析}
 \begin{itemize}
@@ -285,7 +303,7 @@ Record类用于表示存储引擎中的一条记录，其相较Tuple类包含更
 \subsubsection{小结}
 NULL 的实现虽然对用户透明，但在 MiniOB 中涉及存储引擎位图管理、数据文件与元数据文件的协同维护，以及聚合函数、查询算子等诸多模块对 NULL 值的正确处理。其实现的核心如前所述，但是在接下来介绍的各个功能模块的实现中均可以看到其身影。
 
-\subsection{UPDATE 实现流程}
+\subsection{\heiti UPDATE 实现流程}
 \begin{enumerate}
     \item \textbf{语法解析} (yacc\_sql.y)：解析表名、赋值列表、条件
     \begin{itemize}
@@ -556,7 +574,7 @@ CREATE TABLE users (
     \end{itemize}
 \end{enumerate}
 
-\subsection{Join Table 实现流程}
+\subsection{\heiti Join Table 实现流程}
 \begin{enumerate}
     \item \textbf{语法解析} (yacc\_sql.y)
     \begin{itemize}
@@ -842,7 +860,7 @@ NULL处理 & 跳过NULL键 & 处理NULL键 \\
 \caption{JOIN算法特性对比}
 \end{table}
 
-\subsection{复合索引实现流程}
+\subsection{\heiti 复合索引实现流程}
 \begin{enumerate}
     \item \textbf{语法解析} (yacc\_sql.y)
     \begin{itemize}
@@ -881,6 +899,18 @@ NULL处理 & 跳过NULL键 & 处理NULL键 \\
             \item 填充索引：扫描所有记录，插入复合键
         \end{itemize}
     \end{itemize}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.75\textwidth]{index-create.png}
+        \caption{索引创建流程图}
+    \end{figure}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.75\textwidth]{index-open.png}
+        \caption{打开索引（创建之后使用）流程图}
+    \end{figure}
     
     \item \textbf{复合键构建}
     
@@ -1000,7 +1030,7 @@ RC BplusTreeIndex::get_entry(const char *key, int key_len, list<RID> &rids) {
 \caption{复合索引前缀扩展规则}
 \end{table}
 
-\subsection{四、UNIQUE 索引实现流程}
+\subsection{\heiti UNIQUE 索引实现流程}
 UNIQUE 索引用于保证索引键的唯一性（NULL 值除外），其实现流程涵盖语法解析、元数据存储、创建/插入/更新阶段的唯一性检查，以及 NULL 值处理等环节。
 
 \begin{enumerate}
@@ -1225,7 +1255,7 @@ for (Index* index : indexes_) {
     \item \textbf{冲突处理}：通过返回\texttt{RC::RECORD\_DUPLICATE\_KEY}明确拒绝重复键，保证数据一致性。
 \end{itemize}
 
-\subsection{五、子查询实现流程}
+\subsection{\heiti 子查询实现流程}
 子查询是 SQL 中嵌套在其他查询内部的查询语句，支持在 WHERE 条件、UPDATE SET 子句、比较表达式和 IN/NOT IN 等场景中使用。以下是子查询在 MiniOB 中的实现流程：
 
 \begin{enumerate}
@@ -1443,7 +1473,7 @@ if (value_expr->type() == ExprType::SUB_QUERY) {
     \end{itemize}
 \end{itemize}
 
-\subsection{ALIAS（别名）实现流程}
+\subsection{\heiti ALIAS（别名）实现流程}
 别名机制用于为表或字段提供临时名称，提升查询可读性和灵活性。MiniOB 支持表别名和字段别名，并处理了多层嵌套查询中的别名遮蔽问题。
 
 \begin{enumerate}
@@ -1654,7 +1684,7 @@ for (auto &expr : expressions_) {
 \end{tabular}
 \end{center}
 
-\subsection{Drop Table 功能实现}
+\subsection{\heiti Drop Table 功能实现}
 
 \subsubsection{概述}
 Drop Table 是数据库中用于删除表及其相关数据的操作。在 MiniOB 中，该功能涉及 SQL 语法解析、执行器以及底层存储文件的删除等，这里重点关注对于数据文件、索引文件和元数据文件的处理。
@@ -1779,10 +1809,16 @@ RC HeapTableEngine::close()
 \subsubsection{小结}
 Drop Table 操作在 MiniOB 中虽然从用户视角简单，但在内核中涉及语法解析、执行器调度以及多文件删除。通过逐层传递信息并对数据文件、索引文件和元数据文件等进行处理，可以保证操作的便捷性、正确性和数据库的一致性。
 
-\subsection{ORDER BY 功能实现}
+\subsection{\heiti ORDER BY 功能实现}
 
 \subsubsection{概述}
-ORDER BY 是 SQL 中用于对查询结果进行排序的操作，在查询中至关重要。在 MiniOB 中，ORDER BY 的实现涉及语法解析、逻辑算子构建、物理算子执行以及记录排序等，这里重点关注算子及其下层操作的实现。
+ORDER BY 是 SQL 中用于对查询结果进行排序的操作，在查询中至关重要。在 MiniOB 中，ORDER BY 的实现涉及语法解析、逻辑算子构建、物理算子执行以及记录排序等，这里重点关注算子及其下层操作的实现。如下所示是我在开发过程中绘制的简单思维导图，仅供参考：
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{order-by.png}
+    \caption{order by 实现流程图}
+\end{figure}
 
 \subsubsection{语法与词法解析}
 \begin{itemize}
