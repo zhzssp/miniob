@@ -1973,16 +1973,53 @@ ORDER BY 在 MiniOB 中虽然是常见 SQL 操作，但其实现涉及逻辑算�
 \section{功能测试}
 \begin{itemize}
     \item \textbf{UPDATE测试}：\\
+    \textbf{测试sql语句:}
+    \texttt{CREATE TABLE Update\_table\_1(id int, t\_name char, col1 int, col2 int);\\
+    INSERT INTO Update\_table\_1 VALUES (1,'N1',1,1);\\
+    INSERT INTO Update\_table\_1 VALUES(2,'N2',1,1);\\
+    INSERT INTO Update\_table\_1 VALUES (3,'N3',2,1);\\
+    UPDATE Update\_table\_1 SET t\_name='N01' WHERE id=1;\\
+    SELECT * FROM Update\_table\_1;}\\
     \includegraphics[width=0.3\textwidth]{update_test.png}
     \item \textbf{JOIN测试}：\\
-     \includegraphics[width=0.3\textwidth]{join_test.png}
-     \item \textbf{唯一索引测试-违反唯一约束}：\\
-     \includegraphics[width=0.3\textwidth]{unique_index_success.png} \\
-     \item \textbf{唯一索引测试-唯一约束通过}：\\
+    \textbf{测试sql语句:}
+    \texttt{CREATE TABLE join\_table\_1(id int, name char);\\
+    CREATE TABLE join\_table\_2(id int, num int);\\
+    INSERT INTO join\_table\_1 VALUES (1, 'a');\\
+    INSERT INTO join\_table\_1 VALUES (2, 'b');\\
+    INSERT INTO join\_table\_1 VALUES (3, 'c');\\
+    INSERT INTO join\_table\_2 VALUES (1, 2);\\
+    INSERT INTO join\_table\_2 VALUES (2, 15);\\
+    SELECT * FROM join\_table\_1 INNER JOIN join\_table\_2 ON join\_table\_1.id=join\_table\_2.id;}\\
+    \includegraphics[width=0.3\textwidth]{join_test.png}
+    \item \textbf{唯一索引测试-违反唯一约束}：\\
+    \textbf{测试sql语句:}
+    \texttt{CREATE TABLE multi\_index3(id int, col1 int, col2 float, col3 char, col4 date, col5 int, col6 int);\\
+    CREATE UNIQUE INDEX i\_3\_i1 ON multi\_index3(id,col1);\\
+    INSERT INTO multi\_index3 VALUES(1,1,11.2,'a','2021-01-02',1,1);\\
+    INSERT INTO multi\_index3 VALUES(1,1,11.2,'a','2021-01-02',1,1);}\\
+    \includegraphics[width=0.3\textwidth]{unique_index_success.png}
+    \item \textbf{唯一索引测试-唯一约束通过}：\\
+    \textbf{测试sql语句:}
+    \texttt{INSERT INTO multi\_index3 VALUES(2,1,11.2,'a','2021-01-02',1,1);}\\
     \includegraphics[width=0.3\textwidth]{unique_index_fail.png}
     \item \textbf{子查询测试}：\\
+    \textbf{测试sql语句:}
+    \texttt{CREATE TABLE ssq\_1(id int, col1 int, feat1 float);\\
+    CREATE TABLE ssq\_2(id int, col2 int, feat2 float);\\
+    INSERT INTO ssq\_1 VALUES (1, 4, 11.2);\\
+    INSERT INTO ssq\_1 VALUES (2, 2, 12.0);\\
+    INSERT INTO ssq\_1 VALUES (3, 3, 13.5);\\
+    INSERT INTO ssq\_2 VALUES (1, 2, 13.0);\\
+    INSERT INTO ssq\_2 VALUES (2, 7, 10.5);\\
+    INSERT INTO ssq\_2 VALUES (5, 3, 12.6);\\
+    SELECT * FROM ssq\_1 WHERE id IN (SELECT ssq\_2.id FROM ssq\_2);}\\
     \includegraphics[width=0.3\textwidth]{subquery_test.png}
     \item \textbf{别名测试}：\\
+    \textbf{测试sql语句:}
+    \texttt{SELECT * FROM ssq\_1 WHERE id IN(SELECT ssq\_2.id FROM ssq\_2);\\
+    SELECT id AS i FROM ssq\_1 WHERE id IN(SELECT ssq\_2.id FROM ssq\_2);\\
+    SELECT id AS i FROM ssq\_1 AS s1 WHERE id IN (SELECT ssq\_2.id AS i FROM ssq\_2);}\\
     \includegraphics[width=0.3\textwidth]{alias_test.png}
 \end{itemize}
 
