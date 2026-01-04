@@ -1,5 +1,5 @@
 PWD e:/miniob/数据库实验期末大作业
 INPUT d:/TexLive/2025/texmf.cnf
 INPUT d:/TexLive/2025/texmf-dist/web2c/texmf.cnf
-INPUT d:/TexLive/2025/texmf-var/web2c/pdftex/pdflatex.fmt
+INPUT d:/TexLive/2025/texmf-var/web2c/xetex/xelatex.fmt
 INPUT e:/miniob/数据库实验期末大作业/数据库实验期末大作业.tex
