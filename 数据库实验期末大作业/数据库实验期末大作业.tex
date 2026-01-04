@@ -51,7 +51,6 @@
 基于MiniOB的数据库内核设计
 
 \section*{\heiti 组员分工}
-\centering
 \renewcommand{\arraystretch}{1.5}  % 增加表格行间距，更易读
 \begin{tabular}{|p{3cm}|p{12cm}|}
     \hline  % 绘制表格横线
@@ -2178,7 +2177,7 @@ ORDER BY 在 MiniOB 中虽然是常见 SQL 操作，但其实现涉及逻辑算�
 
 
 \section{\heiti 总结}
-本课程设计实现了基于MiniOB的数据库内核的功能扩展，涵盖：
+\paragraph{本课程设计实现了基于MiniOB的数据库内核的功能扩展，涵盖：}
 \begin{itemize}
     \item UPDATE操作的原子性与索引一致性
     \item JOIN查询的优化执行（Hash Join/Nested Loop Join）
@@ -2189,6 +2188,7 @@ ORDER BY 在 MiniOB 中虽然是常见 SQL 操作，但其实现涉及逻辑算�
     \item ORDER BY的内存排序
     \item NULL值的支持与处理
 \end{itemize}
-功能测试模块验证了各项功能的正确性，为了简化，我们并没有将所有相关功能的测试均展示出来。本次设计深化了我们对数据库内核架构与自顶向下实现细节的理解，也为未来在其上进行更复杂功能的开发奠定了基础。
+
+\paragraph{  功能测试模块验证了各项功能的正确性，为了简化，我们并没有将所有相关功能的测试均展示出来。本次设计深化了我们对数据库内核架构与自顶向下实现细节的理解，也为未来在其上进行更复杂功能的开发奠定了基础。}
 
 \end{document}
