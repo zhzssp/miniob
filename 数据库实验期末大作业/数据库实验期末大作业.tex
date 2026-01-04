@@ -16,7 +16,7 @@
 \setlist[itemize]{leftmargin=*, nosep}
 \setlist[enumerate]{leftmargin=*, nosep}
 
-\title{数据库系统实验课程设计报告}
+\title{\heiti 数据库系统实验课程设计报告}
 \author{
     郑皓 \\ 姚书璟\\ 罗斯
     \and
@@ -49,6 +49,24 @@
 
 \section*{\heiti 课程设计题目}
 基于MiniOB的数据库内核设计
+
+\section*{\heiti 组员分工}
+% 使用描述性列表环境，自动对齐，层次清晰
+\begin{description}
+    \item[组长：郑皓] 
+          \begin{itemize}
+              \item Drop Table、NULL和Order By功能设计与实现，以及报告中对应内容的编写
+              \item 报告中环境配置与系统架构说明等的编写，报告整体的排版与优化
+          \end{itemize}
+    \item[组员1：xxx] 
+          \begin{itemize}
+              \item  xxx
+          \end{itemize}
+    \item[组员2：xxx] 
+          \begin{itemize}
+              \item xxx
+          \end{itemize}
+\end{description}
 
 \section{\heiti 开发环境}
 \begin{itemize}
@@ -1971,66 +1989,205 @@ ORDER BY 子句中字段的声明顺序执行。
 ORDER BY 在 MiniOB 中虽然是常见 SQL 操作，但其实现涉及逻辑算子与物理算子的映射，以及对存储引擎数据块中元组的访问和排序。物理算子在执行排序时，会结合内存资源情况，高效完成查询结果的排序输出。
 
 \section{功能测试}
-\begin{itemize}
-    \item \textbf{UPDATE测试}：\\
-    \textbf{测试sql语句:}
-    \texttt{CREATE TABLE Update\_table\_1(id int, t\_name char, col1 int, col2 int);\\
-    INSERT INTO Update\_table\_1 VALUES (1,'N1',1,1);\\
-    INSERT INTO Update\_table\_1 VALUES(2,'N2',1,1);\\
-    INSERT INTO Update\_table\_1 VALUES (3,'N3',2,1);\\
-    UPDATE Update\_table\_1 SET t\_name='N01' WHERE id=1;\\
-    SELECT * FROM Update\_table\_1;}\\
-    \includegraphics[width=0.3\textwidth]{update_test.png}
-    \item \textbf{JOIN测试}：\\
-    \textbf{测试sql语句:}
-    \texttt{CREATE TABLE join\_table\_1(id int, name char);\\
-    CREATE TABLE join\_table\_2(id int, num int);\\
-    INSERT INTO join\_table\_1 VALUES (1, 'a');\\
-    INSERT INTO join\_table\_1 VALUES (2, 'b');\\
-    INSERT INTO join\_table\_1 VALUES (3, 'c');\\
-    INSERT INTO join\_table\_2 VALUES (1, 2);\\
-    INSERT INTO join\_table\_2 VALUES (2, 15);\\
-    SELECT * FROM join\_table\_1 INNER JOIN join\_table\_2 ON join\_table\_1.id=join\_table\_2.id;}\\
-    \includegraphics[width=0.3\textwidth]{join_test.png}
-    \item \textbf{唯一索引测试-违反唯一约束}：\\
-    \textbf{测试sql语句:}
-    \texttt{CREATE TABLE multi\_index3(id int, col1 int, col2 float, col3 char, col4 date, col5 int, col6 int);\\
-    CREATE UNIQUE INDEX i\_3\_i1 ON multi\_index3(id,col1);\\
-    INSERT INTO multi\_index3 VALUES(1,1,11.2,'a','2021-01-02',1,1);\\
-    INSERT INTO multi\_index3 VALUES(1,1,11.2,'a','2021-01-02',1,1);}\\
-    \includegraphics[width=0.3\textwidth]{unique_index_success.png}
-    \item \textbf{唯一索引测试-唯一约束通过}：\\
-    \textbf{测试sql语句:}
-    \texttt{INSERT INTO multi\_index3 VALUES(2,1,11.2,'a','2021-01-02',1,1);}\\
-    \includegraphics[width=0.3\textwidth]{unique_index_fail.png}
-    \item \textbf{子查询测试}：\\
-    \textbf{测试sql语句:}
-    \texttt{CREATE TABLE ssq\_1(id int, col1 int, feat1 float);\\
-    CREATE TABLE ssq\_2(id int, col2 int, feat2 float);\\
-    INSERT INTO ssq\_1 VALUES (1, 4, 11.2);\\
-    INSERT INTO ssq\_1 VALUES (2, 2, 12.0);\\
-    INSERT INTO ssq\_1 VALUES (3, 3, 13.5);\\
-    INSERT INTO ssq\_2 VALUES (1, 2, 13.0);\\
-    INSERT INTO ssq\_2 VALUES (2, 7, 10.5);\\
-    INSERT INTO ssq\_2 VALUES (5, 3, 12.6);\\
-    SELECT * FROM ssq\_1 WHERE id IN (SELECT ssq\_2.id FROM ssq\_2);}\\
-    \includegraphics[width=0.3\textwidth]{subquery_test.png}
-    \item \textbf{别名测试}：\\
-    \textbf{测试sql语句:}
-    \texttt{SELECT * FROM ssq\_1 WHERE id IN(SELECT ssq\_2.id FROM ssq\_2);\\
-    SELECT id AS i FROM ssq\_1 WHERE id IN(SELECT ssq\_2.id FROM ssq\_2);\\
-    SELECT id AS i FROM ssq\_1 AS s1 WHERE id IN (SELECT ssq\_2.id AS i FROM ssq\_2);}\\
-    \includegraphics[width=0.3\textwidth]{alias_test.png}
-\end{itemize}
 
-\section{总结}
-本设计实现了基于MiniOB的数据库核心功能扩展，涵盖：
+\subsection{\heiti UPDATE 测试}
+
+\begin{verbatim}
+    CREATE TABLE Update_table_1(id int, t_name char, col1 int, col2 int);
+    INSERT INTO Update_table_1 VALUES (1,'N1',1,1);
+    INSERT INTO Update_table_1 VALUES (2,'N2',1,1);
+    INSERT INTO Update_table_1 VALUES (3,'N3',2,1);
+    UPDATE Update_table_1 SET t_name='N01' WHERE id=1;
+    SELECT * FROM Update_table_1;
+\end{verbatim}
+\vspace{2mm}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.4\textwidth]{update_test.png}
+    \caption{UPDATE 测试结果截图}
+    \label{fig:update_test}
+\end{figure}
+
+\bigskip
+
+\subsection{\heiti JOIN 测试}
+
+\begin{verbatim}
+    CREATE TABLE join_table_1(id int, name char);
+    CREATE TABLE join_table_2(id int, num int);
+
+    INSERT INTO join_table_1 VALUES (1, 'a');
+    INSERT INTO join_table_1 VALUES (2, 'b');
+    INSERT INTO join_table_1 VALUES (3, 'c');
+    INSERT INTO join_table_2 VALUES (1, 2);
+    INSERT INTO join_table_2 VALUES (2, 15);
+
+    SELECT * FROM join_table_1
+    INNER JOIN join_table_2
+    ON join_table_1.id = join_table_2.id;
+\end{verbatim}
+\vspace{2mm}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.4\textwidth]{join_test.png}
+    \caption{JOIN 测试结果截图}
+    \label{fig:join_test}
+\end{figure}
+
+\bigskip
+
+\subsection{\heiti 唯一索引测试 - 违反唯一约束}
+
+\begin{verbatim}
+    CREATE TABLE multi_index3(id int, col1 int, col2 float, col3 char, col4 date, col5 int, col6 int);
+    CREATE UNIQUE INDEX i_3_i1 ON multi_index3(id,col1);
+
+    INSERT INTO multi_index3 VALUES(1,1,11.2,'a','2021-01-02',1,1);
+    INSERT INTO multi_index3 VALUES(1,1,11.2,'a','2021-01-02',1,1);
+\end{verbatim}
+\vspace{2mm}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.4\textwidth]{unique_index_success.png}
+    \caption{唯一索引测试（违反唯一约束）结果截图}
+    \label{fig:unique_index_fail}
+\end{figure}
+
+\bigskip
+
+\subsection{\heiti 唯一索引测试 - 唯一约束通过}
+
+\begin{verbatim}
+    INSERT INTO multi_index3 VALUES(2,1,11.2,'a','2021-01-02',1,1);
+\end{verbatim}
+\vspace{2mm}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.4\textwidth]{unique_index_fail.png}
+    \caption{唯一索引测试（唯一约束通过）结果截图}
+    \label{fig:unique_index_pass}
+\end{figure}
+
+\bigskip
+
+\subsection{\heiti 子查询测试}
+
+\begin{verbatim}
+    CREATE TABLE ssq_1(id int, col1 int, feat1 float);
+    CREATE TABLE ssq_2(id int, col2 int, feat2 float);
+
+    INSERT INTO ssq_1 VALUES (1, 4, 11.2);
+    INSERT INTO ssq_1 VALUES (2, 2, 12.0);
+    INSERT INTO ssq_1 VALUES (3, 3, 13.5);
+    INSERT INTO ssq_2 VALUES (1, 2, 13.0);
+    INSERT INTO ssq_2 VALUES (2, 7, 10.5);
+    INSERT INTO ssq_2 VALUES (5, 3, 12.6);
+
+    SELECT * FROM ssq_1
+    WHERE id IN (SELECT ssq_2.id FROM ssq_2);
+\end{verbatim}
+\vspace{2mm}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.4\textwidth]{subquery_test.png}
+    \caption{子查询测试结果截图}
+    \label{fig:subquery_test}
+\end{figure}
+
+\bigskip
+
+\subsection{\heiti 别名测试}
+
+\begin{verbatim}
+    SELECT * FROM ssq_1 WHERE id IN(SELECT ssq_2.id FROM ssq_2);
+    SELECT id AS i FROM ssq_1 WHERE id IN(SELECT ssq_2.id FROM ssq_2);
+    SELECT id AS i FROM ssq_1 AS s1 WHERE id IN (SELECT ssq_2.id AS i FROM ssq_2);
+\end{verbatim}
+\vspace{2mm}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.4\textwidth]{alias_test.png}
+    \caption{别名测试结果截图}
+    \label{fig:alias_test}
+\end{figure}
+
+
+\subsection{\heiti Drop Table测试}
+\begin{verbatim}
+    CREATE TABLE Drop_table_6(id int, t_name char);
+    CREATE INDEX index_id on Drop_table_6(id);
+    INSERT INTO Drop_table_6 VALUES (1,'OB');
+    DROP TABLE Drop_table_6;
+    SELECT * FROM Drop_table_6;
+\end{verbatim}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.4\textwidth]{drop-table-test.png}
+    \caption{别名测试结果截图}
+    \label{fig:alias_test}
+\end{figure}
+
+
+\subsection{\heiti Order By测试}
+\begin{verbatim}
+    create table t_order_by(id int, score float, name char);
+
+    insert into t_order_by values(3, 1.0, 'a');
+    insert into t_order_by values(1, 2.0, 'b');
+    insert into t_order_by values(4, 3.0, 'c');
+    insert into t_order_by values(3, 2.0, 'c');
+    insert into t_order_by values(3, 4.0, 'c');
+    insert into t_order_by values(3, 3.0, 'd');
+    insert into t_order_by values(3, 2.0, 'f');
+
+    select * from t_order_by order by id;
+    select * from t_order_by order by id desc;
+    select * from t_order_by order by name desc;
+\end{verbatim}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.4\textwidth]{order-by-test.png}
+    \caption{别名测试结果截图}
+    \label{fig:alias_test}
+\end{figure}
+
+
+\subsection{\heiti NULL测试}
+\begin{verbatim}
+    CREATE TABLE null_table(id int not null, num int null, price float not null, birthday date null);
+
+    INSERT INTO null_table VALUES (1, 18, 10.0, '2020-01-01');
+    INSERT INTO null_table VALUES (2, null, 20.0, '2010-01-11');
+    INSERT INTO null_table VALUES (3, 12, 30.0, null);
+    INSERT INTO null_table VALUES (4, 15, 30.0, '2021-01-31');
+
+    SELECT * FROM null_table where 1 is null;
+    SELECT * FROM null_table where null=1;
+    SELECT count(birthday) FROM null_table;
+\end{verbatim}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.4\textwidth]{null-test.png}
+    \caption{别名测试结果截图}
+    \label{fig:alias_test}
+\end{figure}
+
+
+\section{\heiti 总结}
+本课程设计实现了基于MiniOB的数据库内核的功能扩展，涵盖：
 \begin{itemize}
     \item UPDATE操作的原子性与索引一致性
     \item JOIN查询的优化执行（Hash Join/Nested Loop Join）
     \item 复合索引的前缀扫描与唯一约束
     \item 子查询的标量执行与相关子查询
     \item 别名的多层解析与遮蔽机制
+    \item Drop Table的文件删除
+    \item ORDER BY的内存排序
+    \item NULL值的支持与处理
 \end{itemize}
+功能测试模块验证了各项功能的正确性，为了简化，我们并没有将所有相关功能的测试均展示出来。本次设计深化了我们对数据库内核架构与自顶向下实现细节的理解，也为未来在其上进行更复杂功能的开发奠定了基础。
 
 \end{document}
