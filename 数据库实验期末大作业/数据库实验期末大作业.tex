@@ -48,7 +48,7 @@
 \maketitle
 
 \section*{\heiti 课程设计题目}
-基于MiniOB的数据库内核设计
+基于MiniOB的数据库内核设计，github地址：\textbf{\heiti https://github.com/zhzssp/miniob.git}
 
 \section*{\heiti 组员分工}
 \renewcommand{\arraystretch}{1.5}  % 增加表格行间距，更易读
@@ -78,7 +78,7 @@
 \paragraph{\heiti 环境配置}
 
 \begin{itemize}
-    \item 从 github 的 competition-2025 分支下载源码。
+    \item 从 github 仓库的 competition-2025 分支下载源码。
     \item 使用 docker run -d --name miniob --privileged -v path\_to\_src:/root/miniob oceanbase/miniob 安装 docker 开发环境并绑定本地源码目录（路径为 path\_to\_src）。
     \item 在使用 vscode 附加到容器后，使用 CTRL + SHIFT + P， 点击 Task: Run Task，然后点击里面已经设置好的 cmake 和 make 指令并选中{\heiti “继续而不扫描任务输出”}即可对源码进行编译。
     \item 编译成功后，在 Task: Run Task 中找到 Run observer 指令即可运行 miniob 数据库服务器，再使用 Run obclient 指令即可运行客户端进行交互。
@@ -196,6 +196,24 @@ B+ 树中的每个结点都存放在一个固定大小的 page 中。每个 page
   \caption{内部节点图}
 \end{figure}
 
+\subsection*{\heiti 算子（Operator）树}
+\paragraph{\heiti 概述}
+
+自底向上地执行 Physical Operator Tree 上的各个算子，即可实现完整的 SQL 查询逻辑。对于树上的每个算子，有 open，next，close 等方法，通过 next去递归执行算子。下面是算子树结构的简单表示\textbf{\heiti （逻辑算子树的结构和物理算子树一致）}，还可以添加 Group By 和 Having 等算子来进一步扩展功能。
+
+\begin{verbatim}
+     project
+        |
+    predicate
+        |
+    group by
+        |
+    order by
+        |
+    join table
+    |         |
+table scan  table scan
+\end{verbatim}
 
 \section{\heiti 功能设计与代码实现}
 
@@ -319,7 +337,7 @@ Record类用于表示存储引擎中的一条记录，其相较Tuple类包含更
 \end{itemize}
 
 \subsubsection{小结}
-NULL 的实现虽然对用户透明，但在 MiniOB 中涉及存储引擎位图管理、数据文件与元数据文件的协同维护，以及聚合函数、查询算子等诸多模块对 NULL 值的正确处理。其实现的核心如前所述，但是在接下来介绍的各个功能模块的实现中均可以看到其身影。
+NULL 的实现虽然对用户透明，但在 MiniOB 中涉及存储引擎位图管理、数据文件与元数据文件的协同维护，以及聚合函数、查询算子等诸多模块对 NULL 值的正确处理。其实现的核心如前所述，但是在接下来介绍的各个功能模块的实现中均可以看到其身影。\textbf{\heiti 为了简化}，许多与NULL相关的功能特性未能展示出来，可以通过在客户端进行SQL语句测试来验证。
 
 \subsection{\heiti UPDATE 实现流程}
 \begin{enumerate}
@@ -1848,7 +1866,7 @@ ORDER BY 是 SQL 中用于对查询结果进行排序的操作，在查询中至
 \begin{itemize}
     \item MiniOB 会在逻辑计划阶段生成相应的逻辑算子，如 \texttt{LogicalSort}。
     \item 逻辑算子描述排序操作的语义，而不关心具体的执行细节。
-    \item 可以与其他逻辑算子（如扫描、投影、过滤等）组合形成完整的查询计划。
+    \item 可以与其他逻辑算子（如扫描、投影、过滤等）组合形成完整的查询计划，逐步形成最终的查询结果。
 \end{itemize}
 
 \subsubsection{Order By物理算子（Order By Physical Operator）}
@@ -2189,6 +2207,6 @@ ORDER BY 在 MiniOB 中虽然是常见 SQL 操作，但其实现涉及逻辑算�
     \item NULL值的支持与处理
 \end{itemize}
 
-\paragraph{  功能测试模块验证了各项功能的正确性，为了简化，我们并没有将所有相关功能的测试均展示出来。本次设计深化了我们对数据库内核架构与自顶向下实现细节的理解，也为未来在其上进行更复杂功能的开发奠定了基础。}
+\paragraph{    功能测试模块验证了各项功能的正确性，为了简化，我们并没有将所有相关功能的测试均展示出来。本次设计深化了我们对数据库内核架构与自顶向下实现细节的理解，也为未来在其上进行更复杂功能的开发奠定了基础。}
 
 \end{document}
