@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#include <vector>
 #include "common/sys/rc.h"
 #include "common/lang/string.h"
 
@@ -35,11 +36,15 @@ class IndexMeta
 public:
   IndexMeta() = default;
 
-  RC init(const char *name, const FieldMeta &field);
+  RC init(const char *name, const FieldMeta &field, bool is_unique = false);
+  RC init(const char *name, const vector<const FieldMeta *> &fields, bool is_unique = false);
 
 public:
   const char *name() const;
-  const char *field() const;
+  const char *field() const;  // 向后兼容：返回第一个字段名
+  const vector<string> &fields() const { return fields_; }  // 返回所有字段名
+  size_t field_count() const { return fields_.size(); }
+  bool is_unique() const { return is_unique_; }
 
   void desc(ostream &os) const;
 
@@ -48,6 +53,8 @@ public:
   static RC from_json(const TableMeta &table, const Json::Value &json_value, IndexMeta &index);
 
 protected:
-  string name_;   // index's name
-  string field_;  // field's name
+  string name_;          // index's name
+  string field_;         // field's name (向后兼容：第一个字段名)
+  vector<string> fields_; // field names (支持复合索引)
+  bool   is_unique_ = false;  // whether this is a unique index
 };

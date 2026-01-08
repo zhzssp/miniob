@@ -106,6 +106,9 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     return rc;
   }
 
+  // 存储所有 JOIN 的 predicate_oper，确保它们的生命周期与逻辑计划一样长
+  vector<unique_ptr<PredicateLogicalOperator>> join_predicate_ops;
+
   const vector<Table *> &tables = select_stmt->tables();
   for (Table *table : tables) {
 
@@ -116,7 +119,129 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       JoinLogicalOperator *join_oper = new JoinLogicalOperator;
       join_oper->add_child(std::move(table_oper));
       join_oper->add_child(std::move(table_get_oper));
+<<<<<<< HEAD
       table_oper = unique_ptr<LogicalOperator>(join_oper);
+=======
+      
+      // 为每个 JOIN 创建独立的 predicate_oper
+      unique_ptr<PredicateLogicalOperator> join_predicate_oper = nullptr;
+      
+      // 精确条件分配：只处理与当前 JOIN 相关的条件
+      if (select_stmt->join_filter_stmt() != nullptr) {
+        const auto &filter_units = select_stmt->join_filter_stmt()->filter_units();
+        
+        for (const auto &filter_unit : filter_units) {
+          // 检查条件是否与当前 JOIN 相关
+          bool is_relevant = false;
+          
+          // 获取当前 JOIN 涉及的表
+          Table *left_table = nullptr;
+          Table *right_table = table; // 右表是当前表
+          
+          
+          // 左子树：可能是单个表或之前 JOIN 的结果
+          if (table_oper != nullptr && table_oper->type() == LogicalOperatorType::TABLE_GET) {
+            auto *left_table_get = dynamic_cast<TableGetLogicalOperator*>(table_oper.get());
+            if (left_table_get != nullptr) {
+              left_table = left_table_get->table();
+            }
+          } else if (table_oper != nullptr && table_oper->type() == LogicalOperatorType::JOIN) {
+            // 对于 JOIN 类型的左子树，我们无法直接确定左表
+            // 但我们可以通过检查条件中的字段来确定
+            // 暂时跳过左表检查，让条件匹配逻辑自己处理
+          }
+          
+          // 检查条件是否涉及当前 JOIN 的表
+          // 处理两种情况：1) 两个属性之间的比较（跨表条件） 2) 属性与常量的比较（单表过滤条件）
+          if (filter_unit->left().is_attr && filter_unit->right().is_attr) {
+            // 两个属性之间的比较
+            const Table *left_field_table = filter_unit->left().field.table();
+            const Table *right_field_table = filter_unit->right().field.table();
+            
+           // LOG_WARN("JOIN: Checking condition %s.%s = %s.%s", 
+                     left_field_table ? left_field_table->name() : "NULL",
+                     filter_unit->left().field.field_name(),
+                     right_field_table ? right_field_table->name() : "NULL",
+                     filter_unit->right().field.field_name();
+            
+            
+            // 条件涉及左表和右表
+            if (left_table != nullptr) {
+              // 左表已知，检查条件是否涉及左表和右表
+              if ((left_field_table == left_table && right_field_table == right_table) ||
+                  (left_field_table == right_table && right_field_table == left_table)) {
+                is_relevant = true;
+              } else {
+              }
+            } else {
+              // 左表未知（可能是 JOIN 结果），检查条件是否涉及右表
+              if (left_field_table == right_table || right_field_table == right_table) {
+                is_relevant = true;
+              } else {
+              }
+            }
+          } else if (filter_unit->left().is_attr) {
+            // 左边是属性，右边是常量值（单表过滤条件）
+            const Table *left_field_table = filter_unit->left().field.table();
+            // 检查条件是否涉及右表（当前 JOIN 的右表）
+            if (left_field_table == right_table) {
+              is_relevant = true;
+            }
+          } else if (filter_unit->right().is_attr) {
+            // 右边是属性，左边是常量值（单表过滤条件）
+            const Table *right_field_table = filter_unit->right().field.table();
+            // 检查条件是否涉及右表（当前 JOIN 的右表）
+            if (right_field_table == right_table) {
+              is_relevant = true;
+            }
+          }
+          
+          if (is_relevant) {
+            // 将 FilterUnit 转换为 Expression
+            auto left_expr = LogicalPlanGenerator::create_expression_from_filter_obj(filter_unit->left());
+            auto right_expr = LogicalPlanGenerator::create_expression_from_filter_obj(filter_unit->right());
+            if (left_expr != nullptr && right_expr != nullptr) {
+              auto comp_expr = make_unique<ComparisonExpr>(filter_unit->comp(), std::move(left_expr), std::move(right_expr));
+              
+              // 只有等值条件用于 JOIN，非等值条件用于后续过滤
+              if (filter_unit->comp() == CompOp::EQUAL_TO) {
+                join_oper->add_join_predicate(std::move(comp_expr));
+              } else {
+                // 非等值条件添加到 join_predicate_oper 中
+                if (join_predicate_oper == nullptr) {
+                  join_predicate_oper = make_unique<PredicateLogicalOperator>(std::move(comp_expr));
+                } else {
+                  // 如果已经有 join_predicate_oper，需要创建 ConjunctionExpr 来组合条件
+                  auto existing_expr = std::move(join_predicate_oper->expressions()[0]);
+                  join_predicate_oper->expressions().clear();
+                  
+                  vector<unique_ptr<Expression>> conjunction_children;
+                  conjunction_children.push_back(std::move(existing_expr));
+                  conjunction_children.push_back(std::move(comp_expr));
+                  
+                  auto conjunction_expr = make_unique<ConjunctionExpr>(ConjunctionExpr::Type::AND, conjunction_children);
+                  join_predicate_oper = make_unique<PredicateLogicalOperator>(std::move(conjunction_expr));
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // 第二层
+      LOG_TRACE("Set join %d as the second level logical operator", i);
+      table_oper = unique_ptr<LogicalOperator>(join_oper);
+      
+      
+      // 如果有过滤条件，将其设置到 JoinLogicalOperator 中
+      // 将 join_predicate_oper 存储到容器中，确保生命周期
+      if (join_predicate_oper) {
+        // 将 join_predicate_oper 移动到容器中，保持所有权
+        join_predicate_ops.push_back(std::move(join_predicate_oper));
+        // 然后将指针传递给 join_oper
+        join_oper->add_predicate_op(join_predicate_ops.back().get());
+      }
+>>>>>>> d928428f91fe5f4dcbe8f4a5a5f8041146971e2f
     }
   }
 
@@ -175,6 +300,12 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   }
 
   last_oper = &project_oper;
+
+  // 将 join_predicate_ops 移动到 project_oper 的隐藏子节点中，确保生命周期
+  // 注意：这些子节点不会被实际使用，只是为了确保 predicate_oper 的生命周期
+  for (auto &pred_op : join_predicate_ops) {
+    project_oper->add_child(std::move(pred_op));
+  }
 
   logical_operator = std::move(*last_oper);
   return RC::SUCCESS;

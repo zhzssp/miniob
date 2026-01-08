@@ -41,8 +41,91 @@ unique_ptr<Expression> SubqueryExpr::copy() const
 
 RC SubqueryExpr::get_value(const Tuple &tuple, Value &value) const
 {
-  // 子查询通常不直接作为标量值返回，这里保持未实现
-  return RC::UNIMPLEMENTED;
+  // 标量子查询：执行子查询并返回第一行第一列的值
+  LOG_WARN("SubqueryExpr::get_value: called, physical_operator_=%p, is_open_=%d", 
+           physical_operator_.get(), is_open_);
+  
+  if (!physical_operator_) {
+    LOG_WARN("SubqueryExpr::get_value: physical_operator_ is null");
+    return RC::INVALID_ARGUMENT;
+  }
+
+  // 如果已经打开，先关闭（因为外层元组可能已经改变，需要重新执行）
+  if (is_open_) {
+    LOG_WARN("SubqueryExpr::get_value: closing already open physical operator");
+    RC close_rc = close_physical_operator();
+    if (close_rc != RC::SUCCESS) {
+      LOG_WARN("SubqueryExpr::get_value: failed to close already open physical operator. rc=%s", strrc(close_rc));
+    }
+  }
+
+  Tuple *outer_tuple_ptr = const_cast<Tuple*>(&tuple);
+  RC rc = open_physical_operator(outer_tuple_ptr);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("SubqueryExpr::get_value: failed to open physical operator. rc=%s", strrc(rc));
+    return rc;
+  }
+
+  // 获取第一行
+  rc = physical_operator_->next();
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("SubqueryExpr::get_value: failed to get first row. rc=%s", strrc(rc));
+    RC close_rc = close_physical_operator();
+    if (close_rc != RC::SUCCESS) {
+      LOG_WARN("SubqueryExpr::get_value: failed to close physical operator. rc=%s", strrc(close_rc));
+    }
+    // 如果没有行，返回 NULL 值
+    value.set_null(true);
+    return RC::SUCCESS;
+  }
+
+  // 在获取 tuple 之前，确保 current_tuple() 被调用以设置 child_tuple_
+  auto sub_t = physical_operator_->current_tuple();
+  if (!sub_t || sub_t->cell_num() == 0) {
+    LOG_WARN("SubqueryExpr::get_value: tuple is null or has no cells");
+    RC close_rc = close_physical_operator();
+    if (close_rc != RC::SUCCESS) {
+      LOG_WARN("SubqueryExpr::get_value: failed to close physical operator. rc=%s", strrc(close_rc));
+    }
+    value.set_null(true);
+    return RC::SUCCESS;
+  }
+
+  LOG_WARN("SubqueryExpr::get_value: got tuple with %d cells", sub_t->cell_num());
+  
+  // 获取第一列的值
+  rc = sub_t->cell_at(0, value);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("SubqueryExpr::get_value: failed to get first cell. rc=%s, tuple=%p, cell_num=%d", 
+             strrc(rc), sub_t, sub_t ? sub_t->cell_num() : -1);
+    RC close_rc = close_physical_operator();
+    if (close_rc != RC::SUCCESS) {
+      LOG_WARN("SubqueryExpr::get_value: failed to close physical operator. rc=%s", strrc(close_rc));
+    }
+    return rc;
+  }
+  
+  LOG_WARN("SubqueryExpr::get_value: successfully got value=%s", value.to_string().c_str());
+
+  // 检查是否有多行（标量子查询应该只返回一行）
+  RC next_rc = physical_operator_->next();
+  if (next_rc == RC::SUCCESS) {
+    LOG_WARN("SubqueryExpr::get_value: subquery returned more than one row, scalar subquery must return at most one row");
+    RC close_rc = close_physical_operator();
+    if (close_rc != RC::SUCCESS) {
+      LOG_WARN("SubqueryExpr::get_value: failed to close physical operator. rc=%s", strrc(close_rc));
+    }
+    return RC::SUBQUERY_MULTIPLE_ROWS;
+  }
+
+  // 关闭物理算子（注意：不要在这里关闭，因为可能会影响后续的调用）
+  // 实际上，我们应该在每次调用时都重新打开和关闭，所以这里关闭是安全的
+  RC close_rc = close_physical_operator();
+  if (close_rc != RC::SUCCESS) {
+    LOG_WARN("SubqueryExpr::get_value: failed to close physical operator. rc=%s", strrc(close_rc));
+  }
+
+  return RC::SUCCESS;
 }
 
 int SubqueryExpr::value_length() const

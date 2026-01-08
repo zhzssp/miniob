@@ -10,6 +10,7 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#include <vector>
 #include "common/types.h"
 #include "common/lang/functional.h"
 #include "storage/table/table_meta.h"
@@ -46,8 +47,10 @@ public:
   virtual RC update_record_with_trx(const Record &old_record, const Record &new_record, Trx *trx) = 0;
   virtual RC get_record(const RID &rid, Record &record)                                           = 0;
 
-  virtual RC     create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name) = 0;
+  virtual RC     create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name, bool is_unique = false) = 0;
+  virtual RC     create_index(Trx *trx, const vector<const FieldMeta *> &fields_meta, const char *index_name, bool is_unique = false) = 0;
   virtual RC     get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWriteMode mode)   = 0;
+  virtual RC drop_index(const char *index_name) = 0;
   virtual RC     get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadWriteMode mode)  = 0;
   virtual RC     visit_record(const RID &rid, function<bool(Record &)> visitor)              = 0;
   virtual RC     sync()                                                                      = 0;

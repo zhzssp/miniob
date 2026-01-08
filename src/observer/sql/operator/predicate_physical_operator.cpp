@@ -17,6 +17,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/filter_stmt.h"
 #include "storage/field/field.h"
 #include "storage/record/record.h"
+#include "sql/expr/tuple.h"
 
 PredicatePhysicalOperator::PredicatePhysicalOperator(std::unique_ptr<Expression> expr) : expression_(std::move(expr))
 {
@@ -30,6 +31,10 @@ RC PredicatePhysicalOperator::open(Trx *trx)
     return RC::INTERNAL;
   }
 
+  // 递归传递 outer_tuple 给子算子（用于相关子查询）
+  if (outer_tuple != nullptr) {
+    children_[0]->set_outer_tuple(outer_tuple);
+  }
   return children_[0]->open(trx);
 }
 
@@ -47,9 +52,19 @@ RC PredicatePhysicalOperator::next()
     }
 
     Value value;
+    // 对于相关子查询，需要将外层查询的 tuple 和子查询的 tuple 组合
+    // 这样 WHERE 条件中的 FieldExpr 才能访问到外层查询的字段
+    Tuple *eval_tuple = tuple;
+    if (outer_tuple != nullptr) {
+      // 组合外层查询和子查询的 tuple
+      joined_tuple_.set_left(outer_tuple);
+      joined_tuple_.set_right(tuple);
+      eval_tuple = &joined_tuple_;
+    }
+    
     // 将形如age > 18的布尔表达式应用到该元组上 --> 获得bool的Value ?
     // expression_为ComparisonExpr
-    rc = expression_->get_value(*tuple, value);
+    rc = expression_->get_value(*eval_tuple, value);
     if (rc != RC::SUCCESS) {
       return rc;
     }

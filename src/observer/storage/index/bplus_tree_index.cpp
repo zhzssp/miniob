@@ -16,6 +16,9 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "storage/table/table.h"
 #include "storage/db/db.h"
+#include <cstring>
+#include <climits>
+#include <cfloat>
 
 BplusTreeIndex::~BplusTreeIndex() noexcept { close(); }
 
@@ -44,6 +47,33 @@ RC BplusTreeIndex::create(Table *table, const char *file_name, const IndexMeta &
   return RC::SUCCESS;
 }
 
+RC BplusTreeIndex::create(Table *table, const char *file_name, const IndexMeta &index_meta, const vector<const FieldMeta *> &fields_meta)
+{
+  if (inited_) {
+    LOG_WARN("Failed to create composite index due to the index has been created before. file_name:%s, index:%s",
+        file_name, index_meta.name());
+    return RC::RECORD_OPENNED;
+  }
+
+  Index::init(index_meta, fields_meta);
+
+  BufferPoolManager &bpm = table->db()->buffer_pool_manager();
+  // 对于复合索引，使用 CHARS 类型，长度为所有字段长度的总和
+  int total_key_length = calculate_key_length();
+  RC rc = index_handler_.create(table->db()->log_handler(), bpm, file_name, AttrType::CHARS, total_key_length);
+  if (RC::SUCCESS != rc) {
+    LOG_WARN("Failed to create composite index_handler, file_name:%s, index:%s, rc:%s",
+        file_name, index_meta.name(), strrc(rc));
+    return rc;
+  }
+
+  inited_ = true;
+  table_  = table;
+  LOG_INFO("Successfully create composite index, file_name:%s, index:%s, field_count:%zu",
+    file_name, index_meta.name(), fields_meta.size());
+  return RC::SUCCESS;
+}
+
 RC BplusTreeIndex::open(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
 {
   if (inited_) {
@@ -69,6 +99,31 @@ RC BplusTreeIndex::open(Table *table, const char *file_name, const IndexMeta &in
   return RC::SUCCESS;
 }
 
+RC BplusTreeIndex::open(Table *table, const char *file_name, const IndexMeta &index_meta, const vector<const FieldMeta *> &fields_meta)
+{
+  if (inited_) {
+    LOG_WARN("Failed to open composite index due to the index has been initedd before. file_name:%s, index:%s",
+        file_name, index_meta.name());
+    return RC::RECORD_OPENNED;
+  }
+
+  Index::init(index_meta, fields_meta);
+
+  BufferPoolManager &bpm = table->db()->buffer_pool_manager();
+  RC rc = index_handler_.open(table->db()->log_handler(), bpm, file_name);
+  if (RC::SUCCESS != rc) {
+    LOG_WARN("Failed to open composite index_handler, file_name:%s, index:%s, rc:%s",
+        file_name, index_meta.name(), strrc(rc));
+    return rc;
+  }
+
+  inited_ = true;
+  table_  = table;
+  LOG_INFO("Successfully open composite index, file_name:%s, index:%s, field_count:%zu",
+    file_name, index_meta.name(), fields_meta.size());
+  return RC::SUCCESS;
+}
+
 RC BplusTreeIndex::close()
 {
   if (inited_) {
@@ -82,20 +137,158 @@ RC BplusTreeIndex::close()
 
 RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 {
-  // 获取索引字段在record中的位置
-  return index_handler_.insert_entry(record + field_meta_.offset(), rid);
+  // 如果是复合索引，构建复合键
+  if (fields_meta_.size() > 1) {
+    int key_length = calculate_key_length();
+    char *key_buffer = new char[key_length];
+    build_composite_key(record, key_buffer);
+    RC rc = index_handler_.insert_entry(key_buffer, rid);
+    delete[] key_buffer;
+    return rc;
+  } else {
+    // 单字段索引，向后兼容
+    return index_handler_.insert_entry(record + field_meta_.offset(), rid);
+  }
 }
 
 RC BplusTreeIndex::delete_entry(const char *record, const RID *rid)
 {
-  return index_handler_.delete_entry(record + field_meta_.offset(), rid);
+  // 如果是复合索引，构建复合键
+  if (fields_meta_.size() > 1) {
+    int key_length = calculate_key_length();
+    char *key_buffer = new char[key_length];
+    build_composite_key(record, key_buffer);
+    RC rc = index_handler_.delete_entry(key_buffer, rid);
+    delete[] key_buffer;
+    return rc;
+  } else {
+    // 单字段索引，向后兼容
+    return index_handler_.delete_entry(record + field_meta_.offset(), rid);
+  }
+}
+
+RC BplusTreeIndex::get_entry(const char *user_key, int key_len, list<RID> &rids)
+{
+  return index_handler_.get_entry(user_key, key_len, rids);
 }
 
 IndexScanner *BplusTreeIndex::create_scanner(
     const char *left_key, int left_len, bool left_inclusive, const char *right_key, int right_len, bool right_inclusive)
 {
+  // 单键索引：直接按原样创建扫描器，禁止走复合键扩展逻辑，避免误用 fields_meta_
+  if (fields_meta_.size() <= 1) {
+    BplusTreeIndexScanner *index_scanner = new BplusTreeIndexScanner(index_handler_);
+    RC rc = index_scanner->open(left_key, left_len, left_inclusive, right_key, right_len, right_inclusive);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to open index scanner. rc=%d:%s", rc, strrc(rc));
+      delete index_scanner;
+      return nullptr;
+    }
+    return index_scanner;
+  }
+
+  // 单列索引：直接创建扫描器，不做复合键扩展
+  if (fields_meta_.size() <= 1) {
+    BplusTreeIndexScanner *index_scanner = new BplusTreeIndexScanner(index_handler_);
+    RC rc = index_scanner->open(left_key, left_len, left_inclusive, right_key, right_len, right_inclusive);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to open index scanner. rc=%d:%s", rc, strrc(rc));
+      delete index_scanner;
+      return nullptr;
+    }
+    return index_scanner;
+  }
+
+  // 复合索引：当传入的键长度小于完整键长度时，按字段类型扩展剩余字段
+  int full_key_length = calculate_key_length();
+  const char *final_left_key = left_key;
+  int final_left_len = left_len;
+  const char *final_right_key = right_key;
+  int final_right_len = right_len;
+
+  char *expanded_left_key = nullptr;
+  char *expanded_right_key = nullptr;
+
+  if (left_key != nullptr && left_len < full_key_length) {
+    expanded_left_key = new char[full_key_length];
+    memcpy(expanded_left_key, left_key, left_len);
+
+    int offset = left_len;
+    // 找到第一个未完全填充的字段
+    int accumulated_len = 0;
+    size_t start_field_idx = 0;
+    for (size_t i = 0; i < fields_meta_.size(); i++) {
+      accumulated_len += fields_meta_[i]->len();
+      if (accumulated_len > left_len) {
+        start_field_idx = i;
+        break;
+      }
+    }
+    // 从找到的字段开始填充最小值
+    for (size_t j = start_field_idx; j < fields_meta_.size(); j++) {
+      const FieldMeta *field_meta = fields_meta_[j];
+      AttrType field_type = field_meta->type();
+      int field_len = field_meta->len();
+      if (field_type == AttrType::INTS) {
+        int min_int = INT_MIN;
+        memcpy(expanded_left_key + offset, &min_int, field_len);
+      } else if (field_type == AttrType::FLOATS) {
+        float min_float = -FLT_MAX;
+        memcpy(expanded_left_key + offset, &min_float, field_len);
+      } else {
+        memset(expanded_left_key + offset, 0, field_len);
+      }
+      offset += field_len;
+    }
+    final_left_key = expanded_left_key;
+    final_left_len = full_key_length;
+  }
+
+  if (right_key != nullptr && right_len < full_key_length) {
+    expanded_right_key = new char[full_key_length];
+    memcpy(expanded_right_key, right_key, right_len);
+
+    int offset = right_len;
+    // 找到第一个未完全填充的字段
+    int accumulated_len = 0;
+    size_t start_field_idx = 0;
+    for (size_t i = 0; i < fields_meta_.size(); i++) {
+      accumulated_len += fields_meta_[i]->len();
+      if (accumulated_len > right_len) {
+        start_field_idx = i;
+        break;
+      }
+    }
+    // 从找到的字段开始填充最大值
+    for (size_t j = start_field_idx; j < fields_meta_.size(); j++) {
+      const FieldMeta *field_meta = fields_meta_[j];
+      AttrType field_type = field_meta->type();
+      int field_len = field_meta->len();
+      if (field_type == AttrType::INTS) {
+        int max_int = INT_MAX;
+        memcpy(expanded_right_key + offset, &max_int, field_len);
+      } else if (field_type == AttrType::FLOATS) {
+        float max_float = FLT_MAX;
+        memcpy(expanded_right_key + offset, &max_float, field_len);
+      } else {
+        memset(expanded_right_key + offset, 0xFF, field_len);
+      }
+      offset += field_len;
+    }
+    final_right_key = expanded_right_key;
+    final_right_len = full_key_length;
+  }
+
   BplusTreeIndexScanner *index_scanner = new BplusTreeIndexScanner(index_handler_);
-  RC rc = index_scanner->open(left_key, left_len, left_inclusive, right_key, right_len, right_inclusive);
+  RC rc = index_scanner->open(final_left_key, final_left_len, left_inclusive, final_right_key, final_right_len, right_inclusive);
+
+  if (expanded_left_key != nullptr) {
+    delete[] expanded_left_key;
+  }
+  if (expanded_right_key != nullptr) {
+    delete[] expanded_right_key;
+  }
+
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to open index scanner. rc=%d:%s", rc, strrc(rc));
     delete index_scanner;
@@ -105,6 +298,27 @@ IndexScanner *BplusTreeIndex::create_scanner(
 }
 
 RC BplusTreeIndex::sync() { return index_handler_.sync(); }
+
+int BplusTreeIndex::build_composite_key(const char *record, char *key_buffer) const
+{
+  int offset = 0;
+  for (const FieldMeta *field_meta : fields_meta_) {
+    const char *field_data = record + field_meta->offset();
+    int field_len = field_meta->len();
+    memcpy(key_buffer + offset, field_data, field_len);
+    offset += field_len;
+  }
+  return offset;
+}
+
+int BplusTreeIndex::calculate_key_length() const
+{
+  int total_length = 0;
+  for (const FieldMeta *field_meta : fields_meta_) {
+    total_length += field_meta->len();
+  }
+  return total_length;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 BplusTreeIndexScanner::BplusTreeIndexScanner(BplusTreeHandler &tree_handler) : tree_scanner_(tree_handler) {}

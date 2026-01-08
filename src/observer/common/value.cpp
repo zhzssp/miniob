@@ -265,8 +265,8 @@ char *Value::data() const
 string Value::to_string() const
 {
   if(this->is_null()) {
-    LOG_INFO("Get null value, return string(null)");
-    return string("null");
+    LOG_INFO("Get null value, return string(NULL)");
+    return string("NULL");
   }
 
   string res;

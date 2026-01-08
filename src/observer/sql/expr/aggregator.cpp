@@ -123,6 +123,10 @@ RC CountAggregator::count(const Value &value)
 
 RC CountAggregator::evaluate(Value& result)
 {
+<<<<<<< HEAD
+=======
+  // 如果从未调用过count()（即没有数据行），应该返回0
+>>>>>>> d928428f91fe5f4dcbe8f4a5a5f8041146971e2f
   if (value_.attr_type() == AttrType::UNDEFINED) {
     result = Value(0);
     return RC::SUCCESS;

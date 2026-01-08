@@ -28,11 +28,15 @@ public:
   virtual ~BplusTreeIndex() noexcept;
 
   RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta) override;
+  RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const vector<const FieldMeta *> &fields_meta) override;
   RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta) override;
+  RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const vector<const FieldMeta *> &fields_meta) override;
   RC close();
 
   RC insert_entry(const char *record, const RID *rid) override;
   RC delete_entry(const char *record, const RID *rid) override;
+
+  RC get_entry(const char *user_key, int key_len, list<RID> &rids) override;
 
   /**
    * 扫描指定范围的数据
@@ -41,6 +45,20 @@ public:
       int right_len, bool right_inclusive) override;
 
   RC sync() override;
+
+private:
+  /**
+   * @brief 从记录中构建复合键
+   * @param record 记录数据
+   * @param key_buffer 输出的键缓冲区（调用者负责分配足够的内存）
+   * @return 键的长度
+   */
+  int build_composite_key(const char *record, char *key_buffer) const;
+
+  /**
+   * @brief 计算复合键的总长度
+   */
+  int calculate_key_length() const;
 
 private:
   bool             inited_ = false;

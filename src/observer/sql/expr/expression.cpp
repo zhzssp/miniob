@@ -293,6 +293,7 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
       bool ok_l = false, ok_r = false;
       parse_to_double(left, dl, ok_l);
       parse_to_double(right, dr, ok_r);
+<<<<<<< HEAD
       if (ok_l && ok_r) 
       {
         Value l2; l2.set_float(static_cast<float>(dl));
@@ -301,6 +302,26 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
       } else 
       {
         // 无法比较的异类型，返回 false 结果
+=======
+      
+      // 如果字符串无法解析为数字，转换为0
+      if (lt == AttrType::CHARS && !ok_l) {
+        dl = 0.0;
+        ok_l = true;
+      }
+      if (rt == AttrType::CHARS && !ok_r) {
+        dr = 0.0;
+        ok_r = true;
+      }
+      
+      // 现在两者都应该可以按数字比较
+      if (ok_l && ok_r) {
+        Value l2; l2.set_float(static_cast<float>(dl));
+        Value r2; r2.set_float(static_cast<float>(dr));
+        cmp_result = l2.compare(r2);
+      } else {
+        // 如果仍然无法比较，返回 false 结果
+>>>>>>> d928428f91fe5f4dcbe8f4a5a5f8041146971e2f
         cmp_result = 0;
         switch (comp_) {
           case EQUAL_TO:      result = false; return RC::SUCCESS;
@@ -397,60 +418,95 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
     LOG_WARN("[IN CHECK] lhs=%s", left_value.to_string().c_str());
     bool found = false;
     bool any_equal = false;
-    int sub_count = 0;
-    if (right_->type() != ExprType::SUB_QUERY) {
-      LOG_WARN("IN operation expected SUB_QUERY on right, got type=%d. Treating as not found.", (int)right_->type());
-      value.set_boolean(false);
-      return RC::SUCCESS;
-    }
-    SubqueryExpr* subquery_expr = static_cast<SubqueryExpr*>(right_.get());
-    Tuple *outer_tuple_ptr = const_cast<Tuple*>(&tuple);
-    rc = subquery_expr->open_physical_operator(outer_tuple_ptr);
-    if (rc != RC::SUCCESS) {
-      LOG_WARN("IN: failed to open subquery operator. rc=%s", strrc(rc));
-      value.set_boolean(false);
-      return RC::SUCCESS;
-    }
-    while ((rc = subquery_expr->physical_operator()->next()) == RC::SUCCESS) {
-      ++sub_count;
-      auto sub_t = subquery_expr->physical_operator()->current_tuple();
-      LOG_WARN("[IN CHECK] subquery row %d, cell_num=%d", sub_count, sub_t ? sub_t->cell_num() : -1);
-      if (!sub_t || sub_t->cell_num() == 0) continue;
-      Value right_cell;
-      sub_t->cell_at(0, right_cell);
-      LOG_WARN("[IN CHECK]   lhs=%s subval=%s", left_value.to_string().c_str(), right_cell.to_string().c_str());
-      Value aligned_left = left_value;
-      Value aligned_right = right_cell;
-      Value casted;
-      if (right_cell.attr_type() != left_value.attr_type()) {
-        if (Value::cast_to(right_cell, left_value.attr_type(), casted) == RC::SUCCESS) {
-          aligned_right = casted;
-        } else if (Value::cast_to(left_value, right_cell.attr_type(), casted) == RC::SUCCESS) {
-          aligned_left = casted;
+    
+    // 处理值列表表达式
+    if (right_->type() == ExprType::VALUE_LIST) {
+      ValueListExpr* value_list_expr = static_cast<ValueListExpr*>(right_.get());
+      const vector<Value> &values = value_list_expr->values();
+      LOG_WARN("[IN CHECK] value list size=%zu", values.size());
+      
+      for (size_t i = 0; i < values.size(); ++i) {
+        const Value &right_cell = values[i];
+        LOG_WARN("[IN CHECK]   lhs=%s val[%zu]=%s", left_value.to_string().c_str(), i, right_cell.to_string().c_str());
+        Value aligned_left = left_value;
+        Value aligned_right = right_cell;
+        Value casted;
+        if (right_cell.attr_type() != left_value.attr_type()) {
+          if (Value::cast_to(right_cell, left_value.attr_type(), casted) == RC::SUCCESS) {
+            aligned_right = casted;
+          } else if (Value::cast_to(left_value, right_cell.attr_type(), casted) == RC::SUCCESS) {
+            aligned_left = casted;
+          }
         }
-      }
-      if ((aligned_left.attr_type() == AttrType::INTS || aligned_left.attr_type() == AttrType::FLOATS || aligned_left.attr_type() == AttrType::CHARS) &&
-          (aligned_right.attr_type() == AttrType::INTS || aligned_right.attr_type() == AttrType::FLOATS || aligned_right.attr_type() == AttrType::CHARS)) {
-        if (aligned_left.compare(aligned_right) == 0) {
-          any_equal = true;
-          if (comp_ == IN_OP) {
-            found = true;
-            break;
+        if ((aligned_left.attr_type() == AttrType::INTS || aligned_left.attr_type() == AttrType::FLOATS || aligned_left.attr_type() == AttrType::CHARS) &&
+            (aligned_right.attr_type() == AttrType::INTS || aligned_right.attr_type() == AttrType::FLOATS || aligned_right.attr_type() == AttrType::CHARS)) {
+          if (aligned_left.compare(aligned_right) == 0) {
+            any_equal = true;
+            if (comp_ == IN_OP) {
+              found = true;
+              break;
+            }
           }
         }
       }
+      found = (comp_ == IN_OP) ? any_equal : !any_equal;
+      LOG_WARN("[IN CHECK] lhs=%s final found=%d (any_equal=%d) on value_list size=%zu", left_value.to_string().c_str(), found, any_equal, values.size());
+    } else if (right_->type() == ExprType::SUB_QUERY) {
+      // 处理子查询表达式
+      int sub_count = 0;
+      SubqueryExpr* subquery_expr = static_cast<SubqueryExpr*>(right_.get());
+      Tuple *outer_tuple_ptr = const_cast<Tuple*>(&tuple);
+      rc = subquery_expr->open_physical_operator(outer_tuple_ptr);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("IN: failed to open subquery operator. rc=%s", strrc(rc));
+        value.set_boolean(false);
+        return RC::SUCCESS;
+      }
+      while ((rc = subquery_expr->physical_operator()->next()) == RC::SUCCESS) {
+        ++sub_count;
+        auto sub_t = subquery_expr->physical_operator()->current_tuple();
+        LOG_WARN("[IN CHECK] subquery row %d, cell_num=%d", sub_count, sub_t ? sub_t->cell_num() : -1);
+        if (!sub_t || sub_t->cell_num() == 0) continue;
+        Value right_cell;
+        sub_t->cell_at(0, right_cell);
+        LOG_WARN("[IN CHECK]   lhs=%s subval=%s", left_value.to_string().c_str(), right_cell.to_string().c_str());
+        Value aligned_left = left_value;
+        Value aligned_right = right_cell;
+        Value casted;
+        if (right_cell.attr_type() != left_value.attr_type()) {
+          if (Value::cast_to(right_cell, left_value.attr_type(), casted) == RC::SUCCESS) {
+            aligned_right = casted;
+          } else if (Value::cast_to(left_value, right_cell.attr_type(), casted) == RC::SUCCESS) {
+            aligned_left = casted;
+          }
+        }
+        if ((aligned_left.attr_type() == AttrType::INTS || aligned_left.attr_type() == AttrType::FLOATS || aligned_left.attr_type() == AttrType::CHARS) &&
+            (aligned_right.attr_type() == AttrType::INTS || aligned_right.attr_type() == AttrType::FLOATS || aligned_right.attr_type() == AttrType::CHARS)) {
+          if (aligned_left.compare(aligned_right) == 0) {
+            any_equal = true;
+            if (comp_ == IN_OP) {
+              found = true;
+              break;
+            }
+          }
+        }
+      }
+      if (sub_count == 0)
+        LOG_WARN("[IN CHECK] subquery yielded no rows!");
+      RC close_rc = subquery_expr->close_physical_operator();
+      if (close_rc != RC::SUCCESS) {
+        LOG_WARN("IN: failed to close subquery operator. rc=%s", strrc(close_rc));
+      }
+      if (rc != RC::SUCCESS && rc != RC::RECORD_EOF) {
+        LOG_WARN("IN: subquery execution error. rc=%s", strrc(rc));
+      }
+      found = (comp_ == IN_OP) ? any_equal : !any_equal;
+      LOG_WARN("[IN CHECK] lhs=%s final found=%d (any_equal=%d) on sub_count=%d", left_value.to_string().c_str(), found, any_equal, sub_count);
+    } else {
+      LOG_WARN("IN operation expected SUB_QUERY or VALUE_LIST on right, got type=%d. Treating as not found.", (int)right_->type());
+      value.set_boolean(false);
+      return RC::SUCCESS;
     }
-    if (sub_count == 0)
-      LOG_WARN("[IN CHECK] subquery yielded no rows!");
-    RC close_rc = subquery_expr->close_physical_operator();
-    if (close_rc != RC::SUCCESS) {
-      LOG_WARN("IN: failed to close subquery operator. rc=%s", strrc(close_rc));
-    }
-    if (rc != RC::SUCCESS && rc != RC::RECORD_EOF) {
-      LOG_WARN("IN: subquery execution error. rc=%s", strrc(rc));
-    }
-    found = (comp_ == IN_OP) ? any_equal : !any_equal;
-    LOG_WARN("[IN CHECK] lhs=%s final found=%d (any_equal=%d) on sub_count=%d", left_value.to_string().c_str(), found, any_equal, sub_count);
     value.set_boolean(found);
     return RC::SUCCESS;
   }
@@ -459,15 +515,25 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
   Value right_value;
 
   // 比较表达式树 --> 递归
+  LOG_WARN("ComparisonExpr::get_value: this=%p, left_type=%d, right_type=%d, comp=%d", 
+           this, (int)left_->type(), (int)right_->type(), (int)comp_);
   RC rc = left_->get_value(tuple, left_value);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
     return rc;
   }
+  
+  LOG_WARN("ComparisonExpr::get_value: calling right_->get_value, this=%p, right_type=%d, right_ptr=%p", 
+           this, (int)right_->type(), right_.get());
   rc = right_->get_value(tuple, right_value);
   if (rc != RC::SUCCESS) {
+<<<<<<< HEAD
     LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc))
     ;
+=======
+    LOG_WARN("failed to get value of right expression. rc=%s, this=%p, right_type=%d, right_ptr=%p", 
+             strrc(rc), this, (int)right_->type(), right_.get());
+>>>>>>> d928428f91fe5f4dcbe8f4a5a5f8041146971e2f
     return rc;
   }
 
@@ -623,8 +689,12 @@ AttrType ArithmeticExpr::value_type() const
 RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value, Value &value) const
 {
   RC rc = RC::SUCCESS;
+<<<<<<< HEAD
   if(left_value.is_null() || right_value.is_null()) 
   {
+=======
+  if(left_value.is_null() || right_value.is_null()) {
+>>>>>>> d928428f91fe5f4dcbe8f4a5a5f8041146971e2f
     value.set_null(true);
     return rc;
   }
@@ -919,4 +989,12 @@ RC AggregateExpr::type_from_string(const char *type_str, AggregateExpr::Type &ty
     rc = RC::INVALID_ARGUMENT;
   }
   return rc;
+}
+
+ValueListExpr::ValueListExpr(vector<Value> *values)
+{
+  if (values != nullptr) {
+    values_ = *values;
+    delete values;
+  }
 }

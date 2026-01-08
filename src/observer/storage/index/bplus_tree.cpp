@@ -1990,6 +1990,36 @@ RC BplusTreeScanner::next_entry(RID &rid)
   }
 
   if (!first_emitted_) {
+    // 检查第一个条目是否真的在范围内（对于精确匹配，必须等于 user_key）
+    // 首先检查是否超过右边界
+    if (touch_end()) {
+      LOG_DEBUG("First entry exceeds right boundary, returning EOF");
+      return RC::RECORD_EOF;
+    }
+    
+    // 对于精确匹配，还需要检查用户键部分是否真的等于 user_key
+    // 如果 right_key_ 不为空，说明有右边界，需要检查用户键部分是否匹配
+    if (right_key_ != nullptr) {
+      LeafIndexNodeHandler node(mtr_, tree_handler_.file_header_, current_frame_);
+      const char *this_key = node.key_at(iter_index_);
+      // 比较用户键部分（不包括 RID）
+      const auto &attr_comparator = tree_handler_.key_comparator_.attr_comparator();
+      const char *right_user_key = static_cast<const char *>(right_key_.get());
+      int compare_result = attr_comparator(this_key, right_user_key);
+      LOG_DEBUG("Checking first entry user key match. compare_result=%d, iter_index_=%d", compare_result, iter_index_);
+      // 如果用户键部分不相等，说明不在范围内（对于精确匹配）
+      // 注意：compare_result > 0 表示 this_key > right_user_key，应该返回 EOF
+      // compare_result < 0 表示 this_key < right_user_key，但这种情况不应该发生（因为 lookup 找到的是 >= 的位置）
+      // 但是，对于部分键查询（复合索引的部分字段查询），我们不应该进行精确匹配检查
+      // 因为扩展后的右边界键（如 (4, INT_MAX)）和索引中的键（如 (4, 1)）不相等是正常的
+      // 我们只需要检查 this_key 是否 <= right_user_key（即 compare_result <= 0）
+      if (compare_result > 0) {
+        LOG_DEBUG("First entry user key exceeds right boundary. compare_result=%d", compare_result);
+        return RC::RECORD_EOF;
+      }
+      // 对于 compare_result < 0 或 == 0，都认为是有效的（在范围内）
+    }
+    
     fetch_item(rid);
     first_emitted_ = true;
     return RC::SUCCESS;
@@ -2053,7 +2083,22 @@ RC BplusTreeScanner::fix_user_key(
 
   // 这里很粗暴，变长字段才需要做调整，其它默认都不需要做调整
   assert(tree_handler_.file_header_.attr_type == AttrType::CHARS);
-  assert(strlen(user_key) >= static_cast<size_t>(key_len));
+  // 对于固定长度的键（key_len == attr_length），可能是二进制数据（如复合索引或整数索引），跳过 strlen 检查
+  // 对于变长字符串，需要检查 strlen，但只有当键中不包含 null 字节时才使用 strlen（说明是真正的字符串）
+  if (key_len < tree_handler_.file_header_.attr_length) {
+    // 检查键中是否包含 null 字节，如果包含，说明是二进制数据（如整数），不应该使用 strlen
+    bool contains_null = false;
+    for (int i = 0; i < key_len; i++) {
+      if (user_key[i] == '\0') {
+        contains_null = true;
+        break;
+      }
+    }
+    // 只有当键中不包含 null 字节时，才使用 strlen 检查（说明是真正的字符串）
+    if (!contains_null) {
+      assert(strlen(user_key) >= static_cast<size_t>(key_len));
+    }
+  }
 
   *should_inclusive = false;
 
