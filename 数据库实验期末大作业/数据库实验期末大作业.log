@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.9.5)  9 JAN 2026 16:53
+This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.9.5)  9 JAN 2026 18:12
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -989,6 +989,11 @@ Overfull \hbox (17.89958pt too wide) in paragraph at lines 406--408
  []
 
 
+Overfull \hbox (40.16759pt too wide) in paragraph at lines 411--412
+[]\TU/SimSun(1)/m/n/12 本 部 分 代 码 位 于 仓 库 \TU/lmr/m/n/12 https://github.com/alittleplayyer/Our-miniob.git\TU/SimSun(1)/m/n/12 ，| \TU/lmr/m/n/12 competition-
+ []
+
+
 
 [17]
 
@@ -1000,14 +1005,14 @@ Overfull \hbox (17.89958pt too wide) in paragraph at lines 406--408
 
 [21]
 
+[22]
+
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 577.
+(hyperref)                removing `\heiti' on input line 579.
 
 File: null.png Graphic file (type bmp)
 <null.png>
 
-
-[22]
 
 [23]
 
@@ -1018,18 +1023,17 @@ File: null.png Graphic file (type bmp)
 [26]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 699.
-
-
-Overfull \hbox (35.14586pt too wide) in paragraph at lines 704--705
-[]\TU/SimSun(1)/m/n/12 功 能：|  将 \TU/lmr/m/n/12 SQL \TU/SimSun(1)/m/n/12 语 句 \TU/lmtt/m/n/12 UPDATE table SET col1=val1, col2=val2 WHERE condition
- []
+(hyperref)                removing `\heiti' on input line 701.
 
 
 
 [27]
+Overfull \hbox (35.14586pt too wide) in paragraph at lines 706--707
+[]\TU/SimSun(1)/m/n/12 功 能：|  将 \TU/lmr/m/n/12 SQL \TU/SimSun(1)/m/n/12 语 句 \TU/lmtt/m/n/12 UPDATE table SET col1=val1, col2=val2 WHERE condition
+ []
+
 LaTeX Font Info:    Font shape `TU/lmtt/bx/n' in size <10> not available
-(Font)              Font shape `TU/lmtt/b/n' tried instead on input line 737.
+(Font)              Font shape `TU/lmtt/b/n' tried instead on input line 739.
 
 
 [28]
@@ -1041,12 +1045,12 @@ LaTeX Font Info:    Font shape `TU/lmtt/bx/n' in size <10> not available
 [31]
 
 [32]
-Overfull \hbox (15.02975pt too wide) in paragraph at lines 916--917
+Overfull \hbox (15.02975pt too wide) in paragraph at lines 918--919
 []\TU/SimSun(1)/m/n/12 示 例：|  索 引 \TU/lmtt/m/n/12 (name VARCHAR(20), age INT) \TU/lmr/m/n/12 → \TU/SimSun(1)/m/n/12 键 结 构：| \TU/lmtt/m/n/12 [20 \TU/FangSong(0)/m/n/12 字 节 \TU/lmtt/m/n/12 name][4
  []
 
 
-Overfull \hbox (40.55832pt too wide) in paragraph at lines 922--923
+Overfull \hbox (40.55832pt too wide) in paragraph at lines 924--925
 []\TU/SimSun(1)/m/n/12 调 用 \TU/lmtt/m/n/12 index->get_entry(key_buffer, total_key_length, existing_rids) 
  []
 
@@ -1057,10 +1061,10 @@ File: lstlang1.sty 2024/09/23 1.10c listings language file
 [33]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 970.
+(hyperref)                removing `\heiti' on input line 972.
 
 
-Overfull \hbox (25.61598pt too wide) in paragraph at lines 975--976
+Overfull \hbox (25.61598pt too wide) in paragraph at lines 977--978
 []\TU/SimSun(1)/m/n/12 功 能：|  解 析 表 引 用 和 \TU/lmr/m/n/12 JOIN \TU/SimSun(1)/m/n/12 条 件  |（如 \TU/lmtt/m/n/12 table1 INNER JOIN table2 ON condition\TU/SimSun(1)/m/n/12 ）| 
  []
 
@@ -1077,12 +1081,12 @@ Overfull \hbox (25.61598pt too wide) in paragraph at lines 975--976
 [38]
 
 [39]
-Overfull \hbox (5.50574pt too wide) in paragraph at lines 1222--1222
+Overfull \hbox (5.50574pt too wide) in paragraph at lines 1224--1224
  []\TU/lmr/m/n/12 (select_stmt.cpp) 
  []
 
 
-Overfull \hbox (66.11774pt too wide) in paragraph at lines 1223--1223
+Overfull \hbox (66.11774pt too wide) in paragraph at lines 1225--1225
  []\TU/lmr/m/n/12 (logical_plan_generator.cpp) 
  []
 
@@ -1091,7 +1095,7 @@ Overfull \hbox (66.11774pt too wide) in paragraph at lines 1223--1223
 [40]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 1256.
+(hyperref)                removing `\heiti' on input line 1258.
 
 
 
@@ -1114,26 +1118,26 @@ File: index-open.png Graphic file (type bmp)
 [46]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 1426.
+(hyperref)                removing `\heiti' on input line 1428.
 
 
 
 [47]
-Overfull \hbox (99.83029pt too wide) in paragraph at lines 1439--1440
+Overfull \hbox (99.83029pt too wide) in paragraph at lines 1441--1442
 \TU/lmtt/m/n/12 CreateIndexStmt \TU/SimSun(1)/m/n/12 的 \TU/lmtt/m/n/12 is_unique \TU/SimSun(1)/m/n/12 属 性 设 为 \TU/lmtt/m/n/12 true |\TU/SimSun(1)/m/n/12 （对 应 代 码 中 \TU/lmtt/m/n/12 stmt->set_is_unique(true)\TU/SimSun(1)/m/n/12 ） 。| 
  []
 
 
 
 [48]
-Overfull \hbox (31.13795pt too wide) in paragraph at lines 1472--1473
+Overfull \hbox (31.13795pt too wide) in paragraph at lines 1474--1475
 \TU/SimSun(1)/m/n/12 哈 希 表 \TU/lmtt/m/n/12 key_to_rid \TU/SimSun(1)/m/n/12 查 重。|  若 发 现 重 复 键，|  立 即 返 回 \TU/lmtt/m/n/12 RC::RECORD_DUPLICATE_KEY\TU/SimSun(1)/m/n/12 ，|
  []
 
 
 
 [49]
-Overfull \hbox (29.7112pt too wide) in paragraph at lines 1517--1518
+Overfull \hbox (29.7112pt too wide) in paragraph at lines 1519--1520
 []\TU/SimSun(1)/m/n/12 逻 辑：|  插 入 记 录 前，|  对 每 个 唯 一 索 引，|  构 建 索 引 键 并 查 询 索 引  |（\TU/lmtt/m/n/12 index->get_entry\TU/SimSun(1)/m/n/12 ） 。|
  []
 
@@ -1148,7 +1152,7 @@ Overfull \hbox (29.7112pt too wide) in paragraph at lines 1517--1518
 [53]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 1651.
+(hyperref)                removing `\heiti' on input line 1653.
 
 
 
@@ -1165,10 +1169,10 @@ Package hyperref Warning: Token not allowed in a PDF string (Unicode):
 [59]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 1869.
+(hyperref)                removing `\heiti' on input line 1871.
 
 
-Overfull \hbox (63.6259pt too wide) in paragraph at lines 1878--1879
+Overfull \hbox (63.6259pt too wide) in paragraph at lines 1880--1881
 []\TU/SimSun(1)/m/n/12 表 别 名：|  解 析 \TU/lmtt/m/n/12 table AS alias \TU/SimSun(1)/m/n/12 或 \TU/lmtt/m/n/12 table alias \TU/SimSun(1)/m/n/12 结 构，|  存 储 到 \TU/lmtt/m/n/12 RelationSqlNode.alias 
  []
 
@@ -1182,14 +1186,14 @@ Overfull \hbox (63.6259pt too wide) in paragraph at lines 1878--1879
 
 [63]
 
-Package pgf Warning: Returning node center instead of a point on node border. Did you specify a point identical to the center of node ``subquery''? on input line 2045.
+Package pgf Warning: Returning node center instead of a point on node border. Did you specify a point identical to the center of node ``subquery''? on input line 2047.
 
 
 
 [64]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 2080.
+(hyperref)                removing `\heiti' on input line 2082.
 
 
 
@@ -1202,7 +1206,7 @@ Package hyperref Warning: Token not allowed in a PDF string (Unicode):
 [68]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 2205.
+(hyperref)                removing `\heiti' on input line 2207.
 
 File: order-by.png Graphic file (type bmp)
 <order-by.png>
@@ -1213,20 +1217,20 @@ File: order-by.png Graphic file (type bmp)
 [70]
 
 [71]
-Overfull \hbox (15.23425pt too wide) in paragraph at lines 2335--2340
+Overfull \hbox (15.23425pt too wide) in paragraph at lines 2337--2342
  []\TU/SimHei(0)/m/n/12 内 存 管 理 与 资 源 释 放[] \TU/SimSun(1)/m/n/12 由 于 \TU/lmr/m/n/12 ORDER BY \TU/SimSun(1)/m/n/12 在 执 行 过 程 中 显 式 分 配 了 \TU/lmtt/m/n/12 ValueListTuple
  []
 
 
 
 [72]
-Overfull \hbox (14.3462pt too wide) in paragraph at lines 2356--2356
+Overfull \hbox (14.3462pt too wide) in paragraph at lines 2358--2358
 []        \TU/lmtt/m/n/12 LOG_INFO("Execute order by physical operator's close method");[] 
  []
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 2368.
+(hyperref)                removing `\heiti' on input line 2370.
 
 
 
@@ -1238,37 +1242,37 @@ File: date.png Graphic file (type bmp)
 [74]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 2415.
+(hyperref)                removing `\heiti' on input line 2417.
 
 
-Overfull \hbox (45.24623pt too wide) in paragraph at lines 2450--2450
+Overfull \hbox (45.24623pt too wide) in paragraph at lines 2452--2452
 []\TU/lmtt/m/n/12 create table exp_table(id int, col1 int, col2 int, col3 float, col4 float);[] 
  []
 
 
 
 [75]
-Overfull \hbox (502.56624pt too wide) in paragraph at lines 2450--2450
+Overfull \hbox (502.56624pt too wide) in paragraph at lines 2452--2452
 []\TU/lmtt/m/n/12 -- sort select id,-(col2*(-1)+1)+(col4+2)*(col1+col3*2),(4+col2)*col3/2 from exp_table where -(col2*(-1)+1)+(col4+2)*(col1+col3*2) > (4+col2)*col3/2;[] 
  []
 
 
-Overfull \hbox (527.26219pt too wide) in paragraph at lines 2450--2450
+Overfull \hbox (527.26219pt too wide) in paragraph at lines 2452--2452
 []\TU/lmtt/m/n/12 -- sort select id,col1,col2,col3,col4,6-(col2*(1+col1))+(col4+2)/(1+col1*4+col3*2) from exp_table where 6-(col2*(1+col1))+(col4+2)/(1+col1*4+col3*2) > 5;[] 
  []
 
 
-Overfull \hbox (168.8462pt too wide) in paragraph at lines 2450--2450
+Overfull \hbox (168.8462pt too wide) in paragraph at lines 2452--2452
 []\TU/lmtt/m/n/12 -- sort select id,col1,col2,col3,col4,3*col1/(col2+2) from exp_table where 3*col1/(col2+2) > 1;[] 
  []
 
 
-Overfull \hbox (69.96623pt too wide) in paragraph at lines 2450--2450
+Overfull \hbox (69.96623pt too wide) in paragraph at lines 2452--2452
 []\TU/lmtt/m/n/12 -- sort select id,3*col1/(col2+2) from exp_table where 3*col1/(col2+2)+1/0 > 1;[] 
  []
 
 
-Overfull \hbox (422.22627pt too wide) in paragraph at lines 2450--2450
+Overfull \hbox (422.22627pt too wide) in paragraph at lines 2452--2452
 []\TU/lmtt/m/n/12 -- sort select exp_table.id,3*exp_table2.col1/(exp_table.col2+2) from exp_table,exp_table2 where 3*exp_table2.col1/(exp_table.col2+2)>1;[] 
  []
 
@@ -1281,10 +1285,10 @@ File: expression2.png Graphic file (type bmp)
 [76]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 2468.
+(hyperref)                removing `\heiti' on input line 2470.
 
 
-Overfull \hbox (32.88622pt too wide) in paragraph at lines 2477--2477
+Overfull \hbox (32.88622pt too wide) in paragraph at lines 2479--2479
 []    \TU/lmtt/m/n/12 CREATE TABLE Update_table_1(id int, t_name char, col1 int, col2 int);[] 
  []
 
@@ -1295,7 +1299,7 @@ File: update_test.png Graphic file (type bmp)
 [77]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 2488.
+(hyperref)                removing `\heiti' on input line 2490.
 
 File: join_test.png Graphic file (type bmp)
 <join_test.png>
@@ -1304,10 +1308,10 @@ File: join_test.png Graphic file (type bmp)
 [78]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 2514.
+(hyperref)                removing `\heiti' on input line 2516.
 
 
-Overfull \hbox (212.09416pt too wide) in paragraph at lines 2522--2522
+Overfull \hbox (212.09416pt too wide) in paragraph at lines 2524--2524
 []    \TU/lmtt/m/n/12 CREATE TABLE multi_index3(id int, col1 int, col2 float, col3 char, col4 date, col5 int, col6 int);[] 
  []
 
@@ -1315,13 +1319,13 @@ File: unique_index_success.png Graphic file (type bmp)
 <unique_index_success.png>
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 2533.
+(hyperref)                removing `\heiti' on input line 2535.
 
 File: unique_index_fail.png Graphic file (type bmp)
 <unique_index_fail.png>
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 2548.
+(hyperref)                removing `\heiti' on input line 2550.
 
 
 
@@ -1331,15 +1335,15 @@ File: subquery_test.png Graphic file (type bmp)
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 2574.
+(hyperref)                removing `\heiti' on input line 2576.
 
 
-Overfull \hbox (14.34619pt too wide) in paragraph at lines 2580--2580
+Overfull \hbox (14.34619pt too wide) in paragraph at lines 2582--2582
 []    \TU/lmtt/m/n/12 SELECT id AS i FROM ssq_1 WHERE id IN(SELECT ssq_2.id FROM ssq_2);[] 
  []
 
 
-Overfull \hbox (88.50615pt too wide) in paragraph at lines 2580--2580
+Overfull \hbox (88.50615pt too wide) in paragraph at lines 2582--2582
 []    \TU/lmtt/m/n/12 SELECT id AS i FROM ssq_1 AS s1 WHERE id IN (SELECT ssq_2.id AS i FROM ssq_2);[] 
  []
 
@@ -1350,13 +1354,13 @@ File: alias_test.png Graphic file (type bmp)
 [80]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 2590.
+(hyperref)                removing `\heiti' on input line 2592.
 
 File: drop-table-test.png Graphic file (type bmp)
 <drop-table-test.png>
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 2607.
+(hyperref)                removing `\heiti' on input line 2609.
 
 
 
@@ -1366,10 +1370,10 @@ File: order-by-test.png Graphic file (type bmp)
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 2632.
+(hyperref)                removing `\heiti' on input line 2634.
 
 
-Overfull \hbox (205.9262pt too wide) in paragraph at lines 2644--2644
+Overfull \hbox (205.9262pt too wide) in paragraph at lines 2646--2646
 []    \TU/lmtt/m/n/12 CREATE TABLE null_table(id int not null, num int null, price float not null, birthday date null);[] 
  []
 
@@ -1381,7 +1385,7 @@ File: null-test.png Graphic file (type bmp)
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\heiti' on input line 2654.
+(hyperref)                removing `\heiti' on input line 2656.
 
 
 
@@ -1405,10 +1409,10 @@ Package rerunfilecheck Info: File `数据库实验期末大作业.out' has not c
 Here is how much of TeX's memory you used:
  29745 strings out of 473832
  636023 string characters out of 5733159
- 1623292 words of memory out of 5000000
+ 1607651 words of memory out of 5000000
  52303 multiletter control sequences out of 15000+600000
  566317 words of font info for 104 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
- 93i,8n,111p,480b,2122s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 93i,8n,111p,480b,2333s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
 Output written on 数据库实验期末大作业.pdf (84 pages).

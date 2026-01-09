@@ -408,6 +408,8 @@ int DateType::compare(const Value &left, const Value &right) const
 
 \subsubsection{expression模块重构}
 
+本部分代码位于仓库https://github.com/alittleplayyer/Our-miniob.git，competition-2025分支，是基于原生miniob进行的重构。与现有的代码合并任务量较大，故单独放置于一个仓库中，方便查看与测试，也方便后续的合并工作
+
 首先，我们需要在语法解析阶段让计算机识别出更加负责的表达式，于是我们在yacc\_sql.y中对expression的语法规则进行了扩展，新增了对函数嵌套，多个操作符,一元表达式等的支持
 在语法解释上，我们使用递归的办法，将表达式识别为left\_expression operator right\_expression的形式，从而实现对复杂表达式的支持；对于一元表达式，我们采用的办法是将‘-’识别为操作符，
 而将left\_expression置为空，从而实现对一元表达式的支持
