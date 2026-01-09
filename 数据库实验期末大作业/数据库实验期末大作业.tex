@@ -24,7 +24,7 @@
     \and
     班级：9 \\ 班级：8 \\ 班级：9
 }
-\date{提交时间：\rule{3cm}{0.4pt} 年 \rule{2cm}{0.4pt} 月 \rule{2cm}{0.4pt} 日}
+\date{提交时间： 2026 年 1 月 9 日}
 
 % ========== 解决中文代码注释问题 ==========
 \usepackage{listings}
@@ -119,9 +119,9 @@
 \end{figure}
 
 \begin{itemize}
-    \item test1.table：元数据文件，这里面存放了一些元数据。如：表名、数据的索引、字段类型、类型长度等。
-    \item test1.data：数据文件，真正记录存放的文件。
-    \item test1-i\_name.index：索引文件，索引文件有很多个，这里只展示一个示例。
+    \item .table：元数据文件，这里面存放了一些元数据。如：表名、数据的索引、字段类型、类型长度等。
+    \item .data：数据文件，真正记录存放的文件。
+    \item .index：索引文件，索引文件有很多个，这里只展示一个示例。
 \end{itemize}
 
 
@@ -681,13 +681,6 @@ Record类用于表示存储引擎中的一条记录，其相较Tuple类包含更
     }
 \end{lstlisting}
 
-\subsubsection{底层文件管理}
-\begin{itemize}
-    \item 表数据文件（.data）中，NULL 位图通常与实际列数据一起存储。
-    \item 元数据文件（.meta）记录哪些列允许 NULL，以及列在数据文件中的偏移。
-    \item 在删除或更新表数据时，存储引擎必须同步更新 NULL 位图文件或数据块中相关信息。
-\end{itemize}
-
 \subsubsection{执行算子与查询处理}
 \begin{itemize}
     \item 查询执行算子需要支持 NULL 值比较和逻辑判断，如 \texttt{IS NULL}、\texttt{IS NOT NULL}。
@@ -695,8 +688,15 @@ Record类用于表示存储引擎中的一条记录，其相较Tuple类包含更
     \item 物理算子在访问存储引擎时，会结合 NULL 位图完成数据过滤。
 \end{itemize}
 
+\subsubsection{底层文件管理}
+\begin{itemize}
+    \item 表数据文件（.data）中，NULL 位图通常与实际列数据一起存储。
+    \item 元数据文件（.meta）记录哪些列允许 NULL，以及列在数据文件中的偏移。
+    \item 在删除或更新表数据时，存储引擎必须同步更新 NULL 位图文件或数据块中相关信息。
+\end{itemize}
+
 \subsubsection{小结}
-NULL 的实现虽然对用户透明，但在 MiniOB 中涉及存储引擎位图管理、数据文件与元数据文件的协同维护，以及聚合函数、查询算子等诸多模块对 NULL 值的正确处理。其实现的核心如前所述，但是在接下来介绍的各个功能模块的实现中均可以看到其身影。\textbf{\heiti 为了简化}，许多与NULL相关的功能特性未能展示出来，可以通过在客户端进行SQL语句测试来验证。
+NULL 的实现虽然对用户透明，但在 MiniOB 中涉及存储引擎位图管理、数据文件与元数据文件的协同维护，以及聚合函数、查询算子等诸多模块对 NULL 值的正确处理。其实现的核心如前所述，但是在接下来介绍的各个功能模块的实现中均可以看到其身影。NULL的实现代码大多比较零碎，\textbf{\heiti 为了简化}，许多未能展示出来，这些功能特性可以通过在客户端使用SQL语句来验证。
 
 \subsection{\heiti UPDATE 实现流程}
 \begin{enumerate}
@@ -2666,6 +2666,6 @@ insert into exp_table2 VALUES (2, 3);
     \item NULL值的支持与处理
 \end{itemize}
 
-\paragraph{    功能测试模块验证了各项功能的正确性，为了简化，我们并没有将所有相关功能的测试均展示出来。本次设计深化了我们对数据库内核架构与自顶向下实现细节的理解，也为未来在其上进行更复杂功能的开发奠定了基础。}
+\paragraph{功能测试模块验证了各项功能的正确性，\textbf{\heiti 为了简化}，我们并没有将所有相关功能的测试均展示出来。本次设计深化了我们对数据库内核架构与自顶向下实现细节的理解，也为未来在其上进行更复杂功能的开发奠定了基础。}
 
 \end{document}
