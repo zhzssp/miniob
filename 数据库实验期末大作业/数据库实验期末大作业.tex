@@ -81,7 +81,7 @@
 \paragraph{\heiti 环境配置}
 
 \begin{itemize}
-    \item 从 github 仓库的 competition-2025 分支下载源码。
+    \item 从 github 仓库的 Miniob-Final 分支下载源码。
     \item 使用 docker run -d --name miniob --privileged -v path\_to\_src:/root/miniob oceanbase/miniob 安装 docker 开发环境并绑定本地源码目录（路径为 path\_to\_src）。
     \item 在使用 vscode 附加到容器后，使用 CTRL + SHIFT + P， 点击 Task: Run Task，然后点击里面已经设置好的 cmake 和 make 指令并选中{\heiti “继续而不扫描任务输出”}即可对源码进行编译。
     \item 编译成功后，在 Task: Run Task 中找到 Run observer 指令即可运行 miniob 数据库服务器，再使用 Run obclient 指令即可运行客户端进行交互。
