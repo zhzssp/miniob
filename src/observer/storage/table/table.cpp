@@ -35,6 +35,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/table/heap_table_engine.h"
 #include "storage/table/lsm_table_engine.h"
 
+// 表析构函数
 Table::~Table()
 {
   if (lob_handler_ != nullptr) {
