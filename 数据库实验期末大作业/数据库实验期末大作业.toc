@@ -1,0 +1,69 @@
+\contentsline {section}{\numberline {1}\heiti 开发环境}{3}{section.1}%
+\contentsline {paragraph}{\heiti 环境配置}{4}{section*.4}%
+\contentsline {section}{\numberline {2}\heiti MiniOB 系统架构说明}{5}{section.2}%
+\contentsline {paragraph}{\heiti 注：}{6}{section*.6}%
+\contentsline {paragraph}{\heiti 概述}{7}{section*.9}%
+\contentsline {paragraph}{\heiti 简述}{9}{section*.12}%
+\contentsline {paragraph}{索引文件}{9}{section*.14}%
+\contentsline {paragraph}{\heiti 叶子节点}{10}{section*.15}%
+\contentsline {paragraph}{\heiti 内部节点}{10}{section*.16}%
+\contentsline {paragraph}{\heiti 概述}{11}{section*.18}%
+\contentsline {section}{\numberline {3}\heiti 功能设计与代码实现}{11}{section.3}%
+\contentsline {subsection}{\numberline {3.1}date新类型实现}{11}{subsection.3.1}%
+\contentsline {subsubsection}{\numberline {3.1.1}概述}{11}{subsubsection.3.1.1}%
+\contentsline {subsubsection}{\numberline {3.1.2}添加DATE类型识别}{11}{subsubsection.3.1.2}%
+\contentsline {subsubsection}{\numberline {3.1.3}date数据存储与表示}{12}{subsubsection.3.1.3}%
+\contentsline {subsubsection}{\numberline {3.1.4}date数据相关函数}{14}{subsubsection.3.1.4}%
+\contentsline {subsection}{\numberline {3.2}expression表达式实现}{17}{subsection.3.2}%
+\contentsline {subsubsection}{\numberline {3.2.1}概述}{17}{subsubsection.3.2.1}%
+\contentsline {subsubsection}{\numberline {3.2.2}expression模块重构}{17}{subsubsection.3.2.2}%
+\contentsline {subsection}{\numberline {3.3}\heiti NULL 功能实现}{23}{subsection.3.3}%
+\contentsline {subsubsection}{\numberline {3.3.1}概述}{23}{subsubsection.3.3.1}%
+\contentsline {subsubsection}{\numberline {3.3.2}语法与词法解析}{23}{subsubsection.3.3.2}%
+\contentsline {subsubsection}{\numberline {3.3.3}实现原理}{24}{subsubsection.3.3.3}%
+\contentsline {paragraph}{\textbf {Value}}{24}{section*.19}%
+\contentsline {paragraph}{\textbf {Record}}{25}{section*.20}%
+\contentsline {paragraph}{\textbf {TableScan Operator}}{26}{section*.21}%
+\contentsline {subsubsection}{\numberline {3.3.4}底层文件管理}{27}{subsubsection.3.3.4}%
+\contentsline {subsubsection}{\numberline {3.3.5}执行算子与查询处理}{27}{subsubsection.3.3.5}%
+\contentsline {subsubsection}{\numberline {3.3.6}小结}{27}{subsubsection.3.3.6}%
+\contentsline {subsection}{\numberline {3.4}\heiti UPDATE 实现流程}{27}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}\heiti Join Table 实现流程}{34}{subsection.3.5}%
+\contentsline {subsection}{\numberline {3.6}\heiti 复合索引实现流程}{42}{subsection.3.6}%
+\contentsline {subsection}{\numberline {3.7}\heiti UNIQUE 索引实现流程}{47}{subsection.3.7}%
+\contentsline {subsection}{\numberline {3.8}\heiti 子查询实现流程}{54}{subsection.3.8}%
+\contentsline {subsection}{\numberline {3.9}\heiti ALIAS（别名）实现流程}{60}{subsection.3.9}%
+\contentsline {subsection}{\numberline {3.10}\heiti Drop Table 功能实现}{65}{subsection.3.10}%
+\contentsline {subsubsection}{\numberline {3.10.1}概述}{65}{subsubsection.3.10.1}%
+\contentsline {subsubsection}{\numberline {3.10.2}语法与词法解析}{65}{subsubsection.3.10.2}%
+\contentsline {subsubsection}{\numberline {3.10.3}执行器（Executor）}{65}{subsubsection.3.10.3}%
+\contentsline {subsubsection}{\numberline {3.10.4}三层接口的实现}{66}{subsubsection.3.10.4}%
+\contentsline {paragraph}{Database层}{66}{section*.29}%
+\contentsline {paragraph}{Table层}{67}{section*.30}%
+\contentsline {paragraph}{Storage engine层}{68}{section*.31}%
+\contentsline {subsubsection}{\numberline {3.10.5}小结}{69}{subsubsection.3.10.5}%
+\contentsline {subsection}{\numberline {3.11}\heiti ORDER BY 功能实现}{69}{subsection.3.11}%
+\contentsline {subsubsection}{\numberline {3.11.1}概述}{69}{subsubsection.3.11.1}%
+\contentsline {subsubsection}{\numberline {3.11.2}语法与词法解析}{69}{subsubsection.3.11.2}%
+\contentsline {subsubsection}{\numberline {3.11.3}Order By逻辑算子（Order By Logical Operator）}{70}{subsubsection.3.11.3}%
+\contentsline {subsubsection}{\numberline {3.11.4}Order By物理算子（Order By Physical Operator）}{70}{subsubsection.3.11.4}%
+\contentsline {paragraph}{\heiti 物理算子功能概述}{70}{section*.32}%
+\contentsline {paragraph}{\heiti 物理算子核心代码}{70}{section*.33}%
+\contentsline {paragraph}{\heiti 算子执行流程分析}{72}{section*.34}%
+\contentsline {paragraph}{\heiti 内存管理与资源释放}{72}{section*.35}%
+\contentsline {subsubsection}{\numberline {3.11.5}小结}{73}{subsubsection.3.11.5}%
+\contentsline {section}{\numberline {4}功能测试}{73}{section.4}%
+\contentsline {subsection}{\numberline {4.1}\heiti DATE 测试}{73}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}\heiti EXPRESSION 测试}{75}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}\heiti UPDATE 测试}{77}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}\heiti JOIN 测试}{78}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}\heiti 唯一索引测试 - 违反唯一约束}{79}{subsection.4.5}%
+\contentsline {subsection}{\numberline {4.6}\heiti 唯一索引测试 - 唯一约束通过}{79}{subsection.4.6}%
+\contentsline {subsection}{\numberline {4.7}\heiti 子查询测试}{80}{subsection.4.7}%
+\contentsline {subsection}{\numberline {4.8}\heiti 别名测试}{80}{subsection.4.8}%
+\contentsline {subsection}{\numberline {4.9}\heiti Drop Table测试}{81}{subsection.4.9}%
+\contentsline {subsection}{\numberline {4.10}\heiti Order By测试}{81}{subsection.4.10}%
+\contentsline {subsection}{\numberline {4.11}\heiti NULL测试}{83}{subsection.4.11}%
+\contentsline {section}{\numberline {5}\heiti 总结}{83}{section.5}%
+\contentsline {paragraph}{本课程设计实现了基于MiniOB的数据库内核的功能扩展，涵盖：}{83}{section*.36}%
+\contentsline {paragraph}{ 功能测试模块验证了各项功能的正确性，为了简化，我们并没有将所有相关功能的测试均展示出来。本次设计深化了我们对数据库内核架构与自顶向下实现细节的理解，也为未来在其上进行更复杂功能的开发奠定了基础。}{84}{section*.37}%
