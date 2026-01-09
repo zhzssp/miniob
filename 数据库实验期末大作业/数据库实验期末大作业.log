@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2025.9.24)  9 JAN 2026 23:11
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2025.9.24)  9 JAN 2026 23:16
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -960,9 +960,10 @@ LaTeX Font Info:    Trying to load font information for C70+rm on input line 49.
 File: c70rm.fd 2022/07/14 v2.5.10 Chinese font definition (CTEX)
 )
 Package CJKpunct Info: use punctuation spaces for family 'rm' with punctstyle (quanjiao) on input line 49.
+Package CJKpunct Info: use punctuation spaces for family 'zhhei' with punctstyle (quanjiao) on input line 51.
 
 Overfull \hbox (70.06767pt too wide) in paragraph at lines 51--52
-[]\C70/rm/m/n/12/57 � \C70/rm/m/n/12/4e �\OT1/cmr/m/n/12 MiniOB\C70/rm/m/n/12/76 � \C70/rm/m/n/12/65 p \C70/rm/m/n/12/63 n \C70/rm/m/n/12/5e � \C70/rm/m/n/12/51 � \C70/rm/m/n/12/68 8 \C70/rm/m/n/12/8b � �|\C70/rm/m/n/12/ff ^^L| \OT1/cmr/m/n/12 github\C70/rm/m/n/12/57 0 @|\C70/rm/m/n/12/ff ^^Z| \OT1/cmr/bx/n/12 https://github.com/zhzssp/miniob.git 
+[]\C70/rm/m/n/12/57 � \C70/rm/m/n/12/4e �\OT1/cmr/m/n/12 MiniOB\C70/rm/m/n/12/76 � \C70/rm/m/n/12/65 p \C70/rm/m/n/12/63 n \C70/rm/m/n/12/5e � \C70/rm/m/n/12/51 � \C70/rm/m/n/12/68 8 \C70/rm/m/n/12/8b � �|\C70/rm/m/n/12/ff ^^L| \OT1/cmr/m/n/12 github\C70/rm/m/n/12/57 0 @|\C70/rm/m/n/12/ff ^^Z| \OT1/cmr/bx/n/12 https://github.com/zhzssp/miniob.git
  []
 
 
@@ -970,13 +971,13 @@ Overfull \hbox (57.73763pt too wide) in paragraph at lines 55--71
 [][] 
  []
 
+
+
+[2]
 No file 数据库实验期末大作业.toc.
 \tf@toc=\write5
 \openout5 = `数据库实验期末大作业.toc'.
 
-
-
-[2]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
 (hyperref)                removing `\heiti' on input line 74.
@@ -986,19 +987,19 @@ Underfull \hbox (badness 10000) in paragraph at lines 85--86
 
  []
 
-Package CJKpunct Info: use punctuation spaces for family 'zhhei' with punctstyle (quanjiao) on input line 86.
+
+
+[3{d:/TexLive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc}]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
 (hyperref)                removing `\heiti' on input line 91.
 
-<miniob_arch.png, id=132, 288.47775pt x 292.09125pt>
+<miniob_arch.png, id=158, 288.47775pt x 292.09125pt>
 File: miniob_arch.png Graphic file (type png)
 <use miniob_arch.png>
 Package pdftex.def Info: miniob_arch.png  used on input line 96.
 (pdftex.def)             Requested size: 334.60422pt x 338.80377pt.
 
-
-[3{d:/TexLive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc}]
 
 [4 <./miniob_arch.png>]
 <file-arange.png, id=186, 568.62437pt x 382.42876pt>
@@ -1019,7 +1020,7 @@ pdfTeX warning (ext4): destination with the same identifier (name{figure.1}) has
                                                   \__shipout_drop_firstpage_...
 l.134 
        <./file-arange.png (PNG copy)>]
-<file-structure.png, id=210, 402.00188pt x 384.43625pt>
+<file-structure.png, id=212, 402.00188pt x 384.43625pt>
 File: file-structure.png Graphic file (type png)
 <use file-structure.png>
 Package pdftex.def Info: file-structure.png  used on input line 148.
@@ -1032,7 +1033,7 @@ pdfTeX warning (ext4): destination with the same identifier (name{figure.2}) has
                                                   \__shipout_drop_firstpage_...
 l.151 
        <./buffer-pool.png (PNG copy)>]
-<record-manage.png, id=225, 570.13pt x 346.79562pt>
+<record-manage.png, id=227, 570.13pt x 346.79562pt>
 File: record-manage.png Graphic file (type png)
 <use record-manage.png>
 Package pdftex.def Info: record-manage.png  used on input line 163.
@@ -1045,7 +1046,7 @@ pdfTeX warning (ext4): destination with the same identifier (name{figure.3}) has
                                                   \__shipout_drop_firstpage_...
 l.166 
        <./file-structure.png (PNG copy)>]
-<index-file.png, id=235, 512.91624pt x 233.87375pt>
+<index-file.png, id=237, 512.91624pt x 233.87375pt>
 File: index-file.png Graphic file (type png)
 <use index-file.png>
 Package pdftex.def Info: index-file.png  used on input line 178.
@@ -1063,12 +1064,12 @@ pdfTeX warning (ext4): destination with the same identifier (name{figure.5}) has
                                                   \__shipout_drop_firstpage_...
 l.184 
        <./record-manage.png (PNG copy)> <./index-file.png (PNG copy)>]
-<leaf.png, id=250, 512.91624pt x 233.87375pt>
+<leaf.png, id=252, 512.91624pt x 233.87375pt>
 File: leaf.png Graphic file (type png)
 <use leaf.png>
 Package pdftex.def Info: leaf.png  used on input line 189.
 (pdftex.def)             Requested size: 250.95476pt x 114.42783pt.
-<internal.png, id=251, 512.91624pt x 260.975pt>
+<internal.png, id=253, 512.91624pt x 260.975pt>
 File: internal.png Graphic file (type png)
 <use internal.png>
 Package pdftex.def Info: internal.png  used on input line 198.
@@ -3671,11 +3672,11 @@ l.278 ...��否申请并占有内存, 目前对于
                                                   CHARS 类型 own_data_ 为...
 (That makes 100 errors; please try again.) 
 Here is how much of TeX's memory you used:
- 28037 strings out of 467797
- 520565 string characters out of 5435982
- 1228121 words of memory out of 5000000
- 55785 multiletter control sequences out of 15000+600000
- 693177 words of font info for 282 fonts, out of 8000000 for 9000
+ 28065 strings out of 467797
+ 521107 string characters out of 5435982
+ 1228266 words of memory out of 5000000
+ 55803 multiletter control sequences out of 15000+600000
+ 693717 words of font info for 284 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  88i,8n,92p,797b,2174s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
